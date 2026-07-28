@@ -1,6 +1,0 @@
-id=saas_x11_manager
-name=SaaS X11 Manager: Droidspaces Root Engine
-version=v1.0.0
-versionCode=100
-author=SaaS X11 Manager
-description=Installs Droidspaces-compatible daemon/init policy for Magisk, KernelSU, and APatch root managers.
