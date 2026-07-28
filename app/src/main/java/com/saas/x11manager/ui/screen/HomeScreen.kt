@@ -1,5 +1,6 @@
 package com.saas.x11manager.ui.screen
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -20,6 +21,7 @@ import com.saas.x11manager.ui.component.TerminalDialog
 import com.saas.x11manager.ui.component.StatusPill
 import com.saas.x11manager.util.ContainerInfo
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel
