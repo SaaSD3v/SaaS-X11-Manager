@@ -1,0 +1,2 @@
+-keep class com.saas.x11manager.** { *; }
+-keep class com.topjohnwu.superuser.** { *; }

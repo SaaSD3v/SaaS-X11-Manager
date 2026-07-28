@@ -1,0 +1,119 @@
+name: X11 Manager CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a GitHub Release?'
+        required: true
+        type: boolean
+        default: false
+      tag_name:
+        description: 'Tag name'
+        required: false
+        default: 'test'
+
+jobs:
+  build:
+    name: Build Android App
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+
+    - name: Decode Keystore
+      env:
+        RELEASE_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE }}
+      if: "${{ env.RELEASE_KEYSTORE != '' }}"
+      run: echo "${{ env.RELEASE_KEYSTORE }}" | base64 -d > x11manager.keystore
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Build Android App with Gradle
+      env:
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      run: |
+        ./gradlew assembleRelease \
+          -PKEYSTORE_PASSWORD="${{ secrets.KEYSTORE_PASSWORD }}" \
+          -PKEY_ALIAS="${{ secrets.KEY_ALIAS }}" \
+          -PKEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
+
+    - name: Stage & Rename Artifacts
+      run: |
+        TAG="${{ github.event.inputs.tag_name || 'CI' }}"
+        COMMIT_HASH=$(git log -1 --pretty=%h)
+        APK_NAME="X11Manager-${TAG}-${COMMIT_HASH}.apk"
+        mkdir -p dist
+        mv app/build/outputs/apk/release/app-release.apk dist/${APK_NAME}
+        echo "APK_FILE=dist/${APK_NAME}" >> $GITHUB_ENV
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: x11manager-artifacts
+        path: dist/
+
+  release:
+    name: Create GitHub Release
+    needs: [build]
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.create_release == 'true' &&
+      github.event.inputs.tag_name != '' &&
+      github.event.inputs.tag_name != 'test'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Download Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: release-assets
+        merge-multiple: true
+
+    - name: Generate Changelog
+      id: changelog
+      run: |
+        PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        if [ -z "$PREV_TAG" ]; then
+          CHANGELOG=$(git log --oneline --pretty=format:"* %s (%h)")
+        else
+          CHANGELOG=$(git log ${PREV_TAG}..HEAD --oneline --pretty=format:"* %s (%h)")
+        fi
+        {
+          echo "notes<<EOF"
+          echo "$CHANGELOG"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.event.inputs.tag_name }}
+        name: X11 Manager ${{ github.event.inputs.tag_name }}
+        target_commitish: ${{ github.sha }}
+        body: |
+          ## What's Changed
+          ${{ steps.changelog.outputs.notes }}
+
+          ---
+          **Automated Release by X11 Manager CI**
+        files: |
+          release-assets/*.apk
