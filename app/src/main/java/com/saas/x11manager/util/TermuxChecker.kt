@@ -10,17 +10,29 @@ enum class X11ApkStatus { Checking, Installed, NotInstalled }
 object TermuxChecker {
     suspend fun checkTermux(): TermuxStatus = withContext(Dispatchers.IO) {
         try {
-            val r = Shell.cmd("pm path com.termux 2>/dev/null").exec()
-            if (r.isSuccess && r.out.any { it.contains("package:") }) TermuxStatus.Installed
-            else TermuxStatus.NotInstalled
+            var r = Shell.cmd("pm path com.termux 2>/dev/null").exec()
+            if (!r.isSuccess || !r.out.any { it.contains("package:") }) {
+                r = Shell.cmd("ls /data/data/com.termux 2>/dev/null && echo found").exec()
+                if (r.isSuccess && r.out.any { it.contains("found") }) return@withContext TermuxStatus.Installed
+                r = Shell.cmd("ls /data/user/0/com.termux 2>/dev/null && echo found").exec()
+                if (r.isSuccess && r.out.any { it.contains("found") }) return@withContext TermuxStatus.Installed
+                return@withContext TermuxStatus.NotInstalled
+            }
+            TermuxStatus.Installed
         } catch (_: Exception) { TermuxStatus.NotInstalled }
     }
 
     suspend fun checkX11Apk(): X11ApkStatus = withContext(Dispatchers.IO) {
         try {
-            val r = Shell.cmd("pm path com.termux.x11 2>/dev/null").exec()
-            if (r.isSuccess && r.out.any { it.contains("package:") }) X11ApkStatus.Installed
-            else X11ApkStatus.NotInstalled
+            var r = Shell.cmd("pm path com.termux.x11 2>/dev/null").exec()
+            if (!r.isSuccess || !r.out.any { it.contains("package:") }) {
+                r = Shell.cmd("ls /data/data/com.termux.x11 2>/dev/null && echo found").exec()
+                if (r.isSuccess && r.out.any { it.contains("found") }) return@withContext X11ApkStatus.Installed
+                r = Shell.cmd("ls /data/user/0/com.termux.x11 2>/dev/null && echo found").exec()
+                if (r.isSuccess && r.out.any { it.contains("found") }) return@withContext X11ApkStatus.Installed
+                return@withContext X11ApkStatus.NotInstalled
+            }
+            X11ApkStatus.Installed
         } catch (_: Exception) { X11ApkStatus.NotInstalled }
     }
 }

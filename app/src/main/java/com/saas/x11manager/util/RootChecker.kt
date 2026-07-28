@@ -1,7 +1,6 @@
 package com.saas.x11manager.util
 
 import com.topjohnwu.superuser.Shell
-import com.topjohnwu.superuser.ShellUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -10,18 +9,11 @@ enum class RootStatus { Checking, Granted, Denied }
 object RootChecker {
     suspend fun checkRootAccess(): RootStatus = withContext(Dispatchers.IO) {
         return@withContext try {
-            val isRootGranted = Shell.isAppGrantedRoot() == true
-            if (isRootGranted) {
-                if (ShellUtils.fastCmdResult("id")) RootStatus.Granted
-                else RootStatus.Denied
+            val result = Shell.cmd("id").exec()
+            if (result.isSuccess && result.out.any { it.contains("uid=0") }) {
+                RootStatus.Granted
             } else {
-                try {
-                    val result = Shell.cmd("id").exec()
-                    if (result.isSuccess && Shell.isAppGrantedRoot() == true) RootStatus.Granted
-                    else RootStatus.Denied
-                } catch (e: Exception) {
-                    RootStatus.Denied
-                }
+                RootStatus.Denied
             }
         } catch (e: Exception) {
             RootStatus.Denied
