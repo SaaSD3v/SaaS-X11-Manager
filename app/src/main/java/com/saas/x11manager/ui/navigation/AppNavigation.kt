@@ -1,98 +1,183 @@
 package com.saas.x11manager.ui.navigation
 
-import androidx.compose.foundation.layout.padding
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Computer
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.outlined.Computer
-import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavDestination.Companion.hierarchy
-import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.rememberNavController
+import androidx.compose.ui.unit.sp
 import com.saas.x11manager.ui.screen.HomeScreen
 import com.saas.x11manager.ui.screen.HomeViewModel
-import com.saas.x11manager.ui.screen.SystemInfoScreen
+import com.saas.x11manager.ui.screen.RequirementsScreen
 
-sealed class Screen(val route: String) {
-    data object Home : Screen("home")
-    data object SystemInfo : Screen("system_info")
+enum class TabItem(val title: String, val icon: ImageVector) {
+    Home("Home", Icons.Default.Home),
+    Requirements("Requirements", Icons.Default.FactCheck)
 }
-
-data class BottomNavItem(
-    val screen: Screen,
-    val label: String,
-    val selectedIcon: ImageVector,
-    val unselectedIcon: ImageVector
-)
-
-val bottomNavItems = listOf(
-    BottomNavItem(Screen.Home, "Home", Icons.Filled.Computer, Icons.Outlined.Computer),
-    BottomNavItem(Screen.SystemInfo, "System Info", Icons.Filled.Info, Icons.Outlined.Info)
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppNavigation(viewModel: HomeViewModel) {
-    val navController = rememberNavController()
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentDestination = navBackStackEntry?.destination
+    val context = LocalContext.current
+    val tabs = remember { TabItem.entries }
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { tabs.size })
+    val selectedTab = tabs[pagerState.currentPage]
+    val scope = rememberCoroutineScope()
 
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = {
-                    Text("X11 Manager", fontWeight = FontWeight.Bold)
-                }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Computer,
+                            contentDescription = null,
+                            modifier = Modifier.padding(end = 8.dp).size(24.dp)
+                        )
+                        Text(
+                            text = selectedTab.title,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                },
+                windowInsets = WindowInsets.statusBars
             )
         },
         bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                tonalElevation = 0.dp
-            ) {
-                bottomNavItems.forEach { item ->
-                    val selected = currentDestination?.hierarchy?.any { it.route == item.screen.route } == true
-                    NavigationBarItem(
-                        icon = {
-                            Icon(
-                                imageVector = if (selected) item.selectedIcon else item.unselectedIcon,
-                                contentDescription = item.label
-                            )
-                        },
-                        label = { Text(item.label) },
-                        selected = selected,
-                        onClick = {
-                            navController.navigate(item.screen.route) {
-                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        }
-                    )
+            MainBottomBar(
+                selectedTab = selectedTab,
+                onTabSelected = { tab ->
+                    scope.launch {
+                        pagerState.animateScrollToPage(tabs.indexOf(tab))
+                    }
                 }
+            )
+        },
+        contentWindowInsets = WindowInsets(0)
+    ) { innerPadding ->
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) { page ->
+            when (tabs[page]) {
+                TabItem.Home -> HomeScreen(viewModel = viewModel)
+                TabItem.Requirements -> RequirementsScreen(viewModel = viewModel)
             }
         }
-    ) { paddingValues ->
-        NavHost(
-            navController = navController,
-            startDestination = Screen.Home.route,
-            modifier = Modifier.padding(paddingValues)
-        ) {
-            composable(Screen.Home.route) {
-                HomeScreen(viewModel = viewModel)
+    }
+}
+
+@Composable
+private fun MainBottomBar(
+    selectedTab: TabItem,
+    onTabSelected: (TabItem) -> Unit
+) {
+    val tabs = TabItem.entries
+    val selectedIndex = tabs.indexOf(selectedTab)
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(0),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shadowElevation = 0.dp
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                thickness = 1.dp
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .height(56.dp)
+            ) {
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                    val tabWidth = maxWidth / tabs.size
+                    val offset by animateDpAsState(
+                        targetValue = tabWidth * selectedIndex,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessLow
+                        ),
+                        label = "IndicatorOffset"
+                    )
+
+                    Surface(
+                        modifier = Modifier
+                            .width(tabWidth)
+                            .fillMaxHeight()
+                            .offset(x = offset),
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    ) {}
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    tabs.forEach { tab ->
+                        val isSelected = selectedTab == tab
+                        val contentColor by animateColorAsState(
+                            targetValue = if (isSelected) MaterialTheme.colorScheme.primary
+                                          else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            label = "IconColor"
+                        )
+
+                        Surface(
+                            onClick = { onTabSelected(tab) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            color = Color.Transparent,
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = tab.icon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(if (isSelected) 24.dp else 22.dp),
+                                    tint = contentColor
+                                )
+                                Text(
+                                    text = tab.title,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = contentColor,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = if (isSelected) 11.sp else 10.sp
+                                )
+                            }
+                        }
+                    }
+                }
             }
-            composable(Screen.SystemInfo.route) {
-                SystemInfoScreen(viewModel = viewModel)
-            }
+            Spacer(modifier = Modifier.navigationBarsPadding())
         }
     }
 }
