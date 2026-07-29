@@ -30,8 +30,21 @@ object X11SessionManager {
 
     suspend fun startLoader(logger: ContainerLogger? = null): Result<Int> = withContext(Dispatchers.IO) {
         try {
+            logger?.i("Killing stale X11 processes...")
+            val stalePid = Shell.cmd("pidof termux-x11 2>/dev/null").exec()
+            if (stalePid.isSuccess && stalePid.out.isNotEmpty()) {
+                for (pid in stalePid.out) {
+                    val trimmed = pid.trim()
+                    if (trimmed.isNotEmpty()) {
+                        Shell.cmd("kill -9 $trimmed 2>/dev/null").exec()
+                        logger?.i("Killed stale process PID=$trimmed")
+                    }
+                }
+            }
+
             logger?.i("Cleaning old X11 sockets...")
             Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/X* 2>/dev/null").exec()
+            Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/*-lock 2>/dev/null").exec()
             Shell.cmd("mkdir -p '${Constants.X11_SOCK_DIR}' 2>/dev/null").exec()
 
             logger?.i("Starting X11 Loader as root...")
