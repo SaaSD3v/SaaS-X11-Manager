@@ -42,15 +42,12 @@ object ContainerManager {
 
             if (names.isEmpty()) return@withContext containers
 
-            val psOutput = getPsOutput()
-
             for (name in names) {
                 val configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
                 val config = loadConfig(configPath, name) ?: continue
-                val (running, pid) = checkStatus(name, psOutput)
+                val running = isContainerRunning(name)
                 containers.add(config.copy(
-                    status = if (running) ContainerStatus.RUNNING else ContainerStatus.STOPPED,
-                    pid = pid
+                    status = if (running) ContainerStatus.RUNNING else ContainerStatus.STOPPED
                 ))
             }
         } catch (e: Exception) {
@@ -59,57 +56,13 @@ object ContainerManager {
         containers
     }
 
-    private fun getPsOutput(): String {
+    private fun isContainerRunning(name: String): Boolean {
         return try {
-            val r = Shell.cmd("ps -eo pid,args 2>/dev/null").exec()
-            if (r.isSuccess) r.out.joinToString("\n") else ""
-        } catch (_: Exception) { "" }
-    }
-
-    private fun checkStatus(name: String, psOutput: String): Pair<Boolean, Int?> {
-        val dsPid = getDsPid(name)
-        if (dsPid != null && dsPid > 0) {
-            return if (isPidAlive(dsPid)) Pair(true, dsPid) else Pair(false, null)
-        }
-        val psPid = findPidInPs(name, psOutput)
-        if (psPid != null && psPid > 0) {
-            return if (isPidAlive(psPid)) Pair(true, psPid) else Pair(false, null)
-        }
-        return Pair(false, null)
-    }
-
-    private fun getDsPid(name: String): Int? {
-        return try {
-            val r = Shell.cmd("${Constants.DS_BINARY_PATH} --name='$name' pid 2>/dev/null").exec()
-            if (r.isSuccess && r.out.isNotEmpty()) {
-                r.out.first().trim().toIntOrNull()
-            } else null
-        } catch (_: Exception) { null }
-    }
-
-    private fun isPidAlive(pid: Int): Boolean {
-        return try {
-            Shell.cmd("kill -0 $pid 2>/dev/null").exec().isSuccess
+            val r = Shell.cmd(
+                "${Constants.DS_BINARY_PATH} --name='$name' run 'echo ok' 2>/dev/null"
+            ).exec()
+            r.isSuccess && r.out.any { it.trim() == "ok" }
         } catch (_: Exception) { false }
-    }
-
-    private fun findPidInPs(name: String, psOutput: String): Int? {
-        for (line in psOutput.lines()) {
-            val trimmed = line.trim()
-            if (trimmed.isEmpty()) continue
-            val spaceIdx = trimmed.indexOf(' ')
-            if (spaceIdx <= 0) continue
-            val pid = trimmed.substring(0, spaceIdx).toIntOrNull() ?: continue
-            val cmdline = trimmed.substring(spaceIdx + 1)
-            if (cmdline.contains("droidspaces") && (
-                    cmdline.contains("--name=$name") ||
-                    cmdline.contains(" $name ") ||
-                    cmdline.endsWith(" $name")
-                )) {
-                return pid
-            }
-        }
-        return null
     }
 
     private fun loadConfig(path: String, defaultName: String): ContainerInfo? {
@@ -151,9 +104,8 @@ object ContainerManager {
         val path = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
         if (!Shell.cmd("test -f '$path'").exec().isSuccess) return@withContext null
         val c = loadConfig(path, name) ?: return@withContext null
-        val psOutput = getPsOutput()
-        val (running, pid) = checkStatus(c.name, psOutput)
-        c.copy(status = if (running) ContainerStatus.RUNNING else ContainerStatus.STOPPED, pid = pid)
+        val running = isContainerRunning(c.name)
+        c.copy(status = if (running) ContainerStatus.RUNNING else ContainerStatus.STOPPED)
     }
 
     suspend fun updatePulseAudioBindMount(
@@ -198,11 +150,6 @@ object ContainerManager {
             Shell.cmd("chmod 644 '$path' 2>/dev/null").exec()
             true
         } catch (_: Exception) { false }
-    }
-
-    suspend fun checkContainerStatusPublic(name: String): Pair<Boolean, Int?> = withContext(Dispatchers.IO) {
-        val psOutput = getPsOutput()
-        checkStatus(name, psOutput)
     }
 
     suspend fun startContainer(name: String, logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {

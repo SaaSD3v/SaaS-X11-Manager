@@ -13,7 +13,6 @@ import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -139,9 +138,6 @@ class HomeViewModel : ViewModel() {
                     enablePulseAudioFix = container.enablePulseAudio,
                     logger = logger
                 )
-                delay(1000)
-                val psOutput = withContext(Dispatchers.IO) { ContainerManager.listContainers() }
-                _containers.value = psOutput
                 _loaderStatus.value = X11SessionManager.getLoaderStatus()
                 _loaderPid.value = if (_loaderStatus.value == LoaderStatus.Running) {
                     X11SessionManager.getLoaderPid()
@@ -151,6 +147,7 @@ class HomeViewModel : ViewModel() {
                 logger.e("Error: ${e.message}")
             } finally {
                 runningOperationContainer = null
+                refresh()
             }
         }
     }
@@ -165,14 +162,12 @@ class HomeViewModel : ViewModel() {
 
             try {
                 ContainerManager.stopContainer(container.name, logger)
-                delay(500)
-                val updated = withContext(Dispatchers.IO) { ContainerManager.listContainers() }
-                _containers.value = updated
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "stopContainer failed", e)
                 logger.e("Error: ${e.message}")
             } finally {
                 runningOperationContainer = null
+                refresh()
             }
         }
     }
@@ -182,13 +177,12 @@ class HomeViewModel : ViewModel() {
             val logger = ViewModelLogger { _, _ -> }
             try {
                 X11SessionManager.stopAll(logger)
-                delay(500)
-                _containers.value = withContext(Dispatchers.IO) { ContainerManager.listContainers() }
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "stopAll failed", e)
             } finally {
                 _loaderStatus.value = LoaderStatus.Stopped
                 _loaderPid.value = null
+                refresh()
             }
         }
     }
