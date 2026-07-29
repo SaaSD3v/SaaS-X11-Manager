@@ -28,6 +28,73 @@ object X11SessionManager {
         } catch (_: Exception) { null }
     }
 
+    suspend fun startPulseAudio(logger: ContainerLogger? = null): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            logger?.i("[*] Preparing PulseAudio...")
+
+            Shell.cmd("killall pulseaudio 2>/dev/null").exec()
+            Shell.cmd("rm -f '${Constants.PULSE_SOCK}'").exec()
+            Shell.cmd("rm -rf /data/data/com.termux/files/usr/tmp/pulse-* 2>/dev/null").exec()
+
+            logger?.i("[*] Starting PulseAudio daemon...")
+            Shell.cmd(
+                "run-as ${Constants.TERMUX_PACKAGE_NAME} " +
+                "${Constants.PULSE_BIN} " +
+                "--load 'module-native-protocol-unix socket=${Constants.PULSE_SOCK} auth-anonymous=1' " +
+                "--exit-idle-time=-1 " +
+                "--daemonize=yes " +
+                "--use-pid-file=false " +
+                "--disallow-exit"
+            ).exec()
+
+            logger?.i("[*] Waiting for socket (5s timeout)...")
+            var wait = 0
+            while (wait < 5) {
+                Thread.sleep(1000)
+                wait++
+                val sockCheck = Shell.cmd("test -S '${Constants.PULSE_SOCK}' && echo ok").exec()
+                if (sockCheck.isSuccess && sockCheck.out.isNotEmpty() && sockCheck.out[0].contains("ok")) {
+                    break
+                }
+            }
+
+            val sockExists = Shell.cmd("test -S '${Constants.PULSE_SOCK}' && echo ok").exec()
+            if (sockExists.isSuccess && sockExists.out.isNotEmpty() && sockExists.out[0].contains("ok")) {
+                val pid = getPulseAudioPid() ?: 0
+                logger?.i("[+] PulseAudio active (PID=$pid)")
+                Result.success(pid)
+            } else {
+                logger?.e("[-] PulseAudio socket not created")
+                Result.failure(Exception("PulseAudio socket not created"))
+            }
+        } catch (e: Exception) {
+            logger?.e("[-] PulseAudio error: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun stopPulseAudio(logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val pid = getPulseAudioPid()
+            if (pid != null && pid > 0) {
+                Shell.cmd("kill -9 $pid 2>/dev/null").exec()
+                logger?.i("[+] Stopped PulseAudio (PID=$pid)")
+            }
+            Shell.cmd("rm -f '${Constants.PULSE_SOCK}'").exec()
+            Shell.cmd("rm -rf /data/data/com.termux/files/usr/tmp/pulse-* 2>/dev/null").exec()
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun getPulseAudioPid(): Int? = withContext(Dispatchers.IO) {
+        try {
+            val result = Shell.cmd("pidof pulseaudio 2>/dev/null").exec()
+            result.out.firstOrNull()?.trim()?.toIntOrNull()
+        } catch (_: Exception) { null }
+    }
+
     suspend fun startLoader(logger: ContainerLogger? = null): Result<Int> = withContext(Dispatchers.IO) {
         try {
             logger?.i("[*] Preparing X11 environment...")
@@ -109,11 +176,21 @@ object X11SessionManager {
 
     suspend fun startX11Session(
         containerName: String,
+        enablePulseAudioFix: Boolean = false,
         logger: ContainerLogger? = null
     ) = withContext(Dispatchers.IO) {
         try {
             logger?.i("--- Starting X11 Session ---")
             logger?.i("")
+
+            if (enablePulseAudioFix) {
+                val paResult = startPulseAudio(logger)
+                paResult.onFailure { e ->
+                    logger?.w("[!] PulseAudio failed: ${e.message}")
+                    logger?.i("[*] Continuing without audio...")
+                }
+                logger?.i("")
+            }
 
             val loaderResult = startLoader(logger)
             loaderResult.onFailure { e ->
@@ -159,6 +236,7 @@ object X11SessionManager {
     suspend fun stopAll(logger: ContainerLogger? = null) = withContext(Dispatchers.IO) {
         try {
             logger?.i("--- Stopping All ---")
+            stopPulseAudio(logger)
             stopLoader(logger)
             val containers = ContainerManager.listContainers()
             for (c in containers) {

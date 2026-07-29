@@ -96,7 +96,10 @@ fun HomeScreen(
                                 onShowLogs = { viewModel.showLogs(container) },
                                 onStartX11 = { viewModel.startX11(container) },
                                 onStop = { viewModel.stopContainer(container) },
-                                onStart = { viewModel.startX11(container) }
+                                onEdit = {
+                                    expandedContainerName.value = null
+                                    viewModel.navigateToEditContainer(container.name)
+                                }
                             )
                         )
                     }

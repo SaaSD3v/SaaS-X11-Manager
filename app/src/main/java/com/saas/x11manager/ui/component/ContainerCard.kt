@@ -9,8 +9,8 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -20,19 +20,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.saas.x11manager.util.AnimationUtils
 import com.saas.x11manager.util.ContainerInfo
 import com.saas.x11manager.util.ContainerStatus
+import com.saas.x11manager.util.AnimationUtils
 
 data class ContainerCardActions(
-    val onStart: () -> Unit = {},
+    val onStartX11: () -> Unit = {},
     val onStop: () -> Unit = {},
     val onToggleExpand: () -> Unit = {},
     val onShowLogs: () -> Unit = {},
-    val onStartX11: () -> Unit = {}
+    val onEdit: () -> Unit = {}
 )
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -44,7 +43,6 @@ fun ContainerCard(
     isOperationRunning: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     val cardShape = RoundedCornerShape(20.dp)
 
     Surface(
@@ -56,8 +54,8 @@ fun ContainerCard(
                     if (container.isRunning) actions.onShowLogs() else actions.onToggleExpand()
                 },
                 onLongClick = actions.onToggleExpand,
-                indication = rememberRipple(bounded = true),
-                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                indication = remember { androidx.compose.material.ripple.rememberRipple(bounded = true) },
+                interactionSource = remember { MutableInteractionSource() }
             ),
         shape = cardShape,
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -142,7 +140,6 @@ fun ContainerCard(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     if (container.isRunning) {
-                        // STOP button
                         val isStopEnabled = !isOperationRunning
                         Surface(
                             onClick = actions.onStop,
@@ -164,7 +161,6 @@ fun ContainerCard(
                             }
                         }
                     } else {
-                        // START X11 button
                         val isStartEnabled = !isOperationRunning
                         Surface(
                             onClick = actions.onStartX11,
@@ -189,7 +185,7 @@ fun ContainerCard(
                 }
             }
 
-            // Expanded actions (like Droidspaces)
+            // Expanded action drawer (Droidspaces style)
             AnimatedVisibility(
                 visible = isExpanded,
                 enter = expandVertically(animationSpec = AnimationUtils.mediumSpec(), expandFrom = Alignment.Top) + fadeIn(),
@@ -210,6 +206,13 @@ fun ContainerCard(
                         onClick = actions.onShowLogs
                     )
 
+                    ActionItem(
+                        icon = Icons.Default.Edit,
+                        label = "Edit container",
+                        tint = MaterialTheme.colorScheme.primary,
+                        onClick = actions.onEdit
+                    )
+
                     if (!container.isRunning) {
                         ActionItem(
                             icon = Icons.Default.PlayArrow,
@@ -228,7 +231,7 @@ fun ContainerCard(
 private fun ActionItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
-    tint: Color,
+    tint: androidx.compose.ui.graphics.Color,
     onClick: () -> Unit
 ) {
     Surface(

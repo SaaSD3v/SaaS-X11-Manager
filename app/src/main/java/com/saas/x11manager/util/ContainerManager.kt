@@ -14,7 +14,9 @@ data class ContainerInfo(
     val enableTermuxX11: Boolean = false,
     val enableLegacyTermuxX11: Boolean = false,
     val enableHwAccess: Boolean = false,
+    val enablePulseAudio: Boolean = false,
     val netMode: String = "nat",
+    val bindMounts: String = "",
     val status: ContainerStatus = ContainerStatus.UNKNOWN,
     val pid: Int? = null
 ) {
@@ -93,10 +95,91 @@ object ContainerManager {
                 enableTermuxX11 = configMap["enable_termux_x11"] == "1",
                 enableLegacyTermuxX11 = configMap["enable_legacy_termux_x11"] == "1",
                 enableHwAccess = configMap["enable_hw_access"] == "1",
-                netMode = configMap["net_mode"] ?: "nat"
+                enablePulseAudio = configMap["enable_pulseaudio"] == "1",
+                netMode = configMap["net_mode"] ?: "nat",
+                bindMounts = configMap["bind_mounts"] ?: ""
             )
         } catch (e: Exception) {
             return null
+        }
+    }
+
+    suspend fun getContainerInfo(name: String): ContainerInfo? = withContext(Dispatchers.IO) {
+        val configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
+        if (!Shell.cmd("test -f '$configPath'").exec().isSuccess) return@withContext null
+        val config = loadContainerConfig(configPath, name) ?: return@withContext null
+        val (isRunning, pid) = checkContainerStatus(config.name)
+        val status = if (isRunning) ContainerStatus.RUNNING else ContainerStatus.STOPPED
+        config.copy(status = status, pid = pid)
+    }
+
+    suspend fun updateContainerConfig(
+        name: String,
+        enablePulseAudio: Boolean,
+        logger: ContainerLogger? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
+            val readResult = Shell.cmd("cat '$configPath' 2>/dev/null").exec()
+            if (!readResult.isSuccess || readResult.out.isEmpty()) return@withContext false
+
+            val lines = readResult.out.toMutableList()
+            var pulseFound = false
+            var bindMountsFound = false
+            var bindMountsValue = ""
+
+            for (i in lines.indices) {
+                val line = lines[i].trim()
+                if (line.startsWith("enable_pulseaudio=")) {
+                    lines[i] = "enable_pulseaudio=${if (enablePulseAudio) "0" else "1"}"
+                    pulseFound = true
+                }
+                if (line.startsWith("bind_mounts=")) {
+                    bindMountsValue = line.substringAfter("bind_mounts=")
+                    bindMountsFound = true
+                }
+            }
+
+            if (pulseFound) {
+                val paSock = "/data/data/com.termux/files/usr/tmp/.pulse-socket:/tmp/.pulse-socket"
+                if (enablePulseAudio) {
+                    if (!bindMountsValue.contains(paSock)) {
+                        val newValue = if (bindMountsValue.isBlank()) paSock else "$bindMountsValue,$paSock"
+                        for (i in lines.indices) {
+                            if (lines[i].trim().startsWith("bind_mounts=")) {
+                                lines[i] = "bind_mounts=$newValue"
+                            }
+                        }
+                        if (!bindMountsFound) {
+                            lines.add("bind_mounts=$newValue")
+                        }
+                    }
+                } else {
+                    if (bindMountsValue.contains(paSock)) {
+                        val newValue = bindMountsValue
+                            .replace(",$paSock", "")
+                            .replace("$paSock,", "")
+                            .replace(paSock, "")
+                            .trimStart(',')
+                            .trimEnd(',')
+                        for (i in lines.indices) {
+                            if (lines[i].trim().startsWith("bind_mounts=")) {
+                                lines[i] = "bind_mounts=$newValue"
+                            }
+                        }
+                    }
+                }
+            }
+
+            val writeResult = Shell.cmd("cat > '$configPath' 2>/dev/null").exec()
+            val writeInput = lines.joinToString("\n")
+            Shell.cmd("echo '${writeInput.replace("'", "'\\''")}' > '$configPath'").exec()
+
+            logger?.i("[+] Config updated")
+            true
+        } catch (e: Exception) {
+            logger?.e("[-] Config update failed: ${e.message}")
+            false
         }
     }
 

@@ -50,6 +50,8 @@ class HomeViewModel : ViewModel() {
 
     var showLogViewerFor by mutableStateOf<String?>(null)
 
+    var navigateToEdit by mutableStateOf<String?>(null)
+
     private val _kernelVersion = MutableStateFlow("")
     val kernelVersion: StateFlow<String> = _kernelVersion
 
@@ -108,7 +110,11 @@ class HomeViewModel : ViewModel() {
             val logger = ViewModelLogger { level, message -> logs.add(level to message) }
 
             try {
-                X11SessionManager.startX11Session(container.name, logger)
+                X11SessionManager.startX11Session(
+                    containerName = container.name,
+                    enablePulseAudioFix = container.enablePulseAudio,
+                    logger = logger
+                )
 
                 _loaderStatus.value = X11SessionManager.getLoaderStatus()
                 _loaderPid.value = if (_loaderStatus.value == LoaderStatus.Running) {
@@ -187,6 +193,14 @@ class HomeViewModel : ViewModel() {
     fun clearLogsBuffer(name: String) {
         containerLogs[name]?.clear()
         containerLogs = containerLogs.toMutableMap()
+    }
+
+    fun navigateToEditContainer(name: String) {
+        navigateToEdit = name
+    }
+
+    fun onEditNavigated() {
+        navigateToEdit = null
     }
 
     private fun logsFor(name: String): SnapshotStateList<Pair<Int, String>> {

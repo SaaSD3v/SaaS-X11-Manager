@@ -11,4 +11,8 @@ object Constants {
     const val X11_SOCK_FILE = "/data/data/com.termux/files/usr/tmp/.X11-unix/X0"
     const val TERMUX_PACKAGE = "com.termux"
     const val TERMUX_X11_PACKAGE = "com.termux.x11"
+
+    const val PULSE_SOCK = "/data/data/com.termux/files/usr/tmp/.pulse-socket"
+    const val PULSE_BIN = "/data/data/com.termux/files/usr/bin/pulseaudio"
+    const val TERMUX_PACKAGE_NAME = "com.termux"
 }

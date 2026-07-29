@@ -4,6 +4,10 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
@@ -22,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import com.saas.x11manager.ui.screen.EditContainerScreen
 import com.saas.x11manager.ui.screen.HomeScreen
 import com.saas.x11manager.ui.screen.HomeViewModel
 import com.saas.x11manager.ui.screen.RequirementsScreen
@@ -40,50 +45,63 @@ fun AppNavigation(viewModel: HomeViewModel) {
     val selectedTab = tabs[pagerState.currentPage]
     val scope = rememberCoroutineScope()
 
-    Scaffold(
-        containerColor = Color.Transparent,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Computer,
-                            contentDescription = null,
-                            modifier = Modifier.padding(end = 8.dp).size(24.dp)
-                        )
-                        Text(
-                            text = selectedTab.title,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Black
-                        )
+    val navigateToEdit by viewModel.navigateToEdit
+
+    if (navigateToEdit != null) {
+        EditContainerScreen(
+            containerName = navigateToEdit!!,
+            viewModel = viewModel,
+            onBack = {
+                viewModel.onEditNavigated()
+                viewModel.refresh()
+            }
+        )
+    } else {
+        Scaffold(
+            containerColor = Color.Transparent,
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Computer,
+                                contentDescription = null,
+                                modifier = Modifier.padding(end = 8.dp).size(24.dp)
+                            )
+                            Text(
+                                text = selectedTab.title,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    },
+                    windowInsets = WindowInsets.statusBars
+                )
+            },
+            bottomBar = {
+                MainBottomBar(
+                    selectedTab = selectedTab,
+                    onTabSelected = { tab ->
+                        scope.launch {
+                            pagerState.animateScrollToPage(tabs.indexOf(tab))
+                        }
                     }
-                },
-                windowInsets = WindowInsets.statusBars
-            )
-        },
-        bottomBar = {
-            MainBottomBar(
-                selectedTab = selectedTab,
-                onTabSelected = { tab ->
-                    scope.launch {
-                        pagerState.animateScrollToPage(tabs.indexOf(tab))
-                    }
+                )
+            },
+            contentWindowInsets = WindowInsets(0)
+        ) { innerPadding ->
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) { page ->
+                when (tabs[page]) {
+                    TabItem.Home -> HomeScreen(viewModel = viewModel)
+                    TabItem.Requirements -> RequirementsScreen(viewModel = viewModel)
                 }
-            )
-        },
-        contentWindowInsets = WindowInsets(0)
-    ) { innerPadding ->
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) { page ->
-            when (tabs[page]) {
-                TabItem.Home -> HomeScreen(viewModel = viewModel)
-                TabItem.Requirements -> RequirementsScreen(viewModel = viewModel)
             }
         }
     }
