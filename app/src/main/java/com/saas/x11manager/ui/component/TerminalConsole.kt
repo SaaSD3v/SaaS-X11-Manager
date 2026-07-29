@@ -172,7 +172,7 @@ fun TerminalConsole(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     logs.forEach { (level, message) ->
-                        val annotatedText = remember(message) {
+                        val annotatedText = remember(level, message) {
                             val processedMessage = message.replace(
                                 Regex("""/data/local/Droidspaces/bin/droidspaces"""),
                                 "droidspaces"

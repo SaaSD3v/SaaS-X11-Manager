@@ -3,7 +3,6 @@ package com.saas.x11manager.util
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 
 enum class LoaderStatus { Running, Stopped }
 
@@ -37,14 +36,11 @@ object X11SessionManager {
 
             logger?.i("Starting X11 Loader as root...")
 
-            val scriptContent = """#!/system/bin/sh
-CLASSPATH=${Constants.LOADER_APK} /system/bin/app_process -Xnoimage-dex2oat / --nice-name='termux-x11' com.termux.x11.Loader :0
-"""
-            val scriptFile = File("/data/local/tmp/_ds_x11_loader.sh")
-            scriptFile.writeText(scriptContent)
-            Shell.cmd("chmod 755 '${scriptFile.absolutePath}'").exec()
-
-            Shell.cmd("nohup sh '${scriptFile.absolutePath}' > /dev/null 2>&1 &").exec()
+            Shell.cmd(
+                "CLASSPATH=${Constants.LOADER_APK} /system/bin/app_process " +
+                "-Xnoimage-dex2oat / " +
+                "--nice-name=termux-x11 com.termux.x11.Loader :0 &"
+            ).exec()
 
             logger?.i("Waiting for socket X0 (max 10s)...")
             var wait = 0
@@ -56,8 +52,6 @@ CLASSPATH=${Constants.LOADER_APK} /system/bin/app_process -Xnoimage-dex2oat / --
                     break
                 }
             }
-
-            scriptFile.delete()
 
             val sockExists = Shell.cmd("test -S '${Constants.X11_SOCK_FILE}' && echo ok").exec()
             if (sockExists.isSuccess && sockExists.out.isNotEmpty() && sockExists.out[0].contains("ok")) {

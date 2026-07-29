@@ -1,5 +1,6 @@
 package com.saas.x11manager.ui.screen
 
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -9,10 +10,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saas.x11manager.util.*
 import com.topjohnwu.superuser.Shell
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class HomeViewModel : ViewModel() {
     private val _containers = MutableStateFlow<List<ContainerInfo>>(emptyList())
@@ -66,28 +69,30 @@ class HomeViewModel : ViewModel() {
     fun refresh() {
         viewModelScope.launch {
             _isLoading.value = true
+            try {
+                _rootStatus.value = RootChecker.checkRootAccess()
+                _rootProvider.value = RootChecker.getRootProvider()
+                _termuxStatus.value = TermuxChecker.checkTermux()
+                _x11ApkStatus.value = TermuxChecker.checkX11Apk()
+                _dsStatus.value = DroidspacesChecker.checkBackend()
 
-            _rootStatus.value = RootChecker.checkRootAccess()
-            _rootProvider.value = RootChecker.getRootProvider()
-            _termuxStatus.value = TermuxChecker.checkTermux()
-            _x11ApkStatus.value = TermuxChecker.checkX11Apk()
-            _dsStatus.value = DroidspacesChecker.checkBackend()
+                _loaderStatus.value = X11SessionManager.getLoaderStatus()
+                _loaderPid.value = if (_loaderStatus.value == LoaderStatus.Running) {
+                    X11SessionManager.getLoaderPid()
+                } else {
+                    null
+                }
 
-            // Update loader status and PID
-            _loaderStatus.value = X11SessionManager.getLoaderStatus()
-            _loaderPid.value = if (_loaderStatus.value == LoaderStatus.Running) {
-                X11SessionManager.getLoaderPid()
-            } else {
-                null
+                _containers.value = ContainerManager.listContainers()
+
+                _kernelVersion.value = getSystemProp("ro.build.version.release")
+                _arch.value = getSystemProp("ro.product.cpu.abi")
+                _androidVersion.value = getSystemProp("ro.build.version.sdk")
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "refresh() failed", e)
+            } finally {
+                _isLoading.value = false
             }
-
-            _containers.value = ContainerManager.listContainers()
-
-            _kernelVersion.value = getSystemProp("ro.build.version.release")
-            _arch.value = getSystemProp("ro.product.cpu.abi")
-            _androidVersion.value = getSystemProp("ro.build.version.sdk")
-
-            _isLoading.value = false
         }
     }
 
@@ -99,19 +104,23 @@ class HomeViewModel : ViewModel() {
             showLogViewerFor = container.name
             val logger = ViewModelLogger { level, message -> logs.add(level to message) }
 
-            X11SessionManager.startX11Session(container.name, logger)
+            try {
+                X11SessionManager.startX11Session(container.name, logger)
 
-            // Update loader status after starting
-            _loaderStatus.value = X11SessionManager.getLoaderStatus()
-            _loaderPid.value = if (_loaderStatus.value == LoaderStatus.Running) {
-                X11SessionManager.getLoaderPid()
-            } else {
-                null
+                _loaderStatus.value = X11SessionManager.getLoaderStatus()
+                _loaderPid.value = if (_loaderStatus.value == LoaderStatus.Running) {
+                    X11SessionManager.getLoaderPid()
+                } else {
+                    null
+                }
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "startX11 failed", e)
+                logger.e("Error: ${e.message}")
+            } finally {
+                delay(500)
+                runningOperationContainer = null
+                refresh()
             }
-
-            delay(500)
-            runningOperationContainer = null
-            refresh()
         }
     }
 
@@ -123,24 +132,31 @@ class HomeViewModel : ViewModel() {
             showLogViewerFor = container.name
             val logger = ViewModelLogger { level, message -> logs.add(level to message) }
 
-            ContainerManager.stopContainer(container.name, logger)
-
-            delay(500)
-            runningOperationContainer = null
-            refresh()
+            try {
+                ContainerManager.stopContainer(container.name, logger)
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "stopContainer failed", e)
+                logger.e("Error: ${e.message}")
+            } finally {
+                delay(500)
+                runningOperationContainer = null
+                refresh()
+            }
         }
     }
 
     fun stopAll() {
         viewModelScope.launch {
             val logger = ViewModelLogger { _, _ -> }
-            X11SessionManager.stopAll(logger)
-
-            // Update loader status after stopping
-            _loaderStatus.value = LoaderStatus.Stopped
-            _loaderPid.value = null
-
-            refresh()
+            try {
+                X11SessionManager.stopAll(logger)
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "stopAll failed", e)
+            } finally {
+                _loaderStatus.value = LoaderStatus.Stopped
+                _loaderPid.value = null
+                refresh()
+            }
         }
     }
 
@@ -165,8 +181,8 @@ class HomeViewModel : ViewModel() {
         return newLogs
     }
 
-    private fun getSystemProp(key: String): String {
-        return try {
+    private suspend fun getSystemProp(key: String): String = withContext(Dispatchers.IO) {
+        try {
             val result = Shell.cmd("getprop $key 2>/dev/null").exec()
             result.out.firstOrNull()?.trim() ?: ""
         } catch (_: Exception) { "" }
