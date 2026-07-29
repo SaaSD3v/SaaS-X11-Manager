@@ -10,6 +10,11 @@ data class ContainerInfo(
     val name: String,
     val rootfsPath: String,
     val configPath: String,
+    val hostname: String = "",
+    val enableTermuxX11: Boolean = false,
+    val enableLegacyTermuxX11: Boolean = false,
+    val enableHwAccess: Boolean = false,
+    val netMode: String = "nat",
     val status: ContainerStatus = ContainerStatus.UNKNOWN,
     val pid: Int? = null
 ) {
@@ -23,42 +28,76 @@ object ContainerManager {
         log?.invoke("Scanning containers...")
 
         try {
-            val result = Shell.cmd("ls -1 '${Constants.CONTAINERS_DIR}' 2>/dev/null").exec()
+            val result = Shell.cmd("ls -d '${Constants.CONTAINERS_DIR}'/*/ 2>/dev/null").exec()
             if (!result.isSuccess || result.out.isEmpty()) {
                 log?.invoke("No containers found")
                 return@withContext containers
             }
 
-            for (name in result.out) {
-                if (name.isBlank()) continue
-                val dir = "${Constants.CONTAINERS_DIR}/$name"
-                val configPath = "$dir/${Constants.CONFIG_FILE}"
+            for (line in result.out) {
+                val trimmed = line.trim()
+                if (trimmed.isEmpty() || !trimmed.startsWith(Constants.CONTAINERS_DIR)) continue
 
+                val sanitizedName = trimmed.removeSuffix("/").substringAfterLast("/")
+                if (sanitizedName.isEmpty()) continue
+
+                val configPath = "${Constants.CONTAINERS_DIR}/$sanitizedName/${Constants.CONFIG_FILE}"
                 if (!Shell.cmd("test -f '$configPath'").exec().isSuccess) continue
 
-                val rootfsResult = Shell.cmd("grep '^rootfs_path=' '$configPath' 2>/dev/null | cut -d= -f2").exec()
-                val rootfsPath = rootfsResult.out.firstOrNull()?.trim() ?: continue
-                if (rootfsPath.isBlank() || !Shell.cmd("test -f '$rootfsPath'").exec().isSuccess) continue
+                val config = loadContainerConfig(configPath, sanitizedName) ?: continue
 
-                log?.invoke("Found: $name")
+                val (isRunning, pid) = checkContainerStatus(config.name)
+                val status = if (isRunning) ContainerStatus.RUNNING else ContainerStatus.STOPPED
 
-                val (isRunning, pid) = checkContainerStatus(name)
-
-                containers.add(
-                    ContainerInfo(
-                        name = name,
-                        rootfsPath = rootfsPath,
-                        configPath = configPath,
-                        status = if (isRunning) ContainerStatus.RUNNING else ContainerStatus.STOPPED,
-                        pid = pid
-                    )
-                )
+                log?.invoke("Found: ${config.name} (${if (isRunning) "running" else "stopped"})")
+                containers.add(config.copy(status = status, pid = pid))
             }
         } catch (e: Exception) {
             log?.invoke("Error: ${e.message}")
         }
         log?.invoke("${containers.size} container(s) found")
         containers
+    }
+
+    private fun loadContainerConfig(configPath: String, defaultName: String): ContainerInfo? {
+        try {
+            val readResult = Shell.cmd("cat '$configPath' 2>/dev/null").exec()
+            if (!readResult.isSuccess || readResult.out.isEmpty()) return null
+
+            val configMap = mutableMapOf<String, String>()
+            readResult.out.forEach { line ->
+                val trimmed = line.trim()
+                if (trimmed.isEmpty() || trimmed.startsWith("#")) return@forEach
+                val parts = trimmed.split("=", limit = 2)
+                if (parts.size == 2) {
+                    configMap[parts[0].trim()] = parts[1].trim()
+                }
+            }
+
+            val containerName = configMap["name"] ?: defaultName
+            val useSparseImage = configMap["use_sparse_image"] == "1"
+
+            val rootfsPath = configMap["rootfs_path"] ?: if (useSparseImage) {
+                "${Constants.CONTAINERS_DIR}/$defaultName/rootfs.img"
+            } else {
+                "${Constants.CONTAINERS_DIR}/$defaultName/rootfs"
+            }
+
+            if (rootfsPath.isBlank() || !Shell.cmd("test -f '$rootfsPath'").exec().isSuccess) return null
+
+            return ContainerInfo(
+                name = containerName,
+                rootfsPath = rootfsPath,
+                configPath = configPath,
+                hostname = configMap["hostname"] ?: "",
+                enableTermuxX11 = configMap["enable_termux_x11"] == "1",
+                enableLegacyTermuxX11 = configMap["enable_legacy_termux_x11"] == "1",
+                enableHwAccess = configMap["enable_hw_access"] == "1",
+                netMode = configMap["net_mode"] ?: "nat"
+            )
+        } catch (e: Exception) {
+            return null
+        }
     }
 
     private fun checkContainerStatus(name: String): Pair<Boolean, Int?> {
@@ -91,9 +130,18 @@ object ContainerManager {
     suspend fun startContainer(name: String, logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
         logger?.i("Starting container $name...")
         try {
-            val result = Shell.cmd("${Constants.DS_BINARY_PATH} --name='$name' start 2>&1").exec()
+            val configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
+            val result = Shell.cmd(
+                "${Constants.DS_BINARY_PATH} --config='$configPath' start 2>&1"
+            ).exec()
             val output = result.out.joinToString("\n")
             if (output.isNotBlank()) logger?.i(output)
+            if (result.err.isNotEmpty()) {
+                result.err.forEach { line ->
+                    val trimmed = line.trim()
+                    if (trimmed.isNotEmpty()) logger?.w(trimmed)
+                }
+            }
             result.isSuccess
         } catch (e: Exception) {
             logger?.e("Error starting: ${e.message}")

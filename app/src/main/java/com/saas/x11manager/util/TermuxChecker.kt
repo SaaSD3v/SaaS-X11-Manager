@@ -11,28 +11,35 @@ object TermuxChecker {
     suspend fun checkTermux(): TermuxStatus = withContext(Dispatchers.IO) {
         try {
             var r = Shell.cmd("pm path com.termux 2>/dev/null").exec()
-            if (!r.isSuccess || !r.out.any { it.contains("package:") }) {
-                r = Shell.cmd("ls /data/data/com.termux 2>/dev/null && echo found").exec()
-                if (r.isSuccess && r.out.any { it.contains("found") }) return@withContext TermuxStatus.Installed
-                r = Shell.cmd("ls /data/user/0/com.termux 2>/dev/null && echo found").exec()
-                if (r.isSuccess && r.out.any { it.contains("found") }) return@withContext TermuxStatus.Installed
-                return@withContext TermuxStatus.NotInstalled
+            if (r.isSuccess && r.out.any { it.contains("package:") }) {
+                return@withContext TermuxStatus.Installed
             }
-            TermuxStatus.Installed
+            r = Shell.cmd("ls /data/data/com.termux 2>/dev/null && echo found").exec()
+            if (r.isSuccess && r.out.any { it.contains("found") }) return@withContext TermuxStatus.Installed
+            r = Shell.cmd("ls /data/user/0/com.termux 2>/dev/null && echo found").exec()
+            if (r.isSuccess && r.out.any { it.contains("found") }) return@withContext TermuxStatus.Installed
+            TermuxStatus.NotInstalled
         } catch (_: Exception) { TermuxStatus.NotInstalled }
     }
 
     suspend fun checkX11Apk(): X11ApkStatus = withContext(Dispatchers.IO) {
         try {
             var r = Shell.cmd("pm path com.termux.x11 2>/dev/null").exec()
-            if (!r.isSuccess || !r.out.any { it.contains("package:") }) {
-                r = Shell.cmd("ls /data/data/com.termux.x11 2>/dev/null && echo found").exec()
-                if (r.isSuccess && r.out.any { it.contains("found") }) return@withContext X11ApkStatus.Installed
-                r = Shell.cmd("ls /data/user/0/com.termux.x11 2>/dev/null && echo found").exec()
-                if (r.isSuccess && r.out.any { it.contains("found") }) return@withContext X11ApkStatus.Installed
-                return@withContext X11ApkStatus.NotInstalled
+            if (r.isSuccess && r.out.any { it.contains("package:") }) {
+                return@withContext X11ApkStatus.Installed
             }
-            X11ApkStatus.Installed
+            r = Shell.cmd("ls /data/data/com.termux.x11 2>/dev/null && echo found").exec()
+            if (r.isSuccess && r.out.any { it.contains("found") }) return@withContext X11ApkStatus.Installed
+            r = Shell.cmd("ls /data/user/0/com.termux.x11 2>/dev/null && echo found").exec()
+            if (r.isSuccess && r.out.any { it.contains("found") }) return@withContext X11ApkStatus.Installed
+            X11ApkStatus.NotInstalled
         } catch (_: Exception) { X11ApkStatus.NotInstalled }
+    }
+
+    suspend fun checkTermuxX11Loader(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            Shell.cmd("test -f '${Constants.LOADER_APK}' && echo ok").exec()
+                .let { it.isSuccess && it.out.any { o -> o.contains("ok") } }
+        } catch (_: Exception) { false }
     }
 }

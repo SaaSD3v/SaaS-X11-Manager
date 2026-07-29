@@ -23,13 +23,26 @@ object RootChecker {
      */
     suspend fun checkRootAccess(): RootStatus = withContext(Dispatchers.IO) {
         return@withContext try {
-            if (Shell.isAppGrantedRoot() == true) {
-                if (ShellUtils.fastCmdResult("id")) RootStatus.Granted else RootStatus.Denied
-            } else {
-                val result = Shell.cmd("id").exec()
-                if (result.isSuccess && Shell.isAppGrantedRoot() == true) {
+            // Fast path: check if root is already granted (cached check, no allocation)
+            val isRootGranted = Shell.isAppGrantedRoot() == true
+
+            if (isRootGranted) {
+                // Use fastCmdResult for verification (minimal overhead)
+                if (ShellUtils.fastCmdResult("id")) {
                     RootStatus.Granted
                 } else {
+                    RootStatus.Denied
+                }
+            } else {
+                // Try to request root (will show dialog)
+                try {
+                    val result = Shell.cmd("id").exec()
+                    if (result.isSuccess && Shell.isAppGrantedRoot() == true) {
+                        RootStatus.Granted
+                    } else {
+                        RootStatus.Denied
+                    }
+                } catch (e: Exception) {
                     RootStatus.Denied
                 }
             }
@@ -40,8 +53,14 @@ object RootChecker {
 
     fun checkRootAccessSync(): RootStatus {
         return try {
-            if (Shell.isAppGrantedRoot() == true && ShellUtils.fastCmdResult("id")) {
-                RootStatus.Granted
+            val isRootAvailable = Shell.isAppGrantedRoot() == true
+            if (isRootAvailable) {
+                val verifyResult = ShellUtils.fastCmdResult("id")
+                if (verifyResult) {
+                    RootStatus.Granted
+                } else {
+                    RootStatus.Denied
+                }
             } else {
                 RootStatus.Denied
             }
