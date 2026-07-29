@@ -99,7 +99,7 @@ fun RequirementsScreen(
                             TermuxStatus.Checking -> CheckStatus.Checking
                         },
                         detail = when (termuxStatus) {
-                            TermuxStatus.Installed -> "com.termux"
+                            TermuxStatus.Installed -> Constants.TERMUX_PACKAGE
                             TermuxStatus.NotInstalled -> "Not installed"
                             TermuxStatus.Checking -> "Checking..."
                         }
@@ -112,7 +112,7 @@ fun RequirementsScreen(
                             X11ApkStatus.Checking -> CheckStatus.Checking
                         },
                         detail = when (x11ApkStatus) {
-                            X11ApkStatus.Installed -> "com.termux.x11"
+                            X11ApkStatus.Installed -> Constants.TERMUX_X11_PACKAGE
                             X11ApkStatus.NotInstalled -> "Not installed"
                             X11ApkStatus.Checking -> "Checking..."
                         }

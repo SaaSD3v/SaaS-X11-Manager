@@ -17,6 +17,19 @@ enum class RootProvider(val displayName: String) {
 }
 
 object RootChecker {
+
+    private const val KSU_DIR = "/data/adb/ksu"
+    private const val KSU_BIN = "/data/adb/ksud"
+    private const val KSU_PKG = "me.weishu.kernelsu"
+    private const val APATCH_DIR = "/data/adb/ap"
+    private const val APATCH_BIN = "/data/adb/apd"
+    private const val APATCH_PKG = "me.bmax.apatch"
+    private const val MAGISK_DIR = "/data/adb/magisk"
+    private const val MAGISK_PKG = "com.topjohnwu.magisk"
+    private const val SUPERSU_PKG_A = "eu.chainfire.supersu"
+    private const val SUPERSU_PKG_B = "com.noshufou.android.su"
+    private const val LINEAGE_PKG = "org.lineageos.su"
+
     suspend fun checkRootAccess(): RootStatus = withContext(Dispatchers.IO) {
         return@withContext try {
             if (Shell.isAppGrantedRoot() == true) {
@@ -62,23 +75,23 @@ object RootChecker {
         }
     }
 
-    private const val ROOT_PROVIDER_PROBE = """
+    private val ROOT_PROVIDER_PROBE = """
         {
           su -v 2>/dev/null
           su -V 2>/dev/null
           magisk -V 2>/dev/null && echo magisk
           magisk --path 2>/dev/null
-          test -d /data/adb/ksu && echo kernelsu
-          test -d /data/adb/ap && echo apatch
-          test -d /data/adb/magisk && echo magisk
-          test -f /data/adb/ksud && echo kernelsu
-          test -f /data/adb/apd && echo apatch
-          pm path me.weishu.kernelsu 2>/dev/null && echo kernelsu
-          pm path me.bmax.apatch 2>/dev/null && echo apatch
-          pm path com.topjohnwu.magisk 2>/dev/null && echo magisk
-          pm path eu.chainfire.supersu 2>/dev/null && echo supersu
-          pm path com.noshufou.android.su 2>/dev/null && echo supersu
-          pm path org.lineageos.su 2>/dev/null && echo lineagesu
+          test -d $KSU_DIR && echo kernelsu
+          test -d $APATCH_DIR && echo apatch
+          test -d $MAGISK_DIR && echo magisk
+          test -f $KSU_BIN && echo kernelsu
+          test -f $APATCH_BIN && echo apatch
+          pm path $KSU_PKG 2>/dev/null && echo kernelsu
+          pm path $APATCH_PKG 2>/dev/null && echo apatch
+          pm path $MAGISK_PKG 2>/dev/null && echo magisk
+          pm path $SUPERSU_PKG_A 2>/dev/null && echo supersu
+          pm path $SUPERSU_PKG_B 2>/dev/null && echo supersu
+          pm path $LINEAGE_PKG 2>/dev/null && echo lineagesu
         } 2>/dev/null
     """
 }

@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.ui.theme.JetBrainsMono
 import com.saas.x11manager.util.AnsiColorParser
+import com.saas.x11manager.util.Constants
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -174,7 +175,7 @@ fun TerminalConsole(
                     logs.forEach { (level, message) ->
                         val annotatedText = remember(level, message) {
                             val processedMessage = message.replace(
-                                Regex("""/data/local/Droidspaces/bin/droidspaces"""),
+                                Regex(Regex.escape(Constants.DS_BINARY_PATH)),
                                 "droidspaces"
                             )
                             val displayMessage = if (processedMessage.isEmpty()) {

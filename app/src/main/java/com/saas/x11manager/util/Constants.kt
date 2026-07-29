@@ -2,17 +2,23 @@ package com.saas.x11manager.util
 
 object Constants {
     const val DS_BINARY_PATH = "/data/local/Droidspaces/bin/droidspaces"
+    const val DS_BASE_DIR = "/data/local/Droidspaces"
     const val CONTAINERS_DIR = "/data/local/Droidspaces/Containers"
     const val CONFIG_FILE = "container.config"
     const val DAEMON_MODE_FILE = "/data/local/Droidspaces/.daemon_mode"
 
-    const val LOADER_APK = "/data/data/com.termux/files/usr/libexec/termux-x11/loader.apk"
-    const val X11_SOCK_DIR = "/data/data/com.termux/files/usr/tmp/.X11-unix"
-    const val X11_SOCK_FILE = "/data/data/com.termux/files/usr/tmp/.X11-unix/X0"
     const val TERMUX_PACKAGE = "com.termux"
     const val TERMUX_X11_PACKAGE = "com.termux.x11"
 
-    const val PULSE_SOCK = "/data/data/com.termux/files/usr/tmp/.pulse-socket"
-    const val PULSE_BIN = "/data/data/com.termux/files/usr/bin/pulseaudio"
-    const val TERMUX_PACKAGE_NAME = "com.termux"
+    const val TERMUX_DATA_DIR = "/data/data/com.termux"
+    const val TERMUX_DATA_ALT = "/data/user/0/com.termux"
+    const val TERMUX_PREFIX = "/data/data/com.termux/files/usr"
+
+    const val LOADER_APK = "$TERMUX_PREFIX/libexec/termux-x11/loader.apk"
+    const val X11_SOCK_DIR = "$TERMUX_PREFIX/tmp/.X11-unix"
+    const val X11_SOCK_FILE = "$TERMUX_PREFIX/tmp/.X11-unix/X0"
+    const val PULSE_SOCK = "$TERMUX_PREFIX/tmp/.pulse-socket"
+    const val PULSE_BIN = "$TERMUX_PREFIX/bin/pulseaudio"
+
+    const val PA_SCRIPT = "/data/local/tmp/pulseaudio_fix.sh"
 }

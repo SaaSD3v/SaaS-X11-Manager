@@ -11,6 +11,8 @@ import androidx.lifecycle.viewModelScope
 import com.saas.x11manager.util.*
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -74,22 +76,43 @@ class HomeViewModel : ViewModel() {
         viewModelScope.launch {
             if (!initialized) _isLoading.value = true
             try {
-                _rootStatus.value = RootChecker.checkRootAccess()
-                _rootProvider.value = RootChecker.getRootProvider()
-                _termuxStatus.value = TermuxChecker.checkTermux()
-                _x11ApkStatus.value = TermuxChecker.checkX11Apk()
-                _dsStatus.value = DroidspacesChecker.checkBackend()
+                coroutineScope {
+                    val rootDef = async(Dispatchers.IO) {
+                        val status = RootChecker.checkRootAccess()
+                        val provider = RootChecker.getRootProvider()
+                        status to provider
+                    }
+                    val termuxDef = async(Dispatchers.IO) { TermuxChecker.checkTermux() }
+                    val x11Def = async(Dispatchers.IO) { TermuxChecker.checkX11Apk() }
+                    val dsDef = async(Dispatchers.IO) { DroidspacesChecker.checkBackend() }
+                    val containersDef = async(Dispatchers.IO) { ContainerManager.listContainers() }
+                    val systemDef = async(Dispatchers.IO) {
+                        coroutineScope {
+                            val kernel = async { getSystemProp("ro.build.version.release") }
+                            val archVal = async { getSystemProp("ro.product.cpu.abi") }
+                            val sdk = async { getSystemProp("ro.build.version.sdk") }
+                            Triple(kernel.await(), archVal.await(), sdk.await())
+                        }
+                    }
 
-                _loaderStatus.value = X11SessionManager.getLoaderStatus()
-                _loaderPid.value = if (_loaderStatus.value == LoaderStatus.Running) {
-                    X11SessionManager.getLoaderPid()
-                } else null
+                    val (rootSt, rootPr) = rootDef.await()
+                    _rootStatus.value = rootSt
+                    _rootProvider.value = rootPr
+                    _termuxStatus.value = termuxDef.await()
+                    _x11ApkStatus.value = x11Def.await()
+                    _dsStatus.value = dsDef.await()
+                    _containers.value = containersDef.await()
 
-                _containers.value = ContainerManager.listContainers()
+                    val (kernel, archVal, sdk) = systemDef.await()
+                    _kernelVersion.value = kernel
+                    _arch.value = archVal
+                    _androidVersion.value = sdk
 
-                _kernelVersion.value = getSystemProp("ro.build.version.release")
-                _arch.value = getSystemProp("ro.product.cpu.abi")
-                _androidVersion.value = getSystemProp("ro.build.version.sdk")
+                    _loaderStatus.value = X11SessionManager.getLoaderStatus()
+                    _loaderPid.value = if (_loaderStatus.value == LoaderStatus.Running) {
+                        X11SessionManager.getLoaderPid()
+                    } else null
+                }
                 initialized = true
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "refresh() failed", e)

@@ -8,8 +8,6 @@ enum class LoaderStatus { Running, Stopped }
 
 object X11SessionManager {
 
-    private const val PA_SCRIPT = "/data/local/tmp/pulseaudio_fix.sh"
-
     suspend fun getLoaderStatus(): LoaderStatus = withContext(Dispatchers.IO) {
         try {
             val r = Shell.cmd("test -S '${Constants.X11_SOCK_FILE}' && echo ok").exec()
@@ -29,7 +27,7 @@ object X11SessionManager {
             logger?.i("[*] Starting PulseAudio...")
 
             // The .sh script handles killall, rm, run-as, and waits for socket
-            val r = Shell.cmd("sh $PA_SCRIPT 2>&1").exec()
+            val r = Shell.cmd("sh ${Constants.PA_SCRIPT} 2>&1").exec()
             val out = r.out.joinToString("\n")
             val err = r.err.joinToString("\n")
 

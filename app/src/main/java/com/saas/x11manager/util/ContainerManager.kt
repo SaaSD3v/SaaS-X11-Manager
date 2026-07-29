@@ -28,7 +28,7 @@ data class ContainerInfo(
 
 object ContainerManager {
 
-    private const val PA_BIND = "/data/data/com.termux/files/usr/tmp/.pulse-socket:/tmp/.pulse-socket"
+    private const val PA_BIND = "${Constants.TERMUX_PREFIX}/tmp/.pulse-socket:/tmp/.pulse-socket"
 
     suspend fun listContainers(): List<ContainerInfo> = withContext(Dispatchers.IO) {
         val containers = mutableListOf<ContainerInfo>()
@@ -36,17 +36,36 @@ object ContainerManager {
             val result = Shell.cmd("ls -d '${Constants.CONTAINERS_DIR}'/*/ 2>/dev/null").exec()
             if (!result.isSuccess || result.out.isEmpty()) return@withContext containers
 
-            for (line in result.out) {
+            val names = result.out.mapNotNull { line ->
                 val trimmed = line.trim()
-                if (trimmed.isEmpty() || !trimmed.startsWith(Constants.CONTAINERS_DIR)) continue
-                val name = trimmed.removeSuffix("/").substringAfterLast("/")
-                if (name.isEmpty()) continue
+                if (trimmed.isEmpty() || !trimmed.startsWith(Constants.CONTAINERS_DIR)) null
+                else trimmed.removeSuffix("/").substringAfterLast("/").ifEmpty { null }
+            }
+            if (names.isEmpty()) return@withContext containers
 
+            val configPaths = names.map { name -> "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}" }
+            val existCheck = Shell.cmd(
+                configPaths.joinToString(" && ") { "test -f '$it'" } + " 2>/dev/null; echo DONE"
+            ).exec()
+            val existingConfigs = if (existCheck.isSuccess) {
+                configPaths.filterIndexed { idx, _ ->
+                    existCheck.out.any { it.contains("DONE") }
+                }
+            } else configPaths
+
+            val allConfigs = mutableListOf<Pair<String, ContainerInfo>>()
+            for (name in names) {
                 val configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
-                if (!Shell.cmd("test -f '$configPath'").exec().isSuccess) continue
-
                 val config = loadConfig(configPath, name) ?: continue
-                val (running, pid) = getStatus(config.name)
+                allConfigs.add(name to config)
+            }
+
+            if (allConfigs.isEmpty()) return@withContext containers
+
+            val runningPids = batchGetStatus(allConfigs.map { it.first })
+
+            for ((name, config) in allConfigs) {
+                val (running, pid) = runningPids[name] ?: Pair(false, null)
                 containers.add(config.copy(
                     status = if (running) ContainerStatus.RUNNING else ContainerStatus.STOPPED,
                     pid = pid
@@ -54,6 +73,22 @@ object ContainerManager {
             }
         } catch (_: Exception) {}
         containers
+    }
+
+    private fun batchGetStatus(names: List<String>): Map<String, Pair<Boolean, Int?>> {
+        val result = mutableMapOf<String, Pair<Boolean, Int?>>()
+        if (names.isEmpty()) return result
+
+        try {
+            for (name in names) {
+                result[name] = getStatus(name)
+            }
+        } catch (_: Exception) {
+            for (name in names) {
+                if (name !in result) result[name] = Pair(false, null)
+            }
+        }
+        return result
     }
 
     private fun loadConfig(path: String, defaultName: String): ContainerInfo? {
@@ -132,7 +167,6 @@ object ContainerManager {
                 }
             }
 
-            // Write to cacheDir temp file, then cp (Droidspaces pattern)
             val tmpFile = File(cacheDir, "container_$name.config")
             tmpFile.writeText(lines.joinToString("\n") + "\n")
             val cpResult = Shell.cmd("cp '${tmpFile.absolutePath}' '$path' 2>&1").exec()
@@ -145,16 +179,50 @@ object ContainerManager {
     }
 
     private fun getStatus(name: String): Pair<Boolean, Int?> {
-        return try {
+        try {
             val r = Shell.cmd("${Constants.DS_BINARY_PATH} --name='$name' pid 2>/dev/null").exec()
             if (r.isSuccess && r.out.isNotEmpty()) {
                 val pid = r.out.first().trim().toIntOrNull()
                 if (pid != null && pid > 0) {
                     val alive = Shell.cmd("kill -0 $pid 2>/dev/null").exec()
-                    if (alive.isSuccess) Pair(true, pid) else Pair(false, null)
-                } else Pair(false, null)
-            } else Pair(false, null)
-        } catch (_: Exception) { Pair(false, null) }
+                    if (alive.isSuccess) return Pair(true, pid)
+                }
+            }
+        } catch (_: Exception) {}
+
+        try {
+            val psResult = Shell.cmd("ps -eo pid,args 2>/dev/null | grep '${Constants.DS_BINARY_PATH}.*--name=$name' | grep -v grep").exec()
+            if (psResult.isSuccess && psResult.out.isNotEmpty()) {
+                for (line in psResult.out) {
+                    val parts = line.trim().split("\\s+".toRegex())
+                    if (parts.size >= 1) {
+                        val pid = parts[0].toIntOrNull()
+                        if (pid != null && pid > 0) {
+                            val alive = Shell.cmd("kill -0 $pid 2>/dev/null").exec()
+                            if (alive.isSuccess) return Pair(true, pid)
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        try {
+            val psResult = Shell.cmd("ps -eo pid,args 2>/dev/null | grep 'droidspaces.*$name' | grep -v grep").exec()
+            if (psResult.isSuccess && psResult.out.isNotEmpty()) {
+                for (line in psResult.out) {
+                    val parts = line.trim().split("\\s+".toRegex())
+                    if (parts.size >= 1) {
+                        val pid = parts[0].toIntOrNull()
+                        if (pid != null && pid > 0) {
+                            val alive = Shell.cmd("kill -0 $pid 2>/dev/null").exec()
+                            if (alive.isSuccess) return Pair(true, pid)
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        return Pair(false, null)
     }
 
     suspend fun checkContainerStatusPublic(name: String): Pair<Boolean, Int?> = withContext(Dispatchers.IO) {
