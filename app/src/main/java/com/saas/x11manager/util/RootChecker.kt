@@ -1,5 +1,6 @@
 package com.saas.x11manager.util
 
+import android.util.Log
 import com.topjohnwu.superuser.Shell
 import com.topjohnwu.superuser.ShellUtils
 import kotlinx.coroutines.Dispatchers
@@ -17,36 +18,30 @@ enum class RootProvider(val displayName: String) {
 }
 
 object RootChecker {
-    /**
-     * Droidspaces-style root check: prefer libsu's cached grant state, then
-     * request/verify a real root shell with a minimal `id` command.
-     */
     suspend fun checkRootAccess(): RootStatus = withContext(Dispatchers.IO) {
+        Log.d("RootChecker", "checkRootAccess called")
         return@withContext try {
-            // Fast path: check if root is already granted (cached check, no allocation)
-            val isRootGranted = Shell.isAppGrantedRoot() == true
+            val cached = Shell.isAppGrantedRoot()
+            Log.d("RootChecker", "Shell.isAppGrantedRoot() = $cached")
 
-            if (isRootGranted) {
-                // Use fastCmdResult for verification (minimal overhead)
-                if (ShellUtils.fastCmdResult("id")) {
+            if (cached == true) {
+                val fast = ShellUtils.fastCmdResult("id")
+                Log.d("RootChecker", "fastCmdResult(id) = $fast")
+                if (fast) RootStatus.Granted else RootStatus.Denied
+            } else {
+                Log.d("RootChecker", "cached != true, running Shell.cmd(id)...")
+                val result = Shell.cmd("id").exec()
+                Log.d("RootChecker", "Shell.cmd(id) success=${result.isSuccess}, out=${result.out}, err=${result.err}")
+                val afterGrant = Shell.isAppGrantedRoot()
+                Log.d("RootChecker", "After cmd: Shell.isAppGrantedRoot() = $afterGrant")
+                if (result.isSuccess && afterGrant == true) {
                     RootStatus.Granted
                 } else {
                     RootStatus.Denied
                 }
-            } else {
-                // Try to request root (will show dialog)
-                try {
-                    val result = Shell.cmd("id").exec()
-                    if (result.isSuccess && Shell.isAppGrantedRoot() == true) {
-                        RootStatus.Granted
-                    } else {
-                        RootStatus.Denied
-                    }
-                } catch (e: Exception) {
-                    RootStatus.Denied
-                }
             }
         } catch (e: Exception) {
+            Log.e("RootChecker", "Exception during root check", e)
             RootStatus.Denied
         }
     }
