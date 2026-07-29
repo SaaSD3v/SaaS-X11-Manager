@@ -21,9 +21,13 @@ data class ContainerInfo(
     val pid: Int? = null
 ) {
     val isRunning: Boolean get() = status == ContainerStatus.RUNNING
+    val hasPulseAudioBindMount: Boolean
+        get() = bindMounts.contains("/tmp/.pulse-socket")
 }
 
 object ContainerManager {
+
+    private const val PA_BIND_MOUNT = "/data/data/com.termux/files/usr/tmp/.pulse-socket:/tmp/.pulse-socket"
 
     suspend fun listContainers(log: ((String) -> Unit)? = null): List<ContainerInfo> = withContext(Dispatchers.IO) {
         val containers = mutableListOf<ContainerInfo>()
@@ -115,8 +119,7 @@ object ContainerManager {
 
     suspend fun updateContainerConfig(
         name: String,
-        enablePulseAudio: Boolean,
-        logger: ContainerLogger? = null
+        enablePulseAudioFix: Boolean
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             val configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
@@ -124,61 +127,49 @@ object ContainerManager {
             if (!readResult.isSuccess || readResult.out.isEmpty()) return@withContext false
 
             val lines = readResult.out.toMutableList()
-            var pulseFound = false
-            var bindMountsFound = false
-            var bindMountsValue = ""
+            var bindMountsIndex = -1
 
             for (i in lines.indices) {
                 val line = lines[i].trim()
-                if (line.startsWith("enable_pulseaudio=")) {
-                    lines[i] = "enable_pulseaudio=${if (enablePulseAudio) "0" else "1"}"
-                    pulseFound = true
-                }
                 if (line.startsWith("bind_mounts=")) {
-                    bindMountsValue = line.substringAfter("bind_mounts=")
-                    bindMountsFound = true
+                    bindMountsIndex = i
+                    break
                 }
             }
 
-            if (pulseFound) {
-                val paSock = "/data/data/com.termux/files/usr/tmp/.pulse-socket:/tmp/.pulse-socket"
-                if (enablePulseAudio) {
-                    if (!bindMountsValue.contains(paSock)) {
-                        val newValue = if (bindMountsValue.isBlank()) paSock else "$bindMountsValue,$paSock"
-                        for (i in lines.indices) {
-                            if (lines[i].trim().startsWith("bind_mounts=")) {
-                                lines[i] = "bind_mounts=$newValue"
-                            }
-                        }
-                        if (!bindMountsFound) {
-                            lines.add("bind_mounts=$newValue")
-                        }
+            if (enablePulseAudioFix) {
+                if (bindMountsIndex >= 0) {
+                    val currentMounts = lines[bindMountsIndex].trim().substringAfter("bind_mounts=")
+                    if (!currentMounts.contains(PA_BIND_MOUNT)) {
+                        val newMounts = if (currentMounts.isBlank()) PA_BIND_MOUNT else "$currentMounts,$PA_BIND_MOUNT"
+                        lines[bindMountsIndex] = "bind_mounts=$newMounts"
                     }
                 } else {
-                    if (bindMountsValue.contains(paSock)) {
-                        val newValue = bindMountsValue
-                            .replace(",$paSock", "")
-                            .replace("$paSock,", "")
-                            .replace(paSock, "")
-                            .trimStart(',')
-                            .trimEnd(',')
-                        for (i in lines.indices) {
-                            if (lines[i].trim().startsWith("bind_mounts=")) {
-                                lines[i] = "bind_mounts=$newValue"
-                            }
-                        }
+                    lines.add("bind_mounts=$PA_BIND_MOUNT")
+                }
+            } else {
+                if (bindMountsIndex >= 0) {
+                    val currentMounts = lines[bindMountsIndex].trim().substringAfter("bind_mounts=")
+                    val newMounts = currentMounts
+                        .replace(",$PA_BIND_MOUNT", "")
+                        .replace("$PA_BIND_MOUNT,", "")
+                        .replace(PA_BIND_MOUNT, "")
+                        .trim()
+                    if (newMounts.isEmpty()) {
+                        lines.removeAt(bindMountsIndex)
+                    } else {
+                        lines[bindMountsIndex] = "bind_mounts=$newMounts"
                     }
                 }
             }
 
-            val writeResult = Shell.cmd("cat > '$configPath' 2>/dev/null").exec()
-            val writeInput = lines.joinToString("\n")
-            Shell.cmd("echo '${writeInput.replace("'", "'\\''")}' > '$configPath'").exec()
+            val content = lines.joinToString("\n") + "\n"
+            val tmpPath = "${configPath}.tmp"
+            Shell.cmd("cat > '$tmpPath'").exec(content)
+            Shell.cmd("mv '$tmpPath' '$configPath'").exec()
 
-            logger?.i("[+] Config updated")
             true
         } catch (e: Exception) {
-            logger?.e("[-] Config update failed: ${e.message}")
             false
         }
     }

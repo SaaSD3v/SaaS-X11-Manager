@@ -3,7 +3,6 @@ package com.saas.x11manager.ui.screen
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -17,13 +16,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.saas.x11manager.util.ContainerInfo
 import com.saas.x11manager.util.ContainerManager
-import com.saas.x11manager.util.ContainerLogger
-import com.saas.x11manager.util.ViewModelLogger
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -35,18 +30,18 @@ fun EditContainerScreen(
     onBack: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-    var container by remember { mutableStateOf<ContainerInfo?>(null) }
     var pulseAudioFix by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
     var isSaved by remember { mutableStateOf(false) }
     var hasChanges by remember { mutableStateOf(false) }
+    var loaded by remember { mutableStateOf(false) }
 
     LaunchedEffect(containerName) {
-        container = ContainerManager.getContainerInfo(containerName)
-        container?.let {
-            pulseAudioFix = it.enablePulseAudio
+        val info = ContainerManager.getContainerInfo(containerName)
+        if (info != null) {
+            pulseAudioFix = info.hasPulseAudioBindMount
         }
+        loaded = true
     }
 
     Scaffold(
@@ -54,9 +49,7 @@ fun EditContainerScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.Computer,
                             contentDescription = null,
@@ -71,10 +64,7 @@ fun EditContainerScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
-                        )
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 windowInsets = WindowInsets.statusBars
@@ -104,19 +94,16 @@ fun EditContainerScreen(
                             if (hasChanges && !isSaving && !isSaved) {
                                 isSaving = true
                                 scope.launch {
-                                    try {
-                                        ContainerManager.updateContainerConfig(
-                                            name = containerName,
-                                            enablePulseAudio = pulseAudioFix
-                                        )
+                                    val success = ContainerManager.updateContainerConfig(
+                                        name = containerName,
+                                        enablePulseAudioFix = pulseAudioFix
+                                    )
+                                    isSaving = false
+                                    if (success) {
                                         isSaved = true
                                         hasChanges = false
                                         delay(1500)
                                         isSaved = false
-                                    } catch (e: Exception) {
-                                        // Handle error
-                                    } finally {
-                                        isSaving = false
                                     }
                                 }
                             }
@@ -176,119 +163,64 @@ fun EditContainerScreen(
             }
         }
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Spacer(modifier = Modifier.height(8.dp))
+        if (loaded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Spacer(modifier = Modifier.height(8.dp))
 
-            // Warning if container is running
-            container?.let { info ->
-                if (info.isRunning) {
+                SectionHeader(title = "Integration")
+
+                ToggleCard(
+                    icon = Icons.Default.VolumeUp,
+                    title = "PulseAudio Fix",
+                    subtitle = if (pulseAudioFix) "Audio via host PulseAudio" else "Default audio",
+                    checked = pulseAudioFix,
+                    onCheckedChange = { newValue ->
+                        pulseAudioFix = newValue
+                        hasChanges = true
+                        isSaved = false
+                    }
+                )
+
+                if (pulseAudioFix) {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f))
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
                     ) {
                         Row(
-                            modifier = Modifier.padding(16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                Icons.Default.Warning,
+                                Icons.Default.Info,
                                 contentDescription = null,
-                                modifier = Modifier.size(24.dp),
-                                tint = MaterialTheme.colorScheme.error
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.primary
                             )
-                            Column {
-                                Text(
-                                    "Container is running",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                                Text(
-                                    "Stop the container before making changes",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                )
-                            }
+                            Text(
+                                "Starts PulseAudio before X11. Fixes audio when Droidspaces bridge fails.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                            )
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(80.dp))
             }
-
-            // PulseAudio Fix section
-            SectionHeader(title = "Integration")
-
-            ToggleCard(
-                icon = Icons.Default.VolumeUp,
-                title = "PulseAudio Fix",
-                subtitle = if (pulseAudioFix) "Enabled - audio via host PulseAudio" else "Disabled - default audio",
-                checked = pulseAudioFix,
-                onCheckedChange = { newValue ->
-                    pulseAudioFix = newValue
-                    hasChanges = true
-                    isSaved = false
-                }
-            )
-
-            // Info about PulseAudio Fix
-            if (pulseAudioFix) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.Info,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            "Starts PulseAudio on host before X11. Fixes audio when Droidspaces bridge fails. Container must have bind mount for /tmp/.pulse-socket.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                        )
-                    }
-                }
+        } else {
+            Box(modifier = Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
             }
-
-            // Container info section
-            SectionHeader(title = "Container Info")
-
-            InfoRow(
-                icon = Icons.Default.Computer,
-                label = "Hostname",
-                value = container?.hostname?.ifEmpty { "Not set" } ?: "Loading..."
-            )
-
-            InfoRow(
-                icon = Icons.Default.NetworkCheck,
-                label = "Network Mode",
-                value = container?.netMode ?: "Loading..."
-            )
-
-            InfoRow(
-                icon = Icons.Default.Folder,
-                label = "Rootfs",
-                value = container?.rootfsPath?.substringAfterLast("/") ?: "Loading..."
-            )
-
-            Spacer(modifier = Modifier.height(80.dp))
         }
     }
 }
@@ -341,16 +273,8 @@ private fun ToggleCard(
                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                 )
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    )
+                    Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                 }
             }
             Switch(
@@ -364,47 +288,6 @@ private fun ToggleCard(
                     uncheckedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
                 )
             )
-        }
-    }
-}
-
-@Composable
-private fun InfoRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    value: String
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-            )
-            Column {
-                Text(
-                    label,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                )
-                Text(
-                    value,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium
-                )
-            }
         }
     }
 }

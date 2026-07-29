@@ -37,15 +37,12 @@ object X11SessionManager {
             Shell.cmd("rm -rf /data/data/com.termux/files/usr/tmp/pulse-* 2>/dev/null").exec()
 
             logger?.i("[*] Starting PulseAudio daemon...")
-            Shell.cmd(
-                "run-as ${Constants.TERMUX_PACKAGE_NAME} " +
-                "${Constants.PULSE_BIN} " +
-                "--load 'module-native-protocol-unix socket=${Constants.PULSE_SOCK} auth-anonymous=1' " +
-                "--exit-idle-time=-1 " +
-                "--daemonize=yes " +
-                "--use-pid-file=false " +
-                "--disallow-exit"
-            ).exec()
+            val script = """
+                #!/system/bin/sh
+                run-as com.termux ${Constants.PULSE_BIN} --load 'module-native-protocol-unix socket=${Constants.PULSE_SOCK} auth-anonymous=1' --exit-idle-time=-1 --daemonize=yes --use-pid-file=false --disallow-exit 2>&1
+            """.trimIndent()
+            Shell.cmd("echo '${script.replace("'", "'\\''")}' > /data/local/tmp/start_pa.sh").exec()
+            Shell.cmd("sh /data/local/tmp/start_pa.sh").exec()
 
             logger?.i("[*] Waiting for socket (5s timeout)...")
             var wait = 0
