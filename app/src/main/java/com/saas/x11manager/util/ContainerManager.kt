@@ -128,7 +128,6 @@ object ContainerManager {
     }
 
     suspend fun startContainer(name: String, logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
-        logger?.i("Starting container $name...")
         try {
             val configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
             val result = Shell.cmd(
@@ -144,33 +143,31 @@ object ContainerManager {
             }
             result.isSuccess
         } catch (e: Exception) {
-            logger?.e("Error starting: ${e.message}")
+            logger?.e("[-] Error: ${e.message}")
             false
         }
     }
 
     suspend fun stopContainer(name: String, logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
-        logger?.i("Stopping container $name...")
         try {
             val result = Shell.cmd("${Constants.DS_BINARY_PATH} --name='$name' stop 2>&1").exec()
             val output = result.out.joinToString("\n")
             if (output.isNotBlank()) logger?.i(output)
             result.isSuccess
         } catch (e: Exception) {
-            logger?.e("Error stopping: ${e.message}")
+            logger?.e("[-] Error: ${e.message}")
             false
         }
     }
 
     suspend fun restartContainer(name: String, logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
-        logger?.i("Restarting container $name...")
         try {
             val result = Shell.cmd("${Constants.DS_BINARY_PATH} --name='$name' restart 2>&1").exec()
             val output = result.out.joinToString("\n")
             if (output.isNotBlank()) logger?.i(output)
             result.isSuccess
         } catch (e: Exception) {
-            logger?.e("Error restarting: ${e.message}")
+            logger?.e("[-] Error: ${e.message}")
             false
         }
     }
