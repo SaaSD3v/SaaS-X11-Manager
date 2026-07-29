@@ -54,7 +54,7 @@ fun ContainerCard(
                     if (container.isRunning) actions.onShowLogs() else actions.onToggleExpand()
                 },
                 onLongClick = actions.onToggleExpand,
-                indication = remember { androidx.compose.material.ripple.rememberRipple(bounded = true) },
+                indication = null,
                 interactionSource = remember { MutableInteractionSource() }
             ),
         shape = cardShape,

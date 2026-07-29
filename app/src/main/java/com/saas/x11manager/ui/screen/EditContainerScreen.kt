@@ -228,7 +228,7 @@ fun EditContainerScreen(
             SectionHeader(title = "Integration")
 
             ToggleCard(
-                icon = Icons.AutoMirrored.Filled.VolumeUp,
+                icon = Icons.Default.VolumeUp,
                 title = "PulseAudio Fix",
                 subtitle = if (pulseAudioFix) "Enabled - audio via host PulseAudio" else "Disabled - default audio",
                 checked = pulseAudioFix,

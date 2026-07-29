@@ -45,11 +45,11 @@ fun AppNavigation(viewModel: HomeViewModel) {
     val selectedTab = tabs[pagerState.currentPage]
     val scope = rememberCoroutineScope()
 
-    val navigateToEdit by viewModel.navigateToEdit
+    val navigateToEdit = viewModel.navigateToEdit
 
     if (navigateToEdit != null) {
         EditContainerScreen(
-            containerName = navigateToEdit!!,
+            containerName = navigateToEdit,
             viewModel = viewModel,
             onBack = {
                 viewModel.onEditNavigated()
