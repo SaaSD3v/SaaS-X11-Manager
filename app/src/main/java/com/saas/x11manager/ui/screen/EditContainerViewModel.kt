@@ -1,16 +1,14 @@
 package com.saas.x11manager.ui.screen
 
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.saas.x11manager.util.ContainerLogger
 import com.saas.x11manager.util.ContainerManager
 import com.saas.x11manager.util.ContainerStatus
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 
 class EditContainerViewModel : ViewModel() {
@@ -19,7 +17,7 @@ class EditContainerViewModel : ViewModel() {
     var hostname by mutableStateOf("")
     var status by mutableStateOf(ContainerStatus.UNKNOWN)
     var enablePulseAudio by mutableStateOf(false)
-    var logs by mutableStateOf<List<ContainerLogger.Entry>>(emptyList())
+    var logs by mutableStateOf<List<Pair<Int, String>>>(emptyList())
     var isSaving by mutableStateOf(false)
     var saveError by mutableStateOf<String?>(null)
         private set
@@ -27,7 +25,6 @@ class EditContainerViewModel : ViewModel() {
     private var loaded = false
     private var containerName = ""
     private var cacheDir: File? = null
-    private val PA_BIND = "/data/data/com.termux/files/usr/tmp/.pulse-socket:/tmp/.pulse-socket"
 
     fun load(containerName: String, cacheDir: File) {
         if (loaded && this.containerName == containerName) return
@@ -41,6 +38,7 @@ class EditContainerViewModel : ViewModel() {
             hostname = info.hostname
             status = info.status
             enablePulseAudio = info.bindMounts.contains("/tmp/.pulse-socket")
+            logs = emptyList()
         }
     }
 
@@ -48,6 +46,7 @@ class EditContainerViewModel : ViewModel() {
         if (isSaving) return
         isSaving = true
         saveError = null
+        logs = emptyList()
 
         viewModelScope.launch {
             try {
@@ -57,6 +56,8 @@ class EditContainerViewModel : ViewModel() {
                     return@launch
                 }
 
+                logs = logs + (Log.INFO to "[*] Saving configuration...")
+
                 val ok = ContainerManager.updatePulseAudioBindMount(
                     name = containerName,
                     enable = enablePulseAudio,
@@ -64,17 +65,19 @@ class EditContainerViewModel : ViewModel() {
                 )
 
                 if (ok) {
+                    logs = logs + (Log.INFO to "[+] Config saved successfully")
                     saveError = "OK: Config saved"
-                    // Refresh status
                     val info = ContainerManager.getContainerInfo(containerName)
                     if (info != null) {
                         status = info.status
                         enablePulseAudio = info.bindMounts.contains("/tmp/.pulse-socket")
                     }
                 } else {
+                    logs = logs + (Log.ERROR to "[-] Failed to write config")
                     saveError = "Error: Failed to write config"
                 }
             } catch (e: Exception) {
+                logs = logs + (Log.ERROR to "[-] ${e.message}")
                 saveError = "Error: ${e.message}"
             } finally {
                 isSaving = false

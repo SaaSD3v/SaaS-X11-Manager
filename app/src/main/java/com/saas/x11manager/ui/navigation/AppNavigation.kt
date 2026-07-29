@@ -50,8 +50,7 @@ fun AppNavigation(viewModel: HomeViewModel) {
     if (navigateToEdit != null) {
         EditContainerScreen(
             containerName = navigateToEdit,
-            viewModel = viewModel,
-            onBack = {
+            onDismiss = {
                 viewModel.onEditNavigated()
                 viewModel.refresh()
             }
