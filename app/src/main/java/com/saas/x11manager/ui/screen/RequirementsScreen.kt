@@ -22,7 +22,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.saas.x11manager.ui.component.StatusPill
 import com.saas.x11manager.util.*
 
 @Composable
@@ -250,29 +249,12 @@ private fun RequirementSection(
                     }
                 }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    if (sectionOk) {
-                        StatusPill(
-                            label = "OK",
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    } else if (failedCount > 0) {
-                        StatusPill(
-                            label = "$failedCount FAILED",
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-
-                    Icon(
-                        if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    )
-                }
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
             }
 
             AnimatedVisibility(
@@ -355,14 +337,11 @@ private fun CheckRow(check: RequirementCheck) {
         }
 
         when (check.status) {
-            CheckStatus.OK -> StatusPill(label = "OK", color = MaterialTheme.colorScheme.primary)
-            CheckStatus.Failed -> StatusPill(label = "MISSING", color = MaterialTheme.colorScheme.error)
-            CheckStatus.Warning -> StatusPill(label = "WARN", color = MaterialTheme.colorScheme.tertiary)
             CheckStatus.Checking -> CircularProgressIndicator(
                 modifier = Modifier.size(16.dp),
                 strokeWidth = 2.dp
             )
-            CheckStatus.Info -> {}
+            else -> {}
         }
     }
 }
