@@ -59,6 +59,10 @@ class HomeViewModel : ViewModel() {
     private val _rootProvider = MutableStateFlow("")
     val rootProvider: StateFlow<String> = _rootProvider
 
+    init {
+        refresh()
+    }
+
     fun refresh() {
         viewModelScope.launch {
             _isLoading.value = true
