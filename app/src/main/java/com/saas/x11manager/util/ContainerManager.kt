@@ -3,6 +3,7 @@ package com.saas.x11manager.util
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 
 enum class ContainerStatus { RUNNING, STOPPED, UNKNOWN }
 
@@ -27,222 +28,157 @@ data class ContainerInfo(
 
 object ContainerManager {
 
-    private const val PA_BIND_MOUNT = "/data/data/com.termux/files/usr/tmp/.pulse-socket:/tmp/.pulse-socket"
+    private const val PA_BIND = "/data/data/com.termux/files/usr/tmp/.pulse-socket:/tmp/.pulse-socket"
 
-    suspend fun listContainers(log: ((String) -> Unit)? = null): List<ContainerInfo> = withContext(Dispatchers.IO) {
+    suspend fun listContainers(): List<ContainerInfo> = withContext(Dispatchers.IO) {
         val containers = mutableListOf<ContainerInfo>()
-        log?.invoke("Scanning containers...")
-
         try {
             val result = Shell.cmd("ls -d '${Constants.CONTAINERS_DIR}'/*/ 2>/dev/null").exec()
-            if (!result.isSuccess || result.out.isEmpty()) {
-                log?.invoke("No containers found")
-                return@withContext containers
-            }
+            if (!result.isSuccess || result.out.isEmpty()) return@withContext containers
 
             for (line in result.out) {
                 val trimmed = line.trim()
                 if (trimmed.isEmpty() || !trimmed.startsWith(Constants.CONTAINERS_DIR)) continue
+                val name = trimmed.removeSuffix("/").substringAfterLast("/")
+                if (name.isEmpty()) continue
 
-                val sanitizedName = trimmed.removeSuffix("/").substringAfterLast("/")
-                if (sanitizedName.isEmpty()) continue
-
-                val configPath = "${Constants.CONTAINERS_DIR}/$sanitizedName/${Constants.CONFIG_FILE}"
+                val configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
                 if (!Shell.cmd("test -f '$configPath'").exec().isSuccess) continue
 
-                val config = loadContainerConfig(configPath, sanitizedName) ?: continue
-
-                val (isRunning, pid) = checkContainerStatus(config.name)
-                val status = if (isRunning) ContainerStatus.RUNNING else ContainerStatus.STOPPED
-
-                log?.invoke("Found: ${config.name} (${if (isRunning) "running" else "stopped"})")
-                containers.add(config.copy(status = status, pid = pid))
+                val config = loadConfig(configPath, name) ?: continue
+                val (running, pid) = getStatus(config.name)
+                containers.add(config.copy(
+                    status = if (running) ContainerStatus.RUNNING else ContainerStatus.STOPPED,
+                    pid = pid
+                ))
             }
-        } catch (e: Exception) {
-            log?.invoke("Error: ${e.message}")
-        }
-        log?.invoke("${containers.size} container(s) found")
+        } catch (_: Exception) {}
         containers
     }
 
-    private fun loadContainerConfig(configPath: String, defaultName: String): ContainerInfo? {
+    private fun loadConfig(path: String, defaultName: String): ContainerInfo? {
         try {
-            val readResult = Shell.cmd("cat '$configPath' 2>/dev/null").exec()
-            if (!readResult.isSuccess || readResult.out.isEmpty()) return null
+            val r = Shell.cmd("cat '$path' 2>/dev/null").exec()
+            if (!r.isSuccess || r.out.isEmpty()) return null
 
-            val configMap = mutableMapOf<String, String>()
-            readResult.out.forEach { line ->
-                val trimmed = line.trim()
-                if (trimmed.isEmpty() || trimmed.startsWith("#")) return@forEach
-                val parts = trimmed.split("=", limit = 2)
-                if (parts.size == 2) {
-                    configMap[parts[0].trim()] = parts[1].trim()
-                }
+            val m = mutableMapOf<String, String>()
+            r.out.forEach { line ->
+                val t = line.trim()
+                if (t.isEmpty() || t.startsWith("#")) return@forEach
+                val p = t.split("=", limit = 2)
+                if (p.size == 2) m[p[0].trim()] = p[1].trim()
             }
 
-            val containerName = configMap["name"] ?: defaultName
-            val useSparseImage = configMap["use_sparse_image"] == "1"
-
-            val rootfsPath = configMap["rootfs_path"] ?: if (useSparseImage) {
+            val name = m["name"] ?: defaultName
+            val sparse = m["use_sparse_image"] == "1"
+            val rootfs = m["rootfs_path"] ?: if (sparse) {
                 "${Constants.CONTAINERS_DIR}/$defaultName/rootfs.img"
             } else {
                 "${Constants.CONTAINERS_DIR}/$defaultName/rootfs"
             }
-
-            if (rootfsPath.isBlank() || !Shell.cmd("test -f '$rootfsPath'").exec().isSuccess) return null
+            if (rootfs.isBlank() || !Shell.cmd("test -f '$rootfs'").exec().isSuccess) return null
 
             return ContainerInfo(
-                name = containerName,
-                rootfsPath = rootfsPath,
-                configPath = configPath,
-                hostname = configMap["hostname"] ?: "",
-                enableTermuxX11 = configMap["enable_termux_x11"] == "1",
-                enableLegacyTermuxX11 = configMap["enable_legacy_termux_x11"] == "1",
-                enableHwAccess = configMap["enable_hw_access"] == "1",
-                enablePulseAudio = configMap["enable_pulseaudio"] == "1",
-                netMode = configMap["net_mode"] ?: "nat",
-                bindMounts = configMap["bind_mounts"] ?: ""
+                name = name, rootfsPath = rootfs, configPath = path,
+                hostname = m["hostname"] ?: "",
+                enableTermuxX11 = m["enable_termux_x11"] == "1",
+                enableLegacyTermuxX11 = m["enable_legacy_termux_x11"] == "1",
+                enableHwAccess = m["enable_hw_access"] == "1",
+                enablePulseAudio = m["enable_pulseaudio"] == "1",
+                netMode = m["net_mode"] ?: "nat",
+                bindMounts = m["bind_mounts"] ?: ""
             )
-        } catch (e: Exception) {
-            return null
-        }
+        } catch (_: Exception) { return null }
     }
 
     suspend fun getContainerInfo(name: String): ContainerInfo? = withContext(Dispatchers.IO) {
-        val configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
-        if (!Shell.cmd("test -f '$configPath'").exec().isSuccess) return@withContext null
-        val config = loadContainerConfig(configPath, name) ?: return@withContext null
-        val (isRunning, pid) = checkContainerStatus(config.name)
-        val status = if (isRunning) ContainerStatus.RUNNING else ContainerStatus.STOPPED
-        config.copy(status = status, pid = pid)
+        val path = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
+        if (!Shell.cmd("test -f '$path'").exec().isSuccess) return@withContext null
+        val c = loadConfig(path, name) ?: return@withContext null
+        val (running, pid) = getStatus(c.name)
+        c.copy(status = if (running) ContainerStatus.RUNNING else ContainerStatus.STOPPED, pid = pid)
     }
 
-    suspend fun updateContainerConfig(
+    suspend fun updatePulseAudioBindMount(
         name: String,
-        enablePulseAudioFix: Boolean
+        enable: Boolean,
+        cacheDir: File
     ): Boolean = withContext(Dispatchers.IO) {
         try {
-            val configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
-            val readResult = Shell.cmd("cat '$configPath' 2>/dev/null").exec()
-            if (!readResult.isSuccess || readResult.out.isEmpty()) return@withContext false
+            val path = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
+            val r = Shell.cmd("cat '$path' 2>/dev/null").exec()
+            if (!r.isSuccess || r.out.isEmpty()) return@withContext false
 
-            val lines = readResult.out.toMutableList()
-            var bindMountsIndex = -1
-
+            val lines = r.out.toMutableList()
+            var bindIdx = -1
             for (i in lines.indices) {
-                val line = lines[i].trim()
-                if (line.startsWith("bind_mounts=")) {
-                    bindMountsIndex = i
-                    break
-                }
+                if (lines[i].trim().startsWith("bind_mounts=")) { bindIdx = i; break }
             }
 
-            if (enablePulseAudioFix) {
-                if (bindMountsIndex >= 0) {
-                    val currentMounts = lines[bindMountsIndex].trim().substringAfter("bind_mounts=")
-                    if (!currentMounts.contains(PA_BIND_MOUNT)) {
-                        val newMounts = if (currentMounts.isBlank()) PA_BIND_MOUNT else "$currentMounts,$PA_BIND_MOUNT"
-                        lines[bindMountsIndex] = "bind_mounts=$newMounts"
+            if (enable) {
+                if (bindIdx >= 0) {
+                    val cur = lines[bindIdx].substringAfter("bind_mounts=")
+                    if (!cur.contains(PA_BIND)) {
+                        lines[bindIdx] = "bind_mounts=${if (cur.isBlank()) PA_BIND else "$cur,$PA_BIND"}"
                     }
                 } else {
-                    lines.add("bind_mounts=$PA_BIND_MOUNT")
+                    lines.add("bind_mounts=$PA_BIND")
                 }
             } else {
-                if (bindMountsIndex >= 0) {
-                    val currentMounts = lines[bindMountsIndex].trim().substringAfter("bind_mounts=")
-                    val newMounts = currentMounts
-                        .replace(",$PA_BIND_MOUNT", "")
-                        .replace("$PA_BIND_MOUNT,", "")
-                        .replace(PA_BIND_MOUNT, "")
-                        .trim()
-                    if (newMounts.isEmpty()) {
-                        lines.removeAt(bindMountsIndex)
-                    } else {
-                        lines[bindMountsIndex] = "bind_mounts=$newMounts"
-                    }
+                if (bindIdx >= 0) {
+                    val cur = lines[bindIdx].substringAfter("bind_mounts=")
+                    val new = cur.replace(",$PA_BIND", "").replace("$PA_BIND,", "").replace(PA_BIND, "").trim()
+                    if (new.isEmpty()) lines.removeAt(bindIdx) else lines[bindIdx] = "bind_mounts=$new"
                 }
             }
 
-            val content = lines.joinToString("\n") + "\n"
-            val tmpPath = "${configPath}.tmp"
-            Shell.cmd("cat > '$tmpPath'").exec(content)
-            Shell.cmd("mv '$tmpPath' '$configPath'").exec()
+            // Write to cacheDir temp file, then cp (Droidspaces pattern)
+            val tmpFile = File(cacheDir, "container_$name.config")
+            tmpFile.writeText(lines.joinToString("\n") + "\n")
+            val cpResult = Shell.cmd("cp '${tmpFile.absolutePath}' '$path' 2>&1").exec()
+            tmpFile.delete()
 
+            if (!cpResult.isSuccess) return@withContext false
+            Shell.cmd("chmod 644 '$path' 2>/dev/null").exec()
             true
-        } catch (e: Exception) {
-            false
-        }
+        } catch (_: Exception) { false }
     }
 
-    private fun checkContainerStatus(name: String): Pair<Boolean, Int?> {
+    private fun getStatus(name: String): Pair<Boolean, Int?> {
         return try {
-            val quoted = "'$name'"
-            val result = Shell.cmd(
-                "${Constants.DS_BINARY_PATH} --name=$quoted pid 2>/dev/null"
-            ).exec()
-            if (result.isSuccess && result.out.isNotEmpty()) {
-                val pidStr = result.out.first().trim()
-                val pid = pidStr.toIntOrNull()
+            val r = Shell.cmd("${Constants.DS_BINARY_PATH} --name='$name' pid 2>/dev/null").exec()
+            if (r.isSuccess && r.out.isNotEmpty()) {
+                val pid = r.out.first().trim().toIntOrNull()
                 if (pid != null && pid > 0) {
                     val alive = Shell.cmd("kill -0 $pid 2>/dev/null").exec()
                     if (alive.isSuccess) Pair(true, pid) else Pair(false, null)
-                } else {
-                    Pair(false, null)
-                }
-            } else {
-                Pair(false, null)
-            }
-        } catch (_: Exception) {
-            Pair(false, null)
-        }
+                } else Pair(false, null)
+            } else Pair(false, null)
+        } catch (_: Exception) { Pair(false, null) }
     }
 
     suspend fun checkContainerStatusPublic(name: String): Pair<Boolean, Int?> = withContext(Dispatchers.IO) {
-        checkContainerStatus(name)
+        getStatus(name)
     }
 
     suspend fun startContainer(name: String, logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
         try {
-            val configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
-            val result = Shell.cmd(
-                "${Constants.DS_BINARY_PATH} --config='$configPath' start 2>&1"
+            val r = Shell.cmd(
+                "${Constants.DS_BINARY_PATH} --config='${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}' start 2>&1"
             ).exec()
-            val output = result.out.joinToString("\n")
-            if (output.isNotBlank()) logger?.i(output)
-            if (result.err.isNotEmpty()) {
-                result.err.forEach { line ->
-                    val trimmed = line.trim()
-                    if (trimmed.isNotEmpty()) logger?.w(trimmed)
-                }
-            }
-            result.isSuccess
-        } catch (e: Exception) {
-            logger?.e("[-] Error: ${e.message}")
-            false
-        }
+            val out = r.out.joinToString("\n")
+            if (out.isNotBlank()) logger?.i(out)
+            r.err.forEach { val t = it.trim(); if (t.isNotEmpty()) logger?.w(t) }
+            r.isSuccess
+        } catch (e: Exception) { logger?.e("[-] Error: ${e.message}"); false }
     }
 
     suspend fun stopContainer(name: String, logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
         try {
-            val result = Shell.cmd("${Constants.DS_BINARY_PATH} --name='$name' stop 2>&1").exec()
-            val output = result.out.joinToString("\n")
-            if (output.isNotBlank()) logger?.i(output)
-            result.isSuccess
-        } catch (e: Exception) {
-            logger?.e("[-] Error: ${e.message}")
-            false
-        }
-    }
-
-    suspend fun restartContainer(name: String, logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val result = Shell.cmd("${Constants.DS_BINARY_PATH} --name='$name' restart 2>&1").exec()
-            val output = result.out.joinToString("\n")
-            if (output.isNotBlank()) logger?.i(output)
-            result.isSuccess
-        } catch (e: Exception) {
-            logger?.e("[-] Error: ${e.message}")
-            false
-        }
+            val r = Shell.cmd("${Constants.DS_BINARY_PATH} --name='$name' stop 2>&1").exec()
+            val out = r.out.joinToString("\n")
+            if (out.isNotBlank()) logger?.i(out)
+            r.isSuccess
+        } catch (e: Exception) { logger?.e("[-] Error: ${e.message}"); false }
     }
 }

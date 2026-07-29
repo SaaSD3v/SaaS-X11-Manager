@@ -1,291 +1,198 @@
 package com.saas.x11manager.ui.screen
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.saas.x11manager.data.prefs.UserPreferences
+import com.saas.x11manager.ui.component.TerminalConsole
+import com.saas.x11manager.ui.component.TerminalLogger
+import com.saas.x11manager.ui.theme.SaaSCatppuccin
 import com.saas.x11manager.util.ContainerManager
-import kotlinx.coroutines.delay
+import com.saas.x11manager.util.ContainerStatus
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditContainerScreen(
     containerName: String,
-    viewModel: HomeViewModel,
-    onBack: () -> Unit
+    onDismiss: () -> Unit,
+    preferences: UserPreferences,
+    viewModel: EditContainerViewModel = viewModel()
 ) {
     val scope = rememberCoroutineScope()
-    var pulseAudioFix by remember { mutableStateOf(false) }
-    var isSaving by remember { mutableStateOf(false) }
-    var isSaved by remember { mutableStateOf(false) }
-    var hasChanges by remember { mutableStateOf(false) }
-    var loaded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     LaunchedEffect(containerName) {
-        val info = ContainerManager.getContainerInfo(containerName)
-        if (info != null) {
-            pulseAudioFix = info.hasPulseAudioBindMount
-        }
-        loaded = true
+        viewModel.load(containerName, context.cacheDir)
     }
+
+    val name = viewModel.name
+    val hostname = viewModel.hostname
+    val status = viewModel.status
+    val enablePulseAudio = viewModel.enablePulseAudio
+    val logs = viewModel.logs
+    val isSaving = viewModel.isSaving
+    val saveError = viewModel.saveError
+
+    val terminalColors = SaaSCatppuccin.Terminal
+    val terminalColorsDark = SaaSCatppuccin.TerminalDark
+    val palette = preferences.themePalette(terminalColors, terminalColorsDark)
 
     Scaffold(
-        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Computer,
-                            contentDescription = null,
-                            modifier = Modifier.padding(end = 8.dp).size(24.dp)
-                        )
-                        Text(
-                            text = "Edit $containerName",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                },
+                title = { Text(name.ifEmpty { containerName }) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                     }
                 },
-                windowInsets = WindowInsets.statusBars
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
             )
         },
-        bottomBar = {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surfaceContainer
+        containerColor = MaterialTheme.colorScheme.background
+    ) { padding ->
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Spacer(Modifier.height(8.dp))
+
+            // PulseAudio Fix toggle
+            SettingsToggleCard(
+                title = "PulseAudio Fix",
+                description = "Adds PA socket bind mount",
+                enabled = enablePulseAudio,
+                palette = palette,
+                onToggle = { viewModel.enablePulseAudio = it }
+            )
+
+            // Status row
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = SaaSCatppuccin.Surface),
+                shape = RoundedCornerShape(20.dp),
+                elevation = CardDefaults.cardElevation(0.dp)
             ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    HorizontalDivider(
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                        thickness = 1.dp
-                    )
-                    val buttonColor by animateColorAsState(
-                        targetValue = when {
-                            isSaved -> MaterialTheme.colorScheme.primaryContainer
-                            isSaving -> MaterialTheme.colorScheme.primary
-                            hasChanges -> MaterialTheme.colorScheme.primary
-                            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                Row(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Status:", color = SaaSCatppuccin.Text, fontSize = 13.sp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        when (status) {
+                            ContainerStatus.RUNNING -> "Running"
+                            ContainerStatus.STOPPED -> "Stopped"
+                            else -> "Unknown"
                         },
-                        label = "ButtonColor"
-                    )
-                    Surface(
-                        onClick = {
-                            if (hasChanges && !isSaving && !isSaved) {
-                                isSaving = true
-                                scope.launch {
-                                    val success = ContainerManager.updateContainerConfig(
-                                        name = containerName,
-                                        enablePulseAudioFix = pulseAudioFix
-                                    )
-                                    isSaving = false
-                                    if (success) {
-                                        isSaved = true
-                                        hasChanges = false
-                                        delay(1500)
-                                        isSaved = false
-                                    }
-                                }
-                            }
+                        color = when (status) {
+                            ContainerStatus.RUNNING -> SaaSCatppuccin.Green
+                            ContainerStatus.STOPPED -> SaaSCatppuccin.Text
+                            else -> SaaSCatppuccin.Overlay0
                         },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        shape = RoundedCornerShape(20.dp),
-                        color = buttonColor,
-                        border = BorderStroke(
-                            1.dp,
-                            if (hasChanges) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 16.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (isSaving) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                            } else if (isSaved) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp),
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                            }
-                            Text(
-                                text = when {
-                                    isSaving -> "Saving..."
-                                    isSaved -> "Saved"
-                                    hasChanges -> "Save Changes"
-                                    else -> "No Changes"
-                                },
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = when {
-                                    isSaved -> MaterialTheme.colorScheme.onPrimaryContainer
-                                    hasChanges -> MaterialTheme.colorScheme.onPrimary
-                                    else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                                }
-                            )
-                        }
-                    }
+                        fontSize = 13.sp, fontFamily = FontFamily.Monospace
+                    )
                 }
             }
-        }
-    ) { innerPadding ->
-        if (loaded) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+
+            // Save button
+            val buttonColor by animateColorAsState(
+                targetValue = when {
+                    isSaving -> SaaSCatppuccin.Surface1
+                    saveError?.contains("OK") == true -> SaaSCatppuccin.Mauve
+                    else -> SaaSCatppuccin.Mauve
+                },
+                animationSpec = tween(200)
+            )
+
+            Button(
+                onClick = { viewModel.save() },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = buttonColor),
+                shape = RoundedCornerShape(20.dp),
+                enabled = !isSaving && name.isNotEmpty()
             ) {
-                Spacer(modifier = Modifier.height(8.dp))
+                if (isSaving) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = SaaSCatppuccin.Text)
+                } else {
+                    Text("Save", color = SaaSCatppuccin.Base, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+            }
 
-                SectionHeader(title = "Integration")
-
-                ToggleCard(
-                    icon = Icons.Default.VolumeUp,
-                    title = "PulseAudio Fix",
-                    subtitle = if (pulseAudioFix) "Audio via host PulseAudio" else "Default audio",
-                    checked = pulseAudioFix,
-                    onCheckedChange = { newValue ->
-                        pulseAudioFix = newValue
-                        hasChanges = true
-                        isSaved = false
-                    }
+            if (saveError != null) {
+                val isError = !saveError.contains("OK")
+                Text(
+                    saveError,
+                    color = if (isError) SaaSCatppuccin.Red else SaaSCatppuccin.Green,
+                    fontSize = 11.sp, fontFamily = FontFamily.Monospace
                 )
-
-                if (pulseAudioFix) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Default.Info,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                "Starts PulseAudio before X11. Fixes audio when Droidspaces bridge fails.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(80.dp))
             }
-        } else {
-            Box(modifier = Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+
+            // Logs
+            if (logs.isNotEmpty()) {
+                TerminalConsole(
+                    logs = logs,
+                    palette = palette,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp, max = 300.dp)
+                )
             }
+
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
 
 @Composable
-private fun SectionHeader(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(vertical = 4.dp)
-    )
-}
-
-@Composable
-private fun ToggleCard(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+private fun SettingsToggleCard(
     title: String,
-    subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    description: String,
+    enabled: Boolean,
+    palette: com.saas.x11manager.ui.theme.TerminalPalette,
+    onToggle: (Boolean) -> Unit
 ) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .clickable { onCheckedChange(!checked) },
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = SaaSCatppuccin.Surface),
         shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+        elevation = CardDefaults.cardElevation(0.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                    tint = if (checked) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
-                }
+            Column(Modifier.weight(1f)) {
+                Text(title, color = SaaSCatppuccin.Text, fontSize = 14.sp)
+                Text(description, color = SaaSCatppuccin.Subtext0, fontSize = 11.sp)
             }
             Switch(
-                checked = checked,
-                onCheckedChange = null,
+                checked = enabled,
+                onCheckedChange = onToggle,
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                    checkedTrackColor = MaterialTheme.colorScheme.primary,
-                    uncheckedThumbColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.8f),
-                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    uncheckedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                    checkedThumbColor = SaaSCatppuccin.Mauve,
+                    checkedTrackColor = SaaSCatppuccin.Surface0
                 )
             )
         }

@@ -8,66 +8,60 @@ enum class LoaderStatus { Running, Stopped }
 
 object X11SessionManager {
 
+    private const val PA_SCRIPT = "/data/local/tmp/pulseaudio_fix.sh"
+
     suspend fun getLoaderStatus(): LoaderStatus = withContext(Dispatchers.IO) {
         try {
-            val sockCheck = Shell.cmd("test -S '${Constants.X11_SOCK_FILE}' && echo ok").exec()
-            if (sockCheck.isSuccess && sockCheck.out.isNotEmpty() && sockCheck.out[0].contains("ok")) {
-                LoaderStatus.Running
-            } else {
-                LoaderStatus.Stopped
-            }
-        } catch (_: Exception) {
-            LoaderStatus.Stopped
-        }
+            val r = Shell.cmd("test -S '${Constants.X11_SOCK_FILE}' && echo ok").exec()
+            if (r.isSuccess && r.out.isNotEmpty() && r.out[0].contains("ok")) LoaderStatus.Running
+            else LoaderStatus.Stopped
+        } catch (_: Exception) { LoaderStatus.Stopped }
     }
 
     suspend fun getLoaderPid(): Int? = withContext(Dispatchers.IO) {
         try {
-            val result = Shell.cmd("pidof termux-x11 2>/dev/null").exec()
-            result.out.firstOrNull()?.trim()?.toIntOrNull()
+            Shell.cmd("pidof termux-x11 2>/dev/null").exec().out.firstOrNull()?.trim()?.toIntOrNull()
         } catch (_: Exception) { null }
     }
 
     suspend fun startPulseAudio(logger: ContainerLogger? = null): Result<Int> = withContext(Dispatchers.IO) {
         try {
-            logger?.i("[*] Preparing PulseAudio...")
+            logger?.i("[*] Starting PulseAudio...")
 
             Shell.cmd("killall pulseaudio 2>/dev/null").exec()
-            Shell.cmd("rm -f '${Constants.PULSE_SOCK}'").exec()
-            Shell.cmd("rm -rf /data/data/com.termux/files/usr/tmp/pulse-* 2>/dev/null").exec()
+            Shell.cmd("rm -f '${Constants.PULSE_SOCK}' 2>/dev/null").exec()
 
-            logger?.i("[*] Starting PulseAudio daemon...")
-            val script = """
-                #!/system/bin/sh
-                run-as com.termux ${Constants.PULSE_BIN} --load 'module-native-protocol-unix socket=${Constants.PULSE_SOCK} auth-anonymous=1' --exit-idle-time=-1 --daemonize=yes --use-pid-file=false --disallow-exit 2>&1
-            """.trimIndent()
-            Shell.cmd("echo '${script.replace("'", "'\\''")}' > /data/local/tmp/start_pa.sh").exec()
-            Shell.cmd("sh /data/local/tmp/start_pa.sh").exec()
+            // Run .sh placeholder (like X11 pattern)
+            Shell.cmd("sh $PA_SCRIPT &").exec()
 
-            logger?.i("[*] Waiting for socket (5s timeout)...")
+            logger?.i("[*] Waiting for socket (5s)...")
             var wait = 0
             while (wait < 5) {
                 Thread.sleep(1000)
                 wait++
-                val sockCheck = Shell.cmd("test -S '${Constants.PULSE_SOCK}' && echo ok").exec()
-                if (sockCheck.isSuccess && sockCheck.out.isNotEmpty() && sockCheck.out[0].contains("ok")) {
-                    break
-                }
+                val r = Shell.cmd("test -S '${Constants.PULSE_SOCK}' && echo ok").exec()
+                if (r.isSuccess && r.out.isNotEmpty() && r.out[0].contains("ok")) break
             }
 
-            val sockExists = Shell.cmd("test -S '${Constants.PULSE_SOCK}' && echo ok").exec()
-            if (sockExists.isSuccess && sockExists.out.isNotEmpty() && sockExists.out[0].contains("ok")) {
+            val r = Shell.cmd("test -S '${Constants.PULSE_SOCK}' && echo ok").exec()
+            if (r.isSuccess && r.out.isNotEmpty() && r.out[0].contains("ok")) {
                 val pid = getPulseAudioPid() ?: 0
                 logger?.i("[+] PulseAudio active (PID=$pid)")
                 Result.success(pid)
             } else {
-                logger?.e("[-] PulseAudio socket not created")
-                Result.failure(Exception("PulseAudio socket not created"))
+                logger?.w("[!] PulseAudio socket not created (placeholder .sh)")
+                Result.failure(Exception("PA socket not created"))
             }
         } catch (e: Exception) {
-            logger?.e("[-] PulseAudio error: ${e.message}")
+            logger?.e("[-] PA error: ${e.message}")
             Result.failure(e)
         }
+    }
+
+    suspend fun getPulseAudioPid(): Int? = withContext(Dispatchers.IO) {
+        try {
+            Shell.cmd("pidof pulseaudio 2>/dev/null").exec().out.firstOrNull()?.trim()?.toIntOrNull()
+        } catch (_: Exception) { null }
     }
 
     suspend fun stopPulseAudio(logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
@@ -77,19 +71,9 @@ object X11SessionManager {
                 Shell.cmd("kill -9 $pid 2>/dev/null").exec()
                 logger?.i("[+] Stopped PulseAudio (PID=$pid)")
             }
-            Shell.cmd("rm -f '${Constants.PULSE_SOCK}'").exec()
-            Shell.cmd("rm -rf /data/data/com.termux/files/usr/tmp/pulse-* 2>/dev/null").exec()
+            Shell.cmd("rm -f '${Constants.PULSE_SOCK}' 2>/dev/null").exec()
             true
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    suspend fun getPulseAudioPid(): Int? = withContext(Dispatchers.IO) {
-        try {
-            val result = Shell.cmd("pidof pulseaudio 2>/dev/null").exec()
-            result.out.firstOrNull()?.trim()?.toIntOrNull()
-        } catch (_: Exception) { null }
+        } catch (_: Exception) { false }
     }
 
     suspend fun startLoader(logger: ContainerLogger? = null): Result<Int> = withContext(Dispatchers.IO) {
@@ -102,7 +86,7 @@ object X11SessionManager {
                     val trimmed = pid.trim()
                     if (trimmed.isNotEmpty()) {
                         Shell.cmd("kill -9 $trimmed 2>/dev/null").exec()
-                        logger?.i("[+] Killed stale process (PID=$trimmed)")
+                        logger?.i("[+] Killed stale (PID=$trimmed)")
                     }
                 }
             }
@@ -119,19 +103,17 @@ object X11SessionManager {
                 "--nice-name=termux-x11 com.termux.x11.Loader :0 &"
             ).exec()
 
-            logger?.i("[*] Waiting for socket (10s timeout)...")
+            logger?.i("[*] Waiting for socket (10s)...")
             var wait = 0
             while (wait < 10) {
                 Thread.sleep(1000)
                 wait++
-                val sockCheck = Shell.cmd("test -S '${Constants.X11_SOCK_FILE}' && echo ok").exec()
-                if (sockCheck.isSuccess && sockCheck.out.isNotEmpty() && sockCheck.out[0].contains("ok")) {
-                    break
-                }
+                val r = Shell.cmd("test -S '${Constants.X11_SOCK_FILE}' && echo ok").exec()
+                if (r.isSuccess && r.out.isNotEmpty() && r.out[0].contains("ok")) break
             }
 
-            val sockExists = Shell.cmd("test -S '${Constants.X11_SOCK_FILE}' && echo ok").exec()
-            if (sockExists.isSuccess && sockExists.out.isNotEmpty() && sockExists.out[0].contains("ok")) {
+            val r = Shell.cmd("test -S '${Constants.X11_SOCK_FILE}' && echo ok").exec()
+            if (r.isSuccess && r.out.isNotEmpty() && r.out[0].contains("ok")) {
                 val pid = getLoaderPid() ?: 0
                 logger?.i("[+] X11 loader active (PID=$pid)")
                 Result.success(pid)
@@ -155,20 +137,13 @@ object X11SessionManager {
             Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/X* 2>/dev/null").exec()
             Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/*-lock 2>/dev/null").exec()
             true
-        } catch (_: Exception) {
-            false
-        }
+        } catch (_: Exception) { false }
     }
 
     suspend fun openTermuxX11(): Boolean = withContext(Dispatchers.IO) {
         try {
-            val result = Shell.cmd(
-                "am start -n ${Constants.TERMUX_X11_PACKAGE}/.MainActivity 2>/dev/null"
-            ).exec()
-            result.isSuccess
-        } catch (_: Exception) {
-            false
-        }
+            Shell.cmd("am start -n ${Constants.TERMUX_X11_PACKAGE}/.MainActivity 2>/dev/null").exec().isSuccess
+        } catch (_: Exception) { false }
     }
 
     suspend fun startX11Session(
@@ -177,15 +152,11 @@ object X11SessionManager {
         logger: ContainerLogger? = null
     ) = withContext(Dispatchers.IO) {
         try {
-            logger?.i("--- Starting X11 Session ---")
+            logger?.i("--- Starting Session ---")
             logger?.i("")
 
             if (enablePulseAudioFix) {
-                val paResult = startPulseAudio(logger)
-                paResult.onFailure { e ->
-                    logger?.w("[!] PulseAudio failed: ${e.message}")
-                    logger?.i("[*] Continuing without audio...")
-                }
+                startPulseAudio(logger)
                 logger?.i("")
             }
 
@@ -203,7 +174,7 @@ object X11SessionManager {
                 return@withContext
             }
 
-            logger?.i("[*] Waiting for boot (15s timeout)...")
+            logger?.i("[*] Waiting for boot (15s)...")
             var wait = 0
             while (wait < 15) {
                 Thread.sleep(1000)
@@ -216,9 +187,7 @@ object X11SessionManager {
             }
 
             val (isRunning, _) = ContainerManager.checkContainerStatusPublic(containerName)
-            if (!isRunning) {
-                logger?.w("[!] Container may still be booting")
-            }
+            if (!isRunning) logger?.w("[!] Container may still be booting")
 
             logger?.i("[*] Opening Termux:X11...")
             openTermuxX11()
@@ -237,9 +206,7 @@ object X11SessionManager {
             stopLoader(logger)
             val containers = ContainerManager.listContainers()
             for (c in containers) {
-                if (c.isRunning) {
-                    ContainerManager.stopContainer(c.name, logger)
-                }
+                if (c.isRunning) ContainerManager.stopContainer(c.name, logger)
             }
             logger?.i("[+] All stopped")
         } catch (e: Exception) {

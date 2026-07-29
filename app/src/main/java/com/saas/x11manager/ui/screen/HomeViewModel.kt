@@ -83,9 +83,7 @@ class HomeViewModel : ViewModel() {
                 _loaderStatus.value = X11SessionManager.getLoaderStatus()
                 _loaderPid.value = if (_loaderStatus.value == LoaderStatus.Running) {
                     X11SessionManager.getLoaderPid()
-                } else {
-                    null
-                }
+                } else null
 
                 _containers.value = ContainerManager.listContainers()
 
@@ -112,16 +110,13 @@ class HomeViewModel : ViewModel() {
             try {
                 X11SessionManager.startX11Session(
                     containerName = container.name,
-                    enablePulseAudioFix = container.hasPulseAudioBindMount,
+                    enablePulseAudioFix = container.enablePulseAudio,
                     logger = logger
                 )
-
                 _loaderStatus.value = X11SessionManager.getLoaderStatus()
                 _loaderPid.value = if (_loaderStatus.value == LoaderStatus.Running) {
                     X11SessionManager.getLoaderPid()
-                } else {
-                    null
-                }
+                } else null
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "startX11 failed", e)
                 logger.e("Error: ${e.message}")
@@ -175,14 +170,14 @@ class HomeViewModel : ViewModel() {
         if (logs.isEmpty()) {
             val status = if (container.isRunning) "Running" else "Stopped"
             val pidLine = if (container.pid != null) "  PID: ${container.pid}" else ""
-            logs.add(android.util.Log.INFO to "Container: ${container.name}")
-            logs.add(android.util.Log.INFO to "  Status: $status$pidLine")
-            logs.add(android.util.Log.INFO to "  Rootfs: ${container.rootfsPath}")
+            logs.add(Log.INFO to "Container: ${container.name}")
+            logs.add(Log.INFO to "  Status: $status$pidLine")
+            logs.add(Log.INFO to "  Rootfs: ${container.rootfsPath}")
             if (container.hostname.isNotEmpty()) {
-                logs.add(android.util.Log.INFO to "  Hostname: ${container.hostname}")
+                logs.add(Log.INFO to "  Hostname: ${container.hostname}")
             }
-            logs.add(android.util.Log.INFO to "")
-            logs.add(android.util.Log.INFO to "Start X11 session to see live logs.")
+            logs.add(Log.INFO to "")
+            logs.add(Log.INFO to "Start X11 session to see live logs.")
         }
     }
 
