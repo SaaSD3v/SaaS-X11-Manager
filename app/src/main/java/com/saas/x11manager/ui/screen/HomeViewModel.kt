@@ -62,13 +62,15 @@ class HomeViewModel : ViewModel() {
     private val _rootProvider = MutableStateFlow("")
     val rootProvider: StateFlow<String> = _rootProvider
 
+    private var initialized = false
+
     init {
         refresh()
     }
 
     fun refresh() {
         viewModelScope.launch {
-            _isLoading.value = true
+            if (!initialized) _isLoading.value = true
             try {
                 _rootStatus.value = RootChecker.checkRootAccess()
                 _rootProvider.value = RootChecker.getRootProvider()
@@ -88,6 +90,7 @@ class HomeViewModel : ViewModel() {
                 _kernelVersion.value = getSystemProp("ro.build.version.release")
                 _arch.value = getSystemProp("ro.product.cpu.abi")
                 _androidVersion.value = getSystemProp("ro.build.version.sdk")
+                initialized = true
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "refresh() failed", e)
             } finally {
@@ -166,7 +169,6 @@ class HomeViewModel : ViewModel() {
 
     fun dismissLogViewer() {
         showLogViewerFor = null
-        refresh()
     }
 
     fun clearLogsBuffer(name: String) {
