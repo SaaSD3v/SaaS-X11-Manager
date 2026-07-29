@@ -13,7 +13,6 @@ import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -86,6 +85,11 @@ class HomeViewModel : ViewModel() {
                     val x11Def = async(Dispatchers.IO) { TermuxChecker.checkX11Apk() }
                     val dsDef = async(Dispatchers.IO) { DroidspacesChecker.checkBackend() }
                     val containersDef = async(Dispatchers.IO) { ContainerManager.listContainers() }
+                    val loaderDef = async(Dispatchers.IO) {
+                        val status = X11SessionManager.getLoaderStatus()
+                        val pid = if (status == LoaderStatus.Running) X11SessionManager.getLoaderPid() else null
+                        status to pid
+                    }
                     val systemDef = async(Dispatchers.IO) {
                         coroutineScope {
                             val kernel = async { getSystemProp("ro.build.version.release") }
@@ -102,16 +106,14 @@ class HomeViewModel : ViewModel() {
                     _x11ApkStatus.value = x11Def.await()
                     _dsStatus.value = dsDef.await()
                     _containers.value = containersDef.await()
+                    val (ldStatus, ldPid) = loaderDef.await()
+                    _loaderStatus.value = ldStatus
+                    _loaderPid.value = ldPid
 
                     val (kernel, archVal, sdk) = systemDef.await()
                     _kernelVersion.value = kernel
                     _arch.value = archVal
                     _androidVersion.value = sdk
-
-                    _loaderStatus.value = X11SessionManager.getLoaderStatus()
-                    _loaderPid.value = if (_loaderStatus.value == LoaderStatus.Running) {
-                        X11SessionManager.getLoaderPid()
-                    } else null
                 }
                 initialized = true
             } catch (e: Exception) {
@@ -144,7 +146,6 @@ class HomeViewModel : ViewModel() {
                 Log.e("HomeViewModel", "startX11 failed", e)
                 logger.e("Error: ${e.message}")
             } finally {
-                delay(500)
                 runningOperationContainer = null
                 refresh()
             }
@@ -165,7 +166,6 @@ class HomeViewModel : ViewModel() {
                 Log.e("HomeViewModel", "stopContainer failed", e)
                 logger.e("Error: ${e.message}")
             } finally {
-                delay(500)
                 runningOperationContainer = null
                 refresh()
             }

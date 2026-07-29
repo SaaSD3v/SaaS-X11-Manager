@@ -33,39 +33,14 @@ object ContainerManager {
     suspend fun listContainers(): List<ContainerInfo> = withContext(Dispatchers.IO) {
         val containers = mutableListOf<ContainerInfo>()
         try {
-            val result = Shell.cmd("ls -d '${Constants.CONTAINERS_DIR}'/*/ 2>/dev/null").exec()
-            if (!result.isSuccess || result.out.isEmpty()) return@withContext containers
-
-            val names = result.out.mapNotNull { line ->
-                val trimmed = line.trim()
-                if (trimmed.isEmpty() || !trimmed.startsWith(Constants.CONTAINERS_DIR)) null
-                else trimmed.removeSuffix("/").substringAfterLast("/").ifEmpty { null }
-            }
-            if (names.isEmpty()) return@withContext containers
-
-            val configPaths = names.map { name -> "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}" }
-            val existCheck = Shell.cmd(
-                configPaths.joinToString(" && ") { "test -f '$it'" } + " 2>/dev/null; echo DONE"
-            ).exec()
-            val existingConfigs = if (existCheck.isSuccess) {
-                configPaths.filterIndexed { idx, _ ->
-                    existCheck.out.any { it.contains("DONE") }
-                }
-            } else configPaths
-
-            val allConfigs = mutableListOf<Pair<String, ContainerInfo>>()
-            for (name in names) {
-                val configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
-                val config = loadConfig(configPath, name) ?: continue
-                allConfigs.add(name to config)
-            }
-
+            val allConfigs = loadAllConfigs()
             if (allConfigs.isEmpty()) return@withContext containers
 
-            val runningPids = batchGetStatus(allConfigs.map { it.first })
+            val allNames = allConfigs.map { it.first }
+            val psMap = batchGetStatusViaPs(allNames)
 
             for ((name, config) in allConfigs) {
-                val (running, pid) = runningPids[name] ?: Pair(false, null)
+                val (running, pid) = psMap[name] ?: getStatus(name)
                 containers.add(config.copy(
                     status = if (running) ContainerStatus.RUNNING else ContainerStatus.STOPPED,
                     pid = pid
@@ -75,18 +50,99 @@ object ContainerManager {
         containers
     }
 
-    private fun batchGetStatus(names: List<String>): Map<String, Pair<Boolean, Int?>> {
+    private fun loadAllConfigs(): List<Pair<String, ContainerInfo>> {
+        val result = mutableListOf<Pair<String, ContainerInfo>>()
+
+        val script = """
+            DIR="${Constants.CONTAINERS_DIR}"
+            for d in "$DIR"/*/; do
+                [ -d "$d" ] || continue
+                name=$(basename "$d")
+                cfg="$d${Constants.CONFIG_FILE}"
+                [ -f "$cfg" ] || continue
+                echo "===CONTAINER_START==="
+                echo "NAME=$name"
+                cat "$cfg"
+                echo "===CONTAINER_END==="
+            done
+        """.trimIndent()
+
+        val r = Shell.cmd(script).exec()
+        if (!r.isSuccess || r.out.isEmpty()) return result
+
+        val output = r.out.joinToString("\n")
+        val blocks = output.split("===CONTAINER_START===")
+
+        for (block in blocks) {
+            val trimmed = block.trim()
+            if (!trimmed.startsWith("NAME=")) continue
+            val endIdx = trimmed.indexOf("===CONTAINER_END===")
+            val content = if (endIdx > 0) trimmed.substring(0, endIdx).trim() else trimmed
+
+            val lines = content.lines()
+            if (lines.isEmpty()) continue
+
+            val name = lines.first().removePrefix("NAME=").trim()
+            if (name.isEmpty()) continue
+
+            val m = mutableMapOf<String, String>()
+            for (i in 1 until lines.size) {
+                val t = lines[i].trim()
+                if (t.isEmpty() || t.startsWith("#")) continue
+                val p = t.split("=", limit = 2)
+                if (p.size == 2) m[p[0].trim()] = p[1].trim()
+            }
+
+            val configName = m["name"] ?: name
+            val sparse = m["use_sparse_image"] == "1"
+            val rootfs = m["rootfs_path"] ?: if (sparse) {
+                "${Constants.CONTAINERS_DIR}/$name/rootfs.img"
+            } else {
+                "${Constants.CONTAINERS_DIR}/$name/rootfs"
+            }
+
+            if (rootfs.isBlank()) continue
+
+            result.add(configName to ContainerInfo(
+                name = configName,
+                rootfsPath = rootfs,
+                configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}",
+                hostname = m["hostname"] ?: "",
+                enableTermuxX11 = m["enable_termux_x11"] == "1",
+                enableLegacyTermuxX11 = m["enable_legacy_termux_x11"] == "1",
+                enableHwAccess = m["enable_hw_access"] == "1",
+                enablePulseAudio = m["enable_pulseaudio"] == "1",
+                netMode = m["net_mode"] ?: "nat",
+                bindMounts = m["bind_mounts"] ?: ""
+            ))
+        }
+
+        return result
+    }
+
+    private fun batchGetStatusViaPs(names: List<String>): Map<String, Pair<Boolean, Int?>> {
         val result = mutableMapOf<String, Pair<Boolean, Int?>>()
         if (names.isEmpty()) return result
 
         try {
-            for (name in names) {
-                result[name] = getStatus(name)
+            val r = Shell.cmd("ps -eo pid,args 2>/dev/null | grep -i droidspaces | grep -v grep").exec()
+            if (r.isSuccess && r.out.isNotEmpty()) {
+                for (line in r.out) {
+                    val parts = line.trim().split("\\s+".toRegex())
+                    if (parts.size < 2) continue
+                    val pid = parts[0].toIntOrNull() ?: continue
+                    val cmdline = parts.drop(1).joinToString(" ")
+                    for (name in names) {
+                        if (cmdline.contains("--name=$name") || cmdline.contains(name)) {
+                            result[name] = Pair(true, pid)
+                        }
+                    }
+                }
             }
-        } catch (_: Exception) {
-            for (name in names) {
-                if (name !in result) result[name] = Pair(false, null)
-            }
+        } catch (_: Exception) {}
+
+        for (name in names) {
+            if (name !in result) result[name] = Pair(false, null)
         }
         return result
     }
@@ -111,7 +167,7 @@ object ContainerManager {
             } else {
                 "${Constants.CONTAINERS_DIR}/$defaultName/rootfs"
             }
-            if (rootfs.isBlank() || !Shell.cmd("test -f '$rootfs'").exec().isSuccess) return null
+            if (rootfs.isBlank()) return null
 
             return ContainerInfo(
                 name = name, rootfsPath = rootfs, configPath = path,
@@ -189,39 +245,6 @@ object ContainerManager {
                 }
             }
         } catch (_: Exception) {}
-
-        try {
-            val psResult = Shell.cmd("ps -eo pid,args 2>/dev/null | grep '${Constants.DS_BINARY_PATH}.*--name=$name' | grep -v grep").exec()
-            if (psResult.isSuccess && psResult.out.isNotEmpty()) {
-                for (line in psResult.out) {
-                    val parts = line.trim().split("\\s+".toRegex())
-                    if (parts.size >= 1) {
-                        val pid = parts[0].toIntOrNull()
-                        if (pid != null && pid > 0) {
-                            val alive = Shell.cmd("kill -0 $pid 2>/dev/null").exec()
-                            if (alive.isSuccess) return Pair(true, pid)
-                        }
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-
-        try {
-            val psResult = Shell.cmd("ps -eo pid,args 2>/dev/null | grep 'droidspaces.*$name' | grep -v grep").exec()
-            if (psResult.isSuccess && psResult.out.isNotEmpty()) {
-                for (line in psResult.out) {
-                    val parts = line.trim().split("\\s+".toRegex())
-                    if (parts.size >= 1) {
-                        val pid = parts[0].toIntOrNull()
-                        if (pid != null && pid > 0) {
-                            val alive = Shell.cmd("kill -0 $pid 2>/dev/null").exec()
-                            if (alive.isSuccess) return Pair(true, pid)
-                        }
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-
         return Pair(false, null)
     }
 
