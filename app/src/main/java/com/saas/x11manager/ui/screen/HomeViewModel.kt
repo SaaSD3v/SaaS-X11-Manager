@@ -165,6 +165,19 @@ class HomeViewModel : ViewModel() {
 
     fun showLogs(container: ContainerInfo) {
         showLogViewerFor = container.name
+        val logs = logsFor(container.name)
+        if (logs.isEmpty()) {
+            val status = if (container.isRunning) "Running" else "Stopped"
+            val pidLine = if (container.pid != null) "  PID: ${container.pid}" else ""
+            logs.add(android.util.Log.INFO to "Container: ${container.name}")
+            logs.add(android.util.Log.INFO to "  Status: $status$pidLine")
+            logs.add(android.util.Log.INFO to "  Rootfs: ${container.rootfsPath}")
+            if (container.hostname.isNotEmpty()) {
+                logs.add(android.util.Log.INFO to "  Hostname: ${container.hostname}")
+            }
+            logs.add(android.util.Log.INFO to "")
+            logs.add(android.util.Log.INFO to "Start X11 session to see live logs.")
+        }
     }
 
     fun dismissLogViewer() {
