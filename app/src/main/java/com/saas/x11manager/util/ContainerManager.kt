@@ -53,19 +53,18 @@ object ContainerManager {
     private fun loadAllConfigs(): List<Pair<String, ContainerInfo>> {
         val result = mutableListOf<Pair<String, ContainerInfo>>()
 
-        val script = """
-            DIR="${Constants.CONTAINERS_DIR}"
-            for d in "$DIR"/*/; do
-                [ -d "$d" ] || continue
-                name=$(basename "$d")
-                cfg="$d${Constants.CONFIG_FILE}"
-                [ -f "$cfg" ] || continue
-                echo "===CONTAINER_START==="
-                echo "NAME=$name"
-                cat "$cfg"
-                echo "===CONTAINER_END==="
-            done
-        """.trimIndent()
+        val containersDir = Constants.CONTAINERS_DIR
+        val configFile = Constants.CONFIG_FILE
+        val script = "DIR=\"$containersDir\"; for d in \"$containersDir\"/*/; do " +
+            "[ -d \"\$d\" ] || continue; " +
+            "name=\$(basename \"\$d\"); " +
+            "cfg=\"\$d$configFile\"; " +
+            "[ -f \"\$cfg\" ] || continue; " +
+            "echo \"===CONTAINER_START===\"; " +
+            "echo \"NAME=\$name\"; " +
+            "cat \"\$cfg\"; " +
+            "echo \"===CONTAINER_END===\"; " +
+            "done"
 
         val r = Shell.cmd(script).exec()
         if (!r.isSuccess || r.out.isEmpty()) return result
