@@ -33,13 +33,21 @@ object ContainerManager {
     suspend fun listContainers(): List<ContainerInfo> = withContext(Dispatchers.IO) {
         val containers = mutableListOf<ContainerInfo>()
         try {
-            val allConfigs = loadAllConfigs()
-            if (allConfigs.isEmpty()) return@withContext containers
+            val result = Shell.cmd("ls -d '${Constants.CONTAINERS_DIR}'/*/ 2>/dev/null").exec()
+            if (!result.isSuccess || result.out.isEmpty()) return@withContext containers
 
-            val allNames = allConfigs.map { it.first }
-            val psMap = batchGetStatusViaPs(allNames)
+            val names = result.out.mapNotNull { line ->
+                val trimmed = line.trim()
+                if (trimmed.isEmpty() || !trimmed.startsWith(Constants.CONTAINERS_DIR)) null
+                else trimmed.removeSuffix("/").substringAfterLast("/").ifEmpty { null }
+            }
+            if (names.isEmpty()) return@withContext containers
 
-            for ((name, config) in allConfigs) {
+            val psMap = batchGetStatusViaPs(names)
+
+            for (name in names) {
+                val configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
+                val config = loadConfig(configPath, name) ?: continue
                 val (running, pid) = psMap[name] ?: getStatus(name)
                 containers.add(config.copy(
                     status = if (running) ContainerStatus.RUNNING else ContainerStatus.STOPPED,
@@ -48,75 +56,6 @@ object ContainerManager {
             }
         } catch (_: Exception) {}
         containers
-    }
-
-    private fun loadAllConfigs(): List<Pair<String, ContainerInfo>> {
-        val result = mutableListOf<Pair<String, ContainerInfo>>()
-
-        val containersDir = Constants.CONTAINERS_DIR
-        val configFile = Constants.CONFIG_FILE
-        val script = "DIR=\"$containersDir\"; for d in \"$containersDir\"/*/; do " +
-            "[ -d \"\$d\" ] || continue; " +
-            "name=\$(basename \"\$d\"); " +
-            "cfg=\"\$d$configFile\"; " +
-            "[ -f \"\$cfg\" ] || continue; " +
-            "echo \"===CONTAINER_START===\"; " +
-            "echo \"NAME=\$name\"; " +
-            "cat \"\$cfg\"; " +
-            "echo \"===CONTAINER_END===\"; " +
-            "done"
-
-        val r = Shell.cmd(script).exec()
-        if (!r.isSuccess || r.out.isEmpty()) return result
-
-        val output = r.out.joinToString("\n")
-        val blocks = output.split("===CONTAINER_START===")
-
-        for (block in blocks) {
-            val trimmed = block.trim()
-            if (!trimmed.startsWith("NAME=")) continue
-            val endIdx = trimmed.indexOf("===CONTAINER_END===")
-            val content = if (endIdx > 0) trimmed.substring(0, endIdx).trim() else trimmed
-
-            val lines = content.lines()
-            if (lines.isEmpty()) continue
-
-            val name = lines.first().removePrefix("NAME=").trim()
-            if (name.isEmpty()) continue
-
-            val m = mutableMapOf<String, String>()
-            for (i in 1 until lines.size) {
-                val t = lines[i].trim()
-                if (t.isEmpty() || t.startsWith("#")) continue
-                val p = t.split("=", limit = 2)
-                if (p.size == 2) m[p[0].trim()] = p[1].trim()
-            }
-
-            val configName = m["name"] ?: name
-            val sparse = m["use_sparse_image"] == "1"
-            val rootfs = m["rootfs_path"] ?: if (sparse) {
-                "${Constants.CONTAINERS_DIR}/$name/rootfs.img"
-            } else {
-                "${Constants.CONTAINERS_DIR}/$name/rootfs"
-            }
-
-            if (rootfs.isBlank()) continue
-
-            result.add(configName to ContainerInfo(
-                name = configName,
-                rootfsPath = rootfs,
-                configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}",
-                hostname = m["hostname"] ?: "",
-                enableTermuxX11 = m["enable_termux_x11"] == "1",
-                enableLegacyTermuxX11 = m["enable_legacy_termux_x11"] == "1",
-                enableHwAccess = m["enable_hw_access"] == "1",
-                enablePulseAudio = m["enable_pulseaudio"] == "1",
-                netMode = m["net_mode"] ?: "nat",
-                bindMounts = m["bind_mounts"] ?: ""
-            ))
-        }
-
-        return result
     }
 
     private fun batchGetStatusViaPs(names: List<String>): Map<String, Pair<Boolean, Int?>> {
