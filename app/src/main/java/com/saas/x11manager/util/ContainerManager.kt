@@ -152,6 +152,11 @@ object ContainerManager {
         } catch (_: Exception) { false }
     }
 
+    suspend fun checkContainerStatusPublic(name: String): Pair<Boolean, Int?> = withContext(Dispatchers.IO) {
+        val running = isContainerRunning(name)
+        Pair(running, null)
+    }
+
     suspend fun startContainer(name: String, logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
         try {
             val r = Shell.cmd(
