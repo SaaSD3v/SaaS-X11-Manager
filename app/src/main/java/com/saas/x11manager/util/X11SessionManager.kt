@@ -28,28 +28,26 @@ object X11SessionManager {
         try {
             logger?.i("[*] Starting PulseAudio...")
 
-            Shell.cmd("killall pulseaudio 2>/dev/null").exec()
-            Shell.cmd("rm -f '${Constants.PULSE_SOCK}' 2>/dev/null").exec()
+            // The .sh script handles killall, rm, run-as, and waits for socket
+            val r = Shell.cmd("sh $PA_SCRIPT 2>&1").exec()
+            val out = r.out.joinToString("\n")
+            val err = r.err.joinToString("\n")
 
-            // Run .sh placeholder (like X11 pattern)
-            Shell.cmd("sh $PA_SCRIPT &").exec()
-
-            logger?.i("[*] Waiting for socket (5s)...")
-            var wait = 0
-            while (wait < 5) {
-                Thread.sleep(1000)
-                wait++
-                val r = Shell.cmd("test -S '${Constants.PULSE_SOCK}' && echo ok").exec()
-                if (r.isSuccess && r.out.isNotEmpty() && r.out[0].contains("ok")) break
+            // Log output from script
+            for (line in out.lines()) {
+                val t = line.trim()
+                if (t.isNotEmpty()) logger?.i(t)
             }
 
-            val r = Shell.cmd("test -S '${Constants.PULSE_SOCK}' && echo ok").exec()
-            if (r.isSuccess && r.out.isNotEmpty() && r.out[0].contains("ok")) {
+            // Check if socket exists now
+            val check = Shell.cmd("test -S '${Constants.PULSE_SOCK}' && echo ok").exec()
+            if (check.isSuccess && check.out.isNotEmpty() && check.out[0].contains("ok")) {
                 val pid = getPulseAudioPid() ?: 0
                 logger?.i("[+] PulseAudio active (PID=$pid)")
                 Result.success(pid)
             } else {
-                logger?.w("[!] PulseAudio socket not created (placeholder .sh)")
+                logger?.e("[-] PA script output: $out")
+                if (err.isNotBlank()) logger?.e("[-] stderr: $err")
                 Result.failure(Exception("PA socket not created"))
             }
         } catch (e: Exception) {
