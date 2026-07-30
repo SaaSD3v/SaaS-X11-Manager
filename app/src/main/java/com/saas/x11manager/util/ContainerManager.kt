@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 enum class ContainerStatus { RUNNING, STOPPED, UNKNOWN }
+enum class InitSystem { SYSTEMD, OPENRC }
 
 data class ContainerInfo(
     val name: String,
@@ -19,7 +20,8 @@ data class ContainerInfo(
     val netMode: String = "nat",
     val bindMounts: String = "",
     val status: ContainerStatus = ContainerStatus.UNKNOWN,
-    val pid: Int? = null
+    val pid: Int? = null,
+    val initSystem: InitSystem = InitSystem.SYSTEMD
 ) {
     val isRunning: Boolean get() = status == ContainerStatus.RUNNING
     val hasPulseAudioBindMount: Boolean
@@ -105,7 +107,15 @@ object ContainerManager {
         if (!Shell.cmd("test -f '$path'").exec().isSuccess) return@withContext null
         val c = loadConfig(path, name) ?: return@withContext null
         val running = isContainerRunning(c.name)
-        c.copy(status = if (running) ContainerStatus.RUNNING else ContainerStatus.STOPPED)
+        val initSys = detectInitSystem(c.rootfsPath)
+        c.copy(status = if (running) ContainerStatus.RUNNING else ContainerStatus.STOPPED, initSystem = initSys)
+    }
+
+    private fun detectInitSystem(rootfsPath: String): InitSystem {
+        return try {
+            val r = Shell.cmd("test -f '$rootfsPath/etc/init.d/x11-xfce' 2>/dev/null && echo OPENRC || echo SYSTEMD").exec()
+            if (r.out.any { it.trim() == "OPENRC" }) InitSystem.OPENRC else InitSystem.SYSTEMD
+        } catch (_: Exception) { InitSystem.SYSTEMD }
     }
 
     suspend fun updatePulseAudioBindMount(
@@ -155,6 +165,60 @@ object ContainerManager {
     suspend fun checkContainerStatusPublic(name: String): Pair<Boolean, Int?> = withContext(Dispatchers.IO) {
         val running = isContainerRunning(name)
         Pair(running, null)
+    }
+
+    suspend fun updateInitSystem(
+        name: String,
+        target: InitSystem,
+        cacheDir: File
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val config = loadConfig(
+                "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}", name
+            ) ?: return@withContext false
+            val rootfs = config.rootfsPath
+            val mnt = "/mnt/ds_init_edit"
+
+            if (target == InitSystem.OPENRC) {
+                Shell.cmd("mkdir -p '$mnt' 2>/dev/null").exec()
+                val mount = Shell.cmd("mount -o loop,rw '$rootfs' '$mnt' 2>/dev/null").exec()
+                if (!mount.isSuccess) return@withContext false
+
+                Shell.cmd("mkdir -p '$mnt/usr/local/bin'").exec()
+                Shell.cmd("mkdir -p '$mnt/etc/init.d'").exec()
+                Shell.cmd("mkdir -p '$mnt/etc/runlevels/default'").exec()
+
+                val tmpSh = File(cacheDir, "x11-session.sh")
+                tmpSh.writeText("#!/bin/sh\nexport DISPLAY=:0\nexport HOME=/root\nexport USER=root\nexport SHELL=/bin/sh\nexport XDG_SESSION_TYPE=x11\nexport XDG_RUNTIME_DIR=/tmp/runtime-root\nmkdir -p \"\$XDG_RUNTIME_DIR\"\nexec startxfce4\n")
+                Shell.cmd("cp '${tmpSh.absolutePath}' '$mnt/usr/local/bin/x11-session.sh' && chmod 755 '$mnt/usr/local/bin/x11-session.sh'").exec()
+                tmpSh.delete()
+
+                val tmpSetup = File(cacheDir, "x11-setup")
+                tmpSetup.writeText("#!/sbin/openrc-run\n\ndescription=\"Setup X11 socket directory and bind mount\"\n\ndepend() {\n    before x11-xfce\n    keyword -stop\n}\n\nstart() {\n    ebegin \"Setting up X11 socket\"\n    mkdir -p /tmp/.X11-unix\n    if ! mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n        mount --bind /usr/.X11-unix /tmp/.X11-unix 2>/dev/null\n    fi\n    mkdir -p /tmp/runtime-root\n    eend $?\n}\n\nstop() {\n    ebegin \"Unmounting X11 socket\"\n    if mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n        umount /tmp/.X11-unix 2>/dev/null\n    fi\n    eend $?\n}\n")
+                Shell.cmd("cp '${tmpSetup.absolutePath}' '$mnt/etc/init.d/x11-setup' && chmod 755 '$mnt/etc/init.d/x11-setup'").exec()
+                tmpSetup.delete()
+
+                val tmpXfce = File(cacheDir, "x11-xfce")
+                tmpXfce.writeText("#!/sbin/openrc-run\n\ndescription=\"X11 XFCE Desktop on Termux:X11\"\n\ndepend() {\n    after x11-setup\n    keyword -stop\n}\n\nstart() {\n    ebegin \"Starting XFCE on X11\"\n    /usr/local/bin/x11-session.sh &\n    eend $?\n}\n\nstop() {\n    ebegin \"Stopping XFCE\"\n    pkill -f startxfce4 2>/dev/null\n    pkill -f xfce4-session 2>/dev/null\n    eend $?\n}\n")
+                Shell.cmd("cp '${tmpXfce.absolutePath}' '$mnt/etc/init.d/x11-xfce' && chmod 755 '$mnt/etc/init.d/x11-xfce'").exec()
+                tmpXfce.delete()
+
+                Shell.cmd("ln -sf /etc/init.d/x11-setup '$mnt/etc/runlevels/default/x11-setup'").exec()
+                Shell.cmd("ln -sf /etc/init.d/x11-xfce '$mnt/etc/runlevels/default/x11-xfce'").exec()
+
+                Shell.cmd("umount '$mnt' 2>/dev/null; rmdir '$mnt' 2>/dev/null").exec()
+                true
+            } else {
+                Shell.cmd("mkdir -p '$mnt' 2>/dev/null").exec()
+                val mount = Shell.cmd("mount -o loop,rw '$rootfs' '$mnt' 2>/dev/null").exec()
+                if (!mount.isSuccess) return@withContext false
+
+                Shell.cmd("rm -f '$mnt/etc/init.d/x11-setup' '$mnt/etc/init.d/x11-xfce' '$mnt/etc/runlevels/default/x11-setup' '$mnt/etc/runlevels/default/x11-xfce' '$mnt/usr/local/bin/x11-session.sh' 2>/dev/null").exec()
+
+                Shell.cmd("umount '$mnt' 2>/dev/null; rmdir '$mnt' 2>/dev/null").exec()
+                true
+            }
+        } catch (_: Exception) { false }
     }
 
     suspend fun startContainer(name: String, logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {

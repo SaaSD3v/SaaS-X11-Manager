@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saas.x11manager.util.ContainerManager
 import com.saas.x11manager.util.ContainerStatus
+import com.saas.x11manager.util.InitSystem
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -17,6 +18,7 @@ class EditContainerViewModel : ViewModel() {
     var hostname by mutableStateOf("")
     var status by mutableStateOf(ContainerStatus.UNKNOWN)
     var enablePulseAudio by mutableStateOf(false)
+    var initSystem by mutableStateOf(InitSystem.SYSTEMD)
     var logs by mutableStateOf<List<Pair<Int, String>>>(emptyList())
     var isSaving by mutableStateOf(false)
     var saveError by mutableStateOf<String?>(null)
@@ -38,6 +40,7 @@ class EditContainerViewModel : ViewModel() {
             hostname = info.hostname
             status = info.status
             enablePulseAudio = info.bindMounts.contains("/tmp/.pulse-socket")
+            initSystem = info.initSystem
             logs = emptyList()
         }
     }
@@ -58,19 +61,26 @@ class EditContainerViewModel : ViewModel() {
 
                 logs = logs + (Log.INFO to "[*] Saving configuration...")
 
-                val ok = ContainerManager.updatePulseAudioBindMount(
+                val paOk = ContainerManager.updatePulseAudioBindMount(
                     name = containerName,
                     enable = enablePulseAudio,
                     cacheDir = cd
                 )
 
-                if (ok) {
+                val initOk = ContainerManager.updateInitSystem(
+                    name = containerName,
+                    target = initSystem,
+                    cacheDir = cd
+                )
+
+                if (paOk && initOk) {
                     logs = logs + (Log.INFO to "[+] Config saved successfully")
                     saveError = "OK: Config saved"
                     val info = ContainerManager.getContainerInfo(containerName)
                     if (info != null) {
                         status = info.status
                         enablePulseAudio = info.bindMounts.contains("/tmp/.pulse-socket")
+                        initSystem = info.initSystem
                     }
                 } else {
                     logs = logs + (Log.ERROR to "[-] Failed to write config")

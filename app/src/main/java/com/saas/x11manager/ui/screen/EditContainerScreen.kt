@@ -2,6 +2,8 @@ package com.saas.x11manager.ui.screen
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.saas.x11manager.util.ContainerStatus
+import com.saas.x11manager.util.InitSystem
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,6 +40,7 @@ fun EditContainerScreen(
     val hostname = viewModel.hostname
     val status = viewModel.status
     val enablePulseAudio = viewModel.enablePulseAudio
+    val initSystem = viewModel.initSystem
     val logs = viewModel.logs
     val isSaving = viewModel.isSaving
     val saveError = viewModel.saveError
@@ -63,9 +67,82 @@ fun EditContainerScreen(
         ) {
             Spacer(Modifier.height(8.dp))
 
+            // Init System Radio Group
             Card(
                 Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                shape = RoundedCornerShape(20.dp),
+                elevation = CardDefaults.cardElevation(0.dp)
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Init System", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Select which init system to inject", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    Spacer(Modifier.height(12.dp))
+
+                    val options = listOf(
+                        InitSystem.SYSTEMD to "systemd",
+                        InitSystem.OPENRC to "OpenRC"
+                    )
+
+                    for ((sys, label) in options) {
+                        val selected = initSystem == sys
+                        val borderColor by animateColorAsState(
+                            targetValue = if (selected) MaterialTheme.colorScheme.primary
+                                          else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                            animationSpec = tween(200)
+                        )
+                        val bgColor by animateColorAsState(
+                            targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                                          else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            animationSpec = tween(200)
+                        )
+
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                if (initSystem != sys) viewModel.initSystem = sys
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            color = bgColor,
+                            border = BorderStroke(1.dp, borderColor)
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = selected,
+                                    onClick = { if (initSystem != sys) viewModel.initSystem = sys },
+                                    colors = RadioButtonDefaults.colors(
+                                        selectedColor = MaterialTheme.colorScheme.primary,
+                                        unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(label, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+                                    Text(
+                                        when (sys) {
+                                            InitSystem.SYSTEMD -> "Default for Debian/Ubuntu/Arch"
+                                            InitSystem.OPENRC -> "For Alpine/Artix/Gentoo"
+                                        },
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp
+                                    )
+                                }
+                            }
+                        }
+                        if (sys != InitSystem.OPENRC) Spacer(Modifier.height(6.dp))
+                    }
+                }
+            }
+
+            // PulseAudio Fix (mutually exclusive - disables when OpenRC is active)
+            val paEnabled = initSystem == InitSystem.SYSTEMD
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                ),
                 shape = RoundedCornerShape(20.dp),
                 elevation = CardDefaults.cardElevation(0.dp)
             ) {
@@ -74,12 +151,24 @@ fun EditContainerScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("PulseAudio Fix", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
-                        Text("Adds PA socket bind mount", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                        Text(
+                            "PulseAudio Fix",
+                            color = if (paEnabled) MaterialTheme.colorScheme.onSurface
+                                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                            fontSize = 14.sp
+                        )
+                        Text(
+                            if (paEnabled) "Adds PA socket bind mount"
+                            else "Disabled when OpenRC is active",
+                            color = if (paEnabled) MaterialTheme.colorScheme.onSurfaceVariant
+                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            fontSize = 11.sp
+                        )
                     }
                     Switch(
                         checked = enablePulseAudio,
-                        onCheckedChange = { viewModel.enablePulseAudio = it },
+                        onCheckedChange = { if (paEnabled) viewModel.enablePulseAudio = it },
+                        enabled = paEnabled,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = MaterialTheme.colorScheme.primary,
                             checkedTrackColor = MaterialTheme.colorScheme.surfaceContainerHigh
@@ -88,6 +177,7 @@ fun EditContainerScreen(
                 }
             }
 
+            // Status
             Card(
                 Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -116,6 +206,7 @@ fun EditContainerScreen(
                 }
             }
 
+            // Save button
             val buttonColor by animateColorAsState(
                 targetValue = if (isSaving) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.primary,
                 animationSpec = tween(200)
