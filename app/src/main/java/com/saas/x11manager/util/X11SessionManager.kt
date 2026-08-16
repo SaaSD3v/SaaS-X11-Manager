@@ -26,18 +26,15 @@ object X11SessionManager {
         try {
             logger?.i("[*] Starting PulseAudio...")
 
-            // The .sh script handles killall, rm, run-as, and waits for socket
             val r = Shell.cmd("sh ${Constants.PA_SCRIPT} 2>&1").exec()
             val out = r.out.joinToString("\n")
             val err = r.err.joinToString("\n")
 
-            // Log output from script
             for (line in out.lines()) {
                 val t = line.trim()
                 if (t.isNotEmpty()) logger?.i(t)
             }
 
-            // Check if socket exists now
             val check = Shell.cmd("test -S '${Constants.PULSE_SOCK}' && echo ok").exec()
             if (check.isSuccess && check.out.isNotEmpty() && check.out[0].contains("ok")) {
                 val pid = getPulseAudioPid() ?: 0
@@ -75,6 +72,13 @@ object X11SessionManager {
     suspend fun startLoader(logger: ContainerLogger? = null): Result<Int> = withContext(Dispatchers.IO) {
         try {
             logger?.i("[*] Preparing X11 environment...")
+
+            val existingStatus = getLoaderStatus()
+            val existingPid = getLoaderPid()
+            if (existingStatus == LoaderStatus.Running && existingPid != null && existingPid > 0) {
+                logger?.i("[+] Reusing X11 loader (PID=$existingPid)")
+                return@withContext Result.success(existingPid)
+            }
 
             val stalePid = Shell.cmd("pidof termux-x11 2>/dev/null").exec()
             if (stalePid.isSuccess && stalePid.out.isNotEmpty()) {
