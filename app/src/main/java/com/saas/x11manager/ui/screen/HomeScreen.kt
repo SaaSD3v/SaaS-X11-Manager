@@ -32,7 +32,8 @@ fun HomeScreen(
 
     // Log dialog
     viewModel.showLogViewerFor?.let { containerName ->
-        val memoryLogs = viewModel.containerLogs[containerName]?.toList() ?: emptyList()
+        val memoryLogs: List<Pair<Int, String>> =
+            viewModel.containerLogs[containerName] ?: emptyList()
         val isBlocking = viewModel.runningOperationContainer == containerName
         TerminalDialog(
             title = "Logs: $containerName",
