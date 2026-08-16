@@ -259,15 +259,8 @@ object ContainerManager {
         val c = loadConfig(path, name) ?: return@withContext null
         val state = getContainerRuntimeStates(listOf(c.name))[c.name]
             ?: RuntimeState(ContainerStatus.UNKNOWN)
-        val initSys = detectInitSystem(c.rootfsPath)
+        val initSys = ContainerSettingsManager.getInitSystem(c.name) ?: InitSystem.SYSTEMD
         c.copy(status = state.status, pid = state.pid, initSystem = initSys)
-    }
-
-    private fun detectInitSystem(rootfsPath: String): InitSystem {
-        return try {
-            val r = Shell.cmd("test -f '$rootfsPath/etc/init.d/x11-xfce' 2>/dev/null && echo OPENRC || echo SYSTEMD").exec()
-            if (r.out.any { it.trim() == "OPENRC" }) InitSystem.OPENRC else InitSystem.SYSTEMD
-        } catch (_: Exception) { InitSystem.SYSTEMD }
     }
 
     suspend fun updatePulseAudioBindMount(
@@ -327,7 +320,7 @@ object ContainerManager {
                 "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}", name
             ) ?: return@withContext false
 
-            RootfsAccessor.use(
+            val applied = RootfsAccessor.use(
                 rootfsPath = config.rootfsPath,
                 tag = "init_${name}_${target.name.lowercase()}"
             ) { root ->
@@ -336,6 +329,9 @@ object ContainerManager {
                     InitSystem.SYSTEMD -> applyCurrentSystemdInitFiles(root)
                 }
             } ?: false
+
+            if (!applied) return@withContext false
+            ContainerSettingsManager.setInitSystem(name, target, cacheDir)
         } catch (_: Exception) {
             false
         }
