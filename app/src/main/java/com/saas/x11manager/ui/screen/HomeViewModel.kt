@@ -79,7 +79,8 @@ class HomeViewModel : ViewModel() {
 
     fun refresh() {
         val generation = ++refreshGeneration
-        val runtimeGenerationAtStart = runtimeStateGeneration
+        runtimeRefreshJob?.cancel()
+        val runtimeGenerationAtStart = ++runtimeStateGeneration
         refreshJob?.cancel()
 
         refreshJob = viewModelScope.launch {
