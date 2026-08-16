@@ -29,11 +29,6 @@ object ContainerManager {
 
     private const val CONFIG_MARKER = "@@SAAS_X11_CONTAINER@@"
 
-    private data class RuntimeState(
-        val status: ContainerStatus,
-        val pid: Int? = null
-    )
-
     suspend fun listContainers(): List<ContainerInfo> = withContext(Dispatchers.IO) {
         try {
             val configs = loadConfigsBatch()
@@ -41,7 +36,8 @@ object ContainerManager {
 
             val states = getContainerRuntimeStates(configs.map { it.name })
             configs.map { container ->
-                val state = states[container.name] ?: RuntimeState(ContainerStatus.UNKNOWN)
+                val state = states[container.name]
+                    ?: ContainerRuntimeState(ContainerStatus.UNKNOWN)
                 container.copy(status = state.status, pid = state.pid)
             }
         } catch (e: Exception) {
@@ -92,7 +88,9 @@ object ContainerManager {
         return containers
     }
 
-    private fun getContainerRuntimeStates(containerNames: List<String>): Map<String, RuntimeState> {
+    private fun getContainerRuntimeStates(
+        containerNames: List<String>
+    ): Map<String, ContainerRuntimeState> {
         val names = containerNames.filter { it.isNotBlank() }.distinct()
         if (names.isEmpty()) return emptyMap()
 
@@ -101,104 +99,47 @@ object ContainerManager {
         return queryPidsIndividually(names)
     }
 
-    private fun tryMachineReadableShow(containerNames: List<String>): Map<String, RuntimeState>? {
+    private fun tryMachineReadableShow(
+        containerNames: List<String>
+    ): Map<String, ContainerRuntimeState>? {
         return try {
             val result = Shell.cmd("${Constants.DS_BINARY_PATH} --format show 2>/dev/null").exec()
             if (!result.isSuccess) return null
-
-            val lines = result.out.map { it.trim() }.filter { it.isNotEmpty() }
-            val hasMachineMarkers = lines.any {
-                it.startsWith("TOTAL_CONTAINERS=") ||
-                    it.startsWith("RUN_CONTAINERS=") ||
-                    it.startsWith("CONT_")
-            }
-            val explicitlyEmpty = isNoContainersMessage(lines)
-            if (!hasMachineMarkers && !explicitlyEmpty) return null
-
-            val states = stoppedBaseline(containerNames)
-            lines.forEach { line ->
-                if (!line.startsWith("CONT_")) return@forEach
-                val separator = line.lastIndexOf('=')
-                if (separator <= 5) return@forEach
-
-                val name = line.substring(5, separator)
-                val pid = line.substring(separator + 1).toIntOrNull()
-                if (pid != null && pid > 0 && name in states) {
-                    states[name] = RuntimeState(ContainerStatus.RUNNING, pid)
-                }
-            }
-            states
+            ContainerRuntimeParser.parseMachineReadableShow(result.out, containerNames)
         } catch (_: Exception) {
             null
         }
     }
 
-    private fun tryPlainShow(containerNames: List<String>): Map<String, RuntimeState>? {
+    private fun tryPlainShow(
+        containerNames: List<String>
+    ): Map<String, ContainerRuntimeState>? {
         return try {
             val result = Shell.cmd("${Constants.DS_BINARY_PATH} show 2>/dev/null").exec()
             if (!result.isSuccess) return null
-
-            val lines = result.out.map { it.trim() }.filter { it.isNotEmpty() }
-            val running = mutableMapOf<String, Int>()
-
-            lines.forEach { line ->
-                val delimiter = when {
-                    line.contains('│') -> '│'
-                    line.contains('|') -> '|'
-                    else -> return@forEach
-                }
-                val columns = line.split(delimiter).map { it.trim() }.filter { it.isNotEmpty() }
-                if (columns.size < 2) return@forEach
-
-                val pid = columns.last().toIntOrNull() ?: return@forEach
-                val name = columns[columns.lastIndex - 1]
-                if (pid > 0 && name in containerNames) running[name] = pid
-            }
-
-            val explicitlyEmpty = isNoContainersMessage(lines)
-            if (running.isEmpty() && !explicitlyEmpty) return null
-
-            stoppedBaseline(containerNames).apply {
-                running.forEach { (name, pid) ->
-                    this[name] = RuntimeState(ContainerStatus.RUNNING, pid)
-                }
-            }
+            ContainerRuntimeParser.parsePlainShow(result.out, containerNames)
         } catch (_: Exception) {
             null
         }
     }
 
-    private fun queryPidsIndividually(containerNames: List<String>): Map<String, RuntimeState> {
+    private fun queryPidsIndividually(
+        containerNames: List<String>
+    ): Map<String, ContainerRuntimeState> {
         return buildMap {
             containerNames.forEach { name ->
-                try {
+                val state = try {
                     val result = Shell.cmd(
                         "${Constants.DS_BINARY_PATH} --name=${shellQuote(name)} pid 2>/dev/null"
                     ).exec()
-                    val lines = result.out.map { it.trim() }.filter { it.isNotEmpty() }
-                    val pid = lines.firstNotNullOfOrNull { it.toIntOrNull() }
-
-                    when {
-                        pid != null && pid > 0 -> put(name, RuntimeState(ContainerStatus.RUNNING, pid))
-                        lines.any { it.equals("NONE", ignoreCase = true) } ->
-                            put(name, RuntimeState(ContainerStatus.STOPPED))
-                        else -> put(name, RuntimeState(ContainerStatus.UNKNOWN))
-                    }
+                    ContainerRuntimeParser.parsePid(result.out)
                 } catch (_: Exception) {
-                    put(name, RuntimeState(ContainerStatus.UNKNOWN))
+                    ContainerRuntimeState(ContainerStatus.UNKNOWN)
                 }
+                put(name, state)
             }
         }
     }
-
-    private fun stoppedBaseline(containerNames: List<String>): MutableMap<String, RuntimeState> =
-        containerNames.associateWithTo(mutableMapOf()) { RuntimeState(ContainerStatus.STOPPED) }
-
-    private fun isNoContainersMessage(lines: List<String>): Boolean =
-        lines.any {
-            it.contains("no containers", ignoreCase = true) &&
-                it.contains("running", ignoreCase = true)
-        }
 
     private fun shellQuote(value: String): String =
         "'" + value.replace("'", "'\\''") + "'"
@@ -253,7 +194,7 @@ object ContainerManager {
         if (!Shell.cmd("test -f '$path'").exec().isSuccess) return@withContext null
         val c = loadConfig(path, name) ?: return@withContext null
         val state = getContainerRuntimeStates(listOf(c.name))[c.name]
-            ?: RuntimeState(ContainerStatus.UNKNOWN)
+            ?: ContainerRuntimeState(ContainerStatus.UNKNOWN)
         val initSys = ContainerSettingsManager.getInitSystem(c.name) ?: InitSystem.SYSTEMD
         c.copy(status = state.status, pid = state.pid, initSystem = initSys)
     }
