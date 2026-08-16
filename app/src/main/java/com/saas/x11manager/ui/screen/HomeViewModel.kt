@@ -92,7 +92,7 @@ class HomeViewModel : ViewModel() {
                     }
                     val systemDef = async(Dispatchers.IO) {
                         coroutineScope {
-                            val kernel = async { getSystemProp("ro.build.version.release") }
+                            val kernel = async { getKernelVersion() }
                             val archVal = async { getSystemProp("ro.product.cpu.abi") }
                             val sdk = async { getSystemProp("ro.build.version.sdk") }
                             Triple(kernel.await(), archVal.await(), sdk.await())
@@ -262,6 +262,13 @@ class HomeViewModel : ViewModel() {
         val newLogs = mutableStateListOf<Pair<Int, String>>()
         containerLogs = containerLogs.toMutableMap().apply { put(name, newLogs) }
         return newLogs
+    }
+
+    private suspend fun getKernelVersion(): String = withContext(Dispatchers.IO) {
+        try {
+            val result = Shell.cmd("uname -r 2>/dev/null").exec()
+            result.out.firstOrNull()?.trim() ?: ""
+        } catch (_: Exception) { "" }
     }
 
     private suspend fun getSystemProp(key: String): String = withContext(Dispatchers.IO) {
