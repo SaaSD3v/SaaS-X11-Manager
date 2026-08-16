@@ -6,9 +6,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
@@ -26,8 +28,6 @@ import androidx.compose.ui.unit.dp
 import com.saas.x11manager.ui.theme.JetBrainsMono
 import com.saas.x11manager.util.AnsiColorParser
 import com.saas.x11manager.util.Constants
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
 
 @Composable
 fun ShimmerAnimation(
@@ -101,55 +101,42 @@ fun TerminalConsole(
     maxHeight: Dp? = null
 ) {
     val orientation = LocalConfiguration.current.orientation
-    val verticalScrollState = rememberScrollState()
+    val listState = rememberLazyListState()
     val horizontalScrollState = rememberScrollState()
-
-    LaunchedEffect(orientation) {
-        verticalScrollState.scrollTo(verticalScrollState.maxValue)
-    }
 
     var userScrolledUp by remember { mutableStateOf(false) }
     var isAutoScrolling by remember { mutableStateOf(false) }
 
-    LaunchedEffect(verticalScrollState) {
-        snapshotFlow { verticalScrollState.value }
-            .collect { value ->
-                if (!isAutoScrolling) {
-                    userScrolledUp = value < verticalScrollState.maxValue - 200
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
+            .collect { (isScrolling, canScrollForward) ->
+                if (isScrolling && !isAutoScrolling) {
+                    userScrolledUp = canScrollForward
+                } else if (!canScrollForward) {
+                    userScrolledUp = false
                 }
             }
     }
 
-    LaunchedEffect(Unit) {
-        var scrollJob: Job? = null
-        snapshotFlow {
-            Pair(
-                Triple(logs.size, verticalScrollState.maxValue, userScrolledUp),
-                isProcessing
-            )
-        }.collect { (triple, processing) ->
-            val (_, maxValue, scrolledUp) = triple
-            if (!scrolledUp && verticalScrollState.value < maxValue) {
-                scrollJob?.cancel()
-                scrollJob = launch {
-                    isAutoScrolling = true
-                    try {
-                        if (processing) {
-                            verticalScrollState.animateScrollTo(
-                                value = maxValue,
-                                animationSpec = spring(
-                                    dampingRatio = Spring.DampingRatioNoBouncy,
-                                    stiffness = Spring.StiffnessLow
-                                )
-                            )
-                        } else {
-                            verticalScrollState.scrollTo(maxValue)
-                        }
-                    } finally {
-                        isAutoScrolling = false
-                    }
-                }
+    LaunchedEffect(orientation) {
+        userScrolledUp = false
+        if (logs.isNotEmpty()) {
+            listState.scrollToItem(logs.lastIndex)
+        }
+    }
+
+    LaunchedEffect(logs.size, isProcessing, userScrolledUp) {
+        if (logs.isEmpty() || userScrolledUp) return@LaunchedEffect
+
+        isAutoScrolling = true
+        try {
+            if (isProcessing) {
+                listState.animateScrollToItem(logs.lastIndex)
+            } else {
+                listState.scrollToItem(logs.lastIndex)
             }
+        } finally {
+            isAutoScrolling = false
         }
     }
 
@@ -173,14 +160,27 @@ fun TerminalConsole(
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .fillMaxSize()
                     .padding(horizontal = 12.dp, vertical = 16.dp)
-                    .verticalScroll(verticalScrollState)
                     .horizontalScroll(horizontalScrollState)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    logs.forEach { (level, message) ->
-                        val annotatedText = remember(level, message) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(
+                        count = logs.size,
+                        key = { index -> index }
+                    ) { index ->
+                        val (level, message) = logs[index]
+                        val annotatedText = remember(
+                            level,
+                            message,
+                            defaultTextColor,
+                            errorColor,
+                            warnColor
+                        ) {
                             val processedMessage = message.replace(
                                 Regex(Regex.escape(Constants.DS_BINARY_PATH)),
                                 "droidspaces"
