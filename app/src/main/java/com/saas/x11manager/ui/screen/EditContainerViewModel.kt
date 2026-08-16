@@ -19,6 +19,7 @@ class EditContainerViewModel : ViewModel() {
     var status by mutableStateOf(ContainerStatus.UNKNOWN)
     var enablePulseAudio by mutableStateOf(false)
     var initSystem by mutableStateOf(InitSystem.SYSTEMD)
+        private set
     var logs by mutableStateOf<List<Pair<Int, String>>>(emptyList())
     var isSaving by mutableStateOf(false)
     var saveError by mutableStateOf<String?>(null)
@@ -39,9 +40,17 @@ class EditContainerViewModel : ViewModel() {
             name = info.name
             hostname = info.hostname
             status = info.status
-            enablePulseAudio = info.bindMounts.contains("/tmp/.pulse-socket")
             initSystem = info.initSystem
+            enablePulseAudio = initSystem == InitSystem.SYSTEMD &&
+                info.bindMounts.contains("/tmp/.pulse-socket")
             logs = emptyList()
+        }
+    }
+
+    fun selectInitSystem(system: InitSystem) {
+        initSystem = system
+        if (system == InitSystem.OPENRC) {
+            enablePulseAudio = false
         }
     }
 
@@ -61,9 +70,10 @@ class EditContainerViewModel : ViewModel() {
 
                 logs = logs + (Log.INFO to "[*] Saving configuration...")
 
+                val effectivePulseAudio = enablePulseAudio && initSystem == InitSystem.SYSTEMD
                 val paOk = ContainerManager.updatePulseAudioBindMount(
                     name = containerName,
-                    enable = enablePulseAudio,
+                    enable = effectivePulseAudio,
                     cacheDir = cd
                 )
 
@@ -79,8 +89,9 @@ class EditContainerViewModel : ViewModel() {
                     val info = ContainerManager.getContainerInfo(containerName)
                     if (info != null) {
                         status = info.status
-                        enablePulseAudio = info.bindMounts.contains("/tmp/.pulse-socket")
                         initSystem = info.initSystem
+                        enablePulseAudio = initSystem == InitSystem.SYSTEMD &&
+                            info.bindMounts.contains("/tmp/.pulse-socket")
                     }
                 } else {
                     logs = logs + (Log.ERROR to "[-] Failed to write config")

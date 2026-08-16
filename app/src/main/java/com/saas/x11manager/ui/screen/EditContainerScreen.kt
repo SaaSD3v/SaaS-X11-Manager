@@ -100,7 +100,7 @@ fun EditContainerScreen(
 
                         Surface(
                             modifier = Modifier.fillMaxWidth().clickable {
-                                if (initSystem != sys) viewModel.initSystem = sys
+                                if (initSystem != sys) viewModel.selectInitSystem(sys)
                             },
                             shape = RoundedCornerShape(14.dp),
                             color = bgColor,
@@ -112,7 +112,7 @@ fun EditContainerScreen(
                             ) {
                                 RadioButton(
                                     selected = selected,
-                                    onClick = { if (initSystem != sys) viewModel.initSystem = sys },
+                                    onClick = { if (initSystem != sys) viewModel.selectInitSystem(sys) },
                                     colors = RadioButtonDefaults.colors(
                                         selectedColor = MaterialTheme.colorScheme.primary,
                                         unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
