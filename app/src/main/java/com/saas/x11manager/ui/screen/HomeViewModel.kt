@@ -231,7 +231,7 @@ class HomeViewModel : ViewModel() {
             val logs = logsFor(container.name)
             logs.clear()
             showLogViewerFor = container.name
-            val logger = ViewModelLogger { level, message -> logs.add(level to message) }
+            val logger = ViewModelLogger { level, message -> appendLog(logs, level, message) }
 
             try {
                 X11SessionManager.startX11Session(
@@ -265,7 +265,7 @@ class HomeViewModel : ViewModel() {
             val logs = logsFor(container.name)
             logs.clear()
             showLogViewerFor = container.name
-            val logger = ViewModelLogger { level, message -> logs.add(level to message) }
+            val logger = ViewModelLogger { level, message -> appendLog(logs, level, message) }
 
             try {
                 val stopped = ContainerManager.stopContainer(container.name, logger)
@@ -309,14 +309,14 @@ class HomeViewModel : ViewModel() {
         if (logs.isEmpty()) {
             val status = if (container.isRunning) "Running" else "Stopped"
             val pidLine = if (container.pid != null) "  PID: ${container.pid}" else ""
-            logs.add(Log.INFO to "Container: ${container.name}")
-            logs.add(Log.INFO to "  Status: $status$pidLine")
-            logs.add(Log.INFO to "  Rootfs: ${container.rootfsPath}")
+            appendLog(logs, Log.INFO, "Container: ${container.name}")
+            appendLog(logs, Log.INFO, "  Status: $status$pidLine")
+            appendLog(logs, Log.INFO, "  Rootfs: ${container.rootfsPath}")
             if (container.hostname.isNotEmpty()) {
-                logs.add(Log.INFO to "  Hostname: ${container.hostname}")
+                appendLog(logs, Log.INFO, "  Hostname: ${container.hostname}")
             }
-            logs.add(Log.INFO to "")
-            logs.add(Log.INFO to "Start X11 session to see live logs.")
+            appendLog(logs, Log.INFO, "")
+            appendLog(logs, Log.INFO, "Start X11 session to see live logs.")
         }
     }
 
@@ -342,6 +342,20 @@ class HomeViewModel : ViewModel() {
         val newLogs = mutableStateListOf<Pair<Int, String>>()
         containerLogs = containerLogs.toMutableMap().apply { put(name, newLogs) }
         return newLogs
+    }
+
+    private fun appendLog(
+        logs: SnapshotStateList<Pair<Int, String>>,
+        level: Int,
+        message: String
+    ) {
+        logs.add(level to message)
+        if (logs.size > MAX_LOG_ENTRIES) {
+            val removeCount = logs.size - LOG_ENTRIES_AFTER_TRIM
+            repeat(removeCount) {
+                logs.removeAt(0)
+            }
+        }
     }
 
     private suspend fun getKernelVersion(): String = withContext(Dispatchers.IO) {
@@ -372,4 +386,9 @@ class HomeViewModel : ViewModel() {
         val containers: List<ContainerInfo>,
         val loader: Pair<LoaderStatus, Int?>
     )
+
+    private companion object {
+        const val MAX_LOG_ENTRIES = 2_000
+        const val LOG_ENTRIES_AFTER_TRIM = 1_500
+    }
 }
