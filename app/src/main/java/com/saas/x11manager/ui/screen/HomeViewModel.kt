@@ -2,15 +2,17 @@ package com.saas.x11manager.ui.screen
 
 import android.util.Log
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
-import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saas.x11manager.util.*
 import com.topjohnwu.superuser.Shell
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -66,16 +68,25 @@ class HomeViewModel : ViewModel() {
     val rootProvider: StateFlow<String> = _rootProvider
 
     private var initialized = false
+    private var refreshJob: Job? = null
+    private var runtimeRefreshJob: Job? = null
+    private var refreshGeneration = 0L
+    private var runtimeStateGeneration = 0L
 
     init {
         refresh()
     }
 
     fun refresh() {
-        viewModelScope.launch {
+        val generation = ++refreshGeneration
+        val runtimeGenerationAtStart = runtimeStateGeneration
+        refreshJob?.cancel()
+
+        refreshJob = viewModelScope.launch {
             if (!initialized) _isLoading.value = true
+
             try {
-                coroutineScope {
+                val snapshot = coroutineScope {
                     val rootDef = async(Dispatchers.IO) {
                         val status = RootChecker.checkRootAccess()
                         val provider = RootChecker.getRootProvider()
@@ -99,34 +110,99 @@ class HomeViewModel : ViewModel() {
                         }
                     }
 
-                    val (rootSt, rootPr) = rootDef.await()
-                    _rootStatus.value = rootSt
-                    _rootProvider.value = rootPr
-                    _termuxStatus.value = termuxDef.await()
-                    _x11ApkStatus.value = x11Def.await()
-                    _dsStatus.value = dsDef.await()
-                    _containers.value = containersDef.await()
-                    val (ldStatus, ldPid) = loaderDef.await()
-                    _loaderStatus.value = ldStatus
-                    _loaderPid.value = ldPid
-
-                    val (kernel, archVal, sdk) = systemDef.await()
-                    _kernelVersion.value = kernel
-                    _arch.value = archVal
-                    _androidVersion.value = sdk
+                    FullRefreshSnapshot(
+                        root = rootDef.await(),
+                        termux = termuxDef.await(),
+                        x11Apk = x11Def.await(),
+                        droidspaces = dsDef.await(),
+                        containers = containersDef.await(),
+                        loader = loaderDef.await(),
+                        system = systemDef.await()
+                    )
                 }
+
+                if (generation != refreshGeneration) return@launch
+
+                _rootStatus.value = snapshot.root.first
+                _rootProvider.value = snapshot.root.second
+                _termuxStatus.value = snapshot.termux
+                _x11ApkStatus.value = snapshot.x11Apk
+                _dsStatus.value = snapshot.droidspaces
+
+                val (kernel, archVal, sdk) = snapshot.system
+                _kernelVersion.value = kernel
+                _arch.value = archVal
+                _androidVersion.value = sdk
+
+                if (
+                    runtimeGenerationAtStart == runtimeStateGeneration &&
+                    runningOperationContainer == null
+                ) {
+                    _containers.value = snapshot.containers
+                    _loaderStatus.value = snapshot.loader.first
+                    _loaderPid.value = snapshot.loader.second
+                }
+
                 initialized = true
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "refresh() failed", e)
             } finally {
-                _isLoading.value = false
+                if (generation == refreshGeneration) {
+                    _isLoading.value = false
+                }
+            }
+        }
+    }
+
+    fun refreshRuntimeState() {
+        if (!initialized || runningOperationContainer != null) return
+
+        val generation = ++runtimeStateGeneration
+        runtimeRefreshJob?.cancel()
+        runtimeRefreshJob = viewModelScope.launch {
+            try {
+                val snapshot = coroutineScope {
+                    val containersDef = async(Dispatchers.IO) { ContainerManager.listContainers() }
+                    val loaderDef = async(Dispatchers.IO) {
+                        val status = X11SessionManager.getLoaderStatus()
+                        val pid = if (status == LoaderStatus.Running) X11SessionManager.getLoaderPid() else null
+                        status to pid
+                    }
+                    RuntimeRefreshSnapshot(
+                        containers = containersDef.await(),
+                        loader = loaderDef.await()
+                    )
+                }
+
+                if (
+                    generation != runtimeStateGeneration ||
+                    runningOperationContainer != null
+                ) return@launch
+
+                _containers.value = snapshot.containers
+                _loaderStatus.value = snapshot.loader.first
+                _loaderPid.value = snapshot.loader.second
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "refreshRuntimeState() failed", e)
             }
         }
     }
 
     private suspend fun refreshContainers() {
+        val generation = ++runtimeStateGeneration
+        runtimeRefreshJob?.cancel()
+
         try {
-            _containers.value = ContainerManager.listContainers()
+            val containers = ContainerManager.listContainers()
+            if (generation == runtimeStateGeneration) {
+                _containers.value = containers
+            }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("HomeViewModel", "refreshContainers() failed", e)
         }
@@ -140,6 +216,9 @@ class HomeViewModel : ViewModel() {
 
     private fun tryBeginOperation(containerName: String): Boolean {
         if (runningOperationContainer != null) return false
+
+        runtimeStateGeneration++
+        runtimeRefreshJob?.cancel()
         runningOperationContainer = containerName
         return true
     }
@@ -277,4 +356,19 @@ class HomeViewModel : ViewModel() {
             result.out.firstOrNull()?.trim() ?: ""
         } catch (_: Exception) { "" }
     }
+
+    private data class FullRefreshSnapshot(
+        val root: Pair<RootStatus, String>,
+        val termux: TermuxStatus,
+        val x11Apk: X11ApkStatus,
+        val droidspaces: Boolean,
+        val containers: List<ContainerInfo>,
+        val loader: Pair<LoaderStatus, Int?>,
+        val system: Triple<String, String, String>
+    )
+
+    private data class RuntimeRefreshSnapshot(
+        val containers: List<ContainerInfo>,
+        val loader: Pair<LoaderStatus, Int?>
+    )
 }
