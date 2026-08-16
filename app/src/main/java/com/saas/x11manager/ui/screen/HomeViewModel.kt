@@ -124,6 +124,20 @@ class HomeViewModel : ViewModel() {
         }
     }
 
+    private suspend fun refreshContainers() {
+        try {
+            _containers.value = ContainerManager.listContainers()
+        } catch (e: Exception) {
+            Log.e("HomeViewModel", "refreshContainers() failed", e)
+        }
+    }
+
+    private fun updateContainerState(name: String, status: ContainerStatus, pid: Int? = null) {
+        _containers.value = _containers.value.map { container ->
+            if (container.name == name) container.copy(status = status, pid = pid) else container
+        }
+    }
+
     fun startX11(container: ContainerInfo) {
         viewModelScope.launch {
             runningOperationContainer = container.name
@@ -138,6 +152,12 @@ class HomeViewModel : ViewModel() {
                     enablePulseAudioFix = container.enablePulseAudio,
                     logger = logger
                 )
+
+                val (running, pid) = ContainerManager.checkContainerStatusPublic(container.name)
+                if (running) {
+                    updateContainerState(container.name, ContainerStatus.RUNNING, pid)
+                }
+
                 _loaderStatus.value = X11SessionManager.getLoaderStatus()
                 _loaderPid.value = if (_loaderStatus.value == LoaderStatus.Running) {
                     X11SessionManager.getLoaderPid()
@@ -147,7 +167,7 @@ class HomeViewModel : ViewModel() {
                 logger.e("Error: ${e.message}")
             } finally {
                 runningOperationContainer = null
-                refresh()
+                refreshContainers()
             }
         }
     }
@@ -161,13 +181,16 @@ class HomeViewModel : ViewModel() {
             val logger = ViewModelLogger { level, message -> logs.add(level to message) }
 
             try {
-                ContainerManager.stopContainer(container.name, logger)
+                val stopped = ContainerManager.stopContainer(container.name, logger)
+                if (stopped) {
+                    updateContainerState(container.name, ContainerStatus.STOPPED, null)
+                }
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "stopContainer failed", e)
                 logger.e("Error: ${e.message}")
             } finally {
                 runningOperationContainer = null
-                refresh()
+                refreshContainers()
             }
         }
     }
@@ -177,12 +200,15 @@ class HomeViewModel : ViewModel() {
             val logger = ViewModelLogger { _, _ -> }
             try {
                 X11SessionManager.stopAll(logger)
+                _containers.value = _containers.value.map {
+                    it.copy(status = ContainerStatus.STOPPED, pid = null)
+                }
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "stopAll failed", e)
             } finally {
                 _loaderStatus.value = LoaderStatus.Stopped
                 _loaderPid.value = null
-                refresh()
+                refreshContainers()
             }
         }
     }
