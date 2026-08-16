@@ -8,6 +8,17 @@ enum class LoaderStatus { Running, Stopped }
 
 object X11SessionManager {
 
+    private fun getProcessPids(processName: String): List<Int> {
+        return try {
+            Shell.cmd("pidof $processName 2>/dev/null").exec().out
+                .flatMap { it.trim().split(Regex("\\s+")) }
+                .mapNotNull { it.toIntOrNull() }
+                .distinct()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     suspend fun getLoaderStatus(): LoaderStatus = withContext(Dispatchers.IO) {
         try {
             val r = Shell.cmd("test -S '${Constants.X11_SOCK_FILE}' && echo ok").exec()
@@ -17,9 +28,7 @@ object X11SessionManager {
     }
 
     suspend fun getLoaderPid(): Int? = withContext(Dispatchers.IO) {
-        try {
-            Shell.cmd("pidof termux-x11 2>/dev/null").exec().out.firstOrNull()?.trim()?.toIntOrNull()
-        } catch (_: Exception) { null }
+        getProcessPids("termux-x11").firstOrNull()
     }
 
     suspend fun startPulseAudio(logger: ContainerLogger? = null): Result<Int> = withContext(Dispatchers.IO) {
@@ -52,17 +61,15 @@ object X11SessionManager {
     }
 
     suspend fun getPulseAudioPid(): Int? = withContext(Dispatchers.IO) {
-        try {
-            Shell.cmd("pidof pulseaudio 2>/dev/null").exec().out.firstOrNull()?.trim()?.toIntOrNull()
-        } catch (_: Exception) { null }
+        getProcessPids("pulseaudio").firstOrNull()
     }
 
     suspend fun stopPulseAudio(logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
         try {
-            val pid = getPulseAudioPid()
-            if (pid != null && pid > 0) {
-                Shell.cmd("kill -9 $pid 2>/dev/null").exec()
-                logger?.i("[+] Stopped PulseAudio (PID=$pid)")
+            val pids = getProcessPids("pulseaudio")
+            if (pids.isNotEmpty()) {
+                Shell.cmd("kill -9 ${pids.joinToString(" ")} 2>/dev/null").exec()
+                logger?.i("[+] Stopped PulseAudio (PIDs=${pids.joinToString(",")})")
             }
             Shell.cmd("rm -f '${Constants.PULSE_SOCK}' 2>/dev/null").exec()
             true
@@ -80,15 +87,10 @@ object X11SessionManager {
                 return@withContext Result.success(existingPid)
             }
 
-            val stalePid = Shell.cmd("pidof termux-x11 2>/dev/null").exec()
-            if (stalePid.isSuccess && stalePid.out.isNotEmpty()) {
-                for (pid in stalePid.out) {
-                    val trimmed = pid.trim()
-                    if (trimmed.isNotEmpty()) {
-                        Shell.cmd("kill -9 $trimmed 2>/dev/null").exec()
-                        logger?.i("[+] Killed stale (PID=$trimmed)")
-                    }
-                }
+            val stalePids = getProcessPids("termux-x11")
+            if (stalePids.isNotEmpty()) {
+                Shell.cmd("kill -9 ${stalePids.joinToString(" ")} 2>/dev/null").exec()
+                logger?.i("[+] Killed stale loader PIDs=${stalePids.joinToString(",")}")
             }
 
             Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/X* 2>/dev/null").exec()
@@ -129,10 +131,10 @@ object X11SessionManager {
 
     suspend fun stopLoader(logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
         try {
-            val pid = getLoaderPid()
-            if (pid != null && pid > 0) {
-                Shell.cmd("kill -9 $pid 2>/dev/null").exec()
-                logger?.i("[+] Stopped loader (PID=$pid)")
+            val pids = getProcessPids("termux-x11")
+            if (pids.isNotEmpty()) {
+                Shell.cmd("kill -9 ${pids.joinToString(" ")} 2>/dev/null").exec()
+                logger?.i("[+] Stopped loader (PIDs=${pids.joinToString(",")})")
             }
             Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/X* 2>/dev/null").exec()
             Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/*-lock 2>/dev/null").exec()
