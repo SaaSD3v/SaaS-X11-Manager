@@ -157,7 +157,7 @@ object X11SessionManager {
         return startLoaderTracked(logger).map { it.pid ?: 0 }
     }
 
-    private fun rollbackLoader(lease: LoaderLease, logger: ContainerLogger? = null) {
+    private suspend fun rollbackLoader(lease: LoaderLease, logger: ContainerLogger? = null) {
         if (lease.reused) return
 
         killPids(lease.ownedPids)
