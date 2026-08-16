@@ -29,12 +29,13 @@ fun HomeScreen(
     val containers by viewModel.containers.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val expandedContainerName = remember { mutableStateOf<String?>(null) }
+    val activeOperation = viewModel.runningOperationContainer
 
     // Log dialog
     viewModel.showLogViewerFor?.let { containerName ->
         val memoryLogs: List<Pair<Int, String>> =
             viewModel.containerLogs[containerName] ?: emptyList()
-        val isBlocking = viewModel.runningOperationContainer == containerName
+        val isBlocking = activeOperation == containerName || activeOperation == "__all__"
         TerminalDialog(
             title = "Logs: $containerName",
             logs = memoryLogs,
@@ -88,7 +89,7 @@ fun HomeScreen(
                         ContainerCard(
                             container = container,
                             isExpanded = expandedContainerName.value == container.name,
-                            isOperationRunning = viewModel.runningOperationContainer == container.name,
+                            isOperationRunning = activeOperation != null,
                             actions = ContainerCardActions(
                                 onToggleExpand = {
                                     expandedContainerName.value =
