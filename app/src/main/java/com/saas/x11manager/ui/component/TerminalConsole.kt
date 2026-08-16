@@ -35,6 +35,11 @@ fun ShimmerAnimation(
     enabled: Boolean = true,
     content: @Composable () -> Unit
 ) {
+    if (!enabled) {
+        TerminalFrame(modifier = modifier, content = content)
+        return
+    }
+
     val transition = rememberInfiniteTransition(label = "shimmer")
     val translateAnim by transition.animateFloat(
         initialValue = 0f,
@@ -46,39 +51,41 @@ fun ShimmerAnimation(
         label = "shimmerTranslate"
     )
 
-    val shimmerAlpha by animateFloatAsState(
-        targetValue = if (enabled) 1f else 0f,
-        animationSpec = tween(durationMillis = 800, easing = LinearOutSlowInEasing),
-        label = "shimmerAlpha"
-    )
-
     val shades = listOf(
         Color.Transparent,
         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f),
         Color.Transparent
     )
     val brush = Brush.linearGradient(
-        colors = listOf(
-            shades[0].copy(alpha = shades[0].alpha * shimmerAlpha + shades[0].alpha * (1f - shimmerAlpha) * 0.5f),
-            shades[1].copy(alpha = shades[1].alpha * shimmerAlpha + shades[0].alpha * (1f - shimmerAlpha) * 0.5f),
-            shades[2].copy(alpha = shades[2].alpha * shimmerAlpha + shades[0].alpha * (1f - shimmerAlpha) * 0.5f),
-        ),
+        colors = shades,
         start = Offset(10f, 10f),
         end = Offset(translateAnim, translateAnim)
     )
 
+    TerminalFrame(modifier = modifier, brush = brush, content = content)
+}
+
+@Composable
+private fun TerminalFrame(
+    modifier: Modifier,
+    brush: Brush? = null,
+    content: @Composable () -> Unit
+) {
+    val shape = RoundedCornerShape(16.dp)
+    val framedModifier = modifier
+        .clip(shape)
+        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+        .let { base -> if (brush != null) base.background(brush) else base }
+        .border(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+            shape = shape
+        )
+
     Surface(
-        modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .background(brush)
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                shape = RoundedCornerShape(16.dp)
-            ),
+        modifier = framedModifier,
         color = Color.Transparent,
-        shape = RoundedCornerShape(16.dp),
+        shape = shape,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp
     ) {
