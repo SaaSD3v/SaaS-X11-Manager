@@ -16,7 +16,6 @@ data class ContainerInfo(
     val enableTermuxX11: Boolean = false,
     val enableLegacyTermuxX11: Boolean = false,
     val enableHwAccess: Boolean = false,
-    val enablePulseAudio: Boolean = false,
     val netMode: String = "nat",
     val bindMounts: String = "",
     val status: ContainerStatus = ContainerStatus.UNKNOWN,
@@ -24,13 +23,10 @@ data class ContainerInfo(
     val initSystem: InitSystem = InitSystem.SYSTEMD
 ) {
     val isRunning: Boolean get() = status == ContainerStatus.RUNNING
-    val hasPulseAudioBindMount: Boolean
-        get() = bindMounts.contains("/tmp/.pulse-socket")
 }
 
 object ContainerManager {
 
-    private const val PA_BIND = "${Constants.TERMUX_PREFIX}/tmp/.pulse-socket:/tmp/.pulse-socket"
     private const val CONFIG_MARKER = "@@SAAS_X11_CONTAINER@@"
 
     private data class RuntimeState(
@@ -237,7 +233,6 @@ object ContainerManager {
             enableTermuxX11 = m["enable_termux_x11"] == "1",
             enableLegacyTermuxX11 = m["enable_legacy_termux_x11"] == "1",
             enableHwAccess = m["enable_hw_access"] == "1",
-            enablePulseAudio = m["enable_pulseaudio"] == "1",
             netMode = m["net_mode"] ?: "nat",
             bindMounts = m["bind_mounts"] ?: ""
         )
@@ -261,48 +256,6 @@ object ContainerManager {
             ?: RuntimeState(ContainerStatus.UNKNOWN)
         val initSys = ContainerSettingsManager.getInitSystem(c.name) ?: InitSystem.SYSTEMD
         c.copy(status = state.status, pid = state.pid, initSystem = initSys)
-    }
-
-    suspend fun updatePulseAudioBindMount(
-        name: String,
-        enable: Boolean,
-        cacheDir: File
-    ): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val path = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
-            val r = Shell.cmd("cat '$path' 2>/dev/null").exec()
-            if (!r.isSuccess || r.out.isEmpty()) return@withContext false
-
-            val lines = r.out.toMutableList()
-            var bindIdx = -1
-            for (i in lines.indices) {
-                if (lines[i].trim().startsWith("bind_mounts=")) { bindIdx = i; break }
-            }
-
-            if (enable) {
-                if (bindIdx >= 0) {
-                    val cur = lines[bindIdx].substringAfter("bind_mounts=")
-                    if (!cur.contains(PA_BIND)) {
-                        lines[bindIdx] = "bind_mounts=${if (cur.isBlank()) PA_BIND else "$cur,$PA_BIND"}"
-                    }
-                } else {
-                    lines.add("bind_mounts=$PA_BIND")
-                }
-            } else if (bindIdx >= 0) {
-                val cur = lines[bindIdx].substringAfter("bind_mounts=")
-                val new = cur.replace(",$PA_BIND", "").replace("$PA_BIND,", "").replace(PA_BIND, "").trim()
-                if (new.isEmpty()) lines.removeAt(bindIdx) else lines[bindIdx] = "bind_mounts=$new"
-            }
-
-            val tmpFile = File(cacheDir, "container_$name.config")
-            tmpFile.writeText(lines.joinToString("\n") + "\n")
-            val cpResult = Shell.cmd("cp '${tmpFile.absolutePath}' '$path' 2>&1").exec()
-            tmpFile.delete()
-
-            if (!cpResult.isSuccess) return@withContext false
-            Shell.cmd("chmod 644 '$path' 2>/dev/null").exec()
-            true
-        } catch (_: Exception) { false }
     }
 
     suspend fun checkContainerStatusPublic(name: String): Pair<Boolean, Int?> = withContext(Dispatchers.IO) {

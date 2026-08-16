@@ -17,8 +17,4 @@ object Constants {
     const val LOADER_APK = "$TERMUX_PREFIX/libexec/termux-x11/loader.apk"
     const val X11_SOCK_DIR = "$TERMUX_PREFIX/tmp/.X11-unix"
     const val X11_SOCK_FILE = "$TERMUX_PREFIX/tmp/.X11-unix/X0"
-    const val PULSE_SOCK = "$TERMUX_PREFIX/tmp/.pulse-socket"
-    const val PULSE_BIN = "$TERMUX_PREFIX/bin/pulseaudio"
-
-    const val PA_SCRIPT = "/data/local/tmp/pulseaudio_fix.sh"
 }
