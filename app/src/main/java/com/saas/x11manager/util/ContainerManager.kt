@@ -31,84 +31,160 @@ data class ContainerInfo(
 object ContainerManager {
 
     private const val PA_BIND = "${Constants.TERMUX_PREFIX}/tmp/.pulse-socket:/tmp/.pulse-socket"
+    private const val CONFIG_MARKER = "@@SAAS_X11_CONTAINER@@"
 
     suspend fun listContainers(): List<ContainerInfo> = withContext(Dispatchers.IO) {
-        val containers = mutableListOf<ContainerInfo>()
         try {
-            val lsResult = Shell.cmd("ls '${Constants.CONTAINERS_DIR}' 2>/dev/null").exec()
-            if (!lsResult.isSuccess || lsResult.out.isEmpty()) return@withContext containers
+            val configs = loadConfigsBatch()
+            if (configs.isEmpty()) return@withContext emptyList()
 
-            val names = lsResult.out.flatMap { line ->
-                line.trim().split("\\s+".toRegex())
-            }.filter { it.isNotEmpty() }
-
-            if (names.isEmpty()) return@withContext containers
-
-            for (name in names) {
-                val configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
-                val config = loadConfig(configPath, name) ?: continue
-                val running = isContainerRunning(name)
-                containers.add(config.copy(
-                    status = if (running) ContainerStatus.RUNNING else ContainerStatus.STOPPED
-                ))
+            val running = getRunningContainers()
+            configs.map { container ->
+                val pid = running[container.name]
+                container.copy(
+                    status = if (pid != null) ContainerStatus.RUNNING else ContainerStatus.STOPPED,
+                    pid = pid
+                )
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            emptyList()
         }
-        containers
+    }
+
+    /**
+     * Reads every container.config using one root shell invocation instead of
+     * spawning a root command for each installed container.
+     */
+    private fun loadConfigsBatch(): List<ContainerInfo> {
+        val script = """
+            for cfg in '${Constants.CONTAINERS_DIR}'/*/${Constants.CONFIG_FILE}; do
+                [ -f "\$cfg" ] || continue
+                dir=\${cfg%/${Constants.CONFIG_FILE}}
+                fallback=\${dir##*/}
+                printf '%s%s\n' '$CONFIG_MARKER' "\$fallback"
+                cat "\$cfg"
+            done
+        """.trimIndent()
+
+        val result = Shell.cmd(script).exec()
+        if (!result.isSuccess || result.out.isEmpty()) return emptyList()
+
+        val containers = mutableListOf<ContainerInfo>()
+        var fallbackName: String? = null
+        val configLines = mutableListOf<String>()
+
+        fun flush() {
+            val fallback = fallbackName ?: return
+            parseConfigLines(
+                lines = configLines,
+                defaultName = fallback,
+                path = "${Constants.CONTAINERS_DIR}/$fallback/${Constants.CONFIG_FILE}"
+            )?.let(containers::add)
+            configLines.clear()
+        }
+
+        result.out.forEach { line ->
+            if (line.startsWith(CONFIG_MARKER)) {
+                flush()
+                fallbackName = line.removePrefix(CONFIG_MARKER)
+            } else if (fallbackName != null) {
+                configLines.add(line)
+            }
+        }
+        flush()
+
+        return containers
+    }
+
+    /**
+     * DroidSpaces >= 6.2.5 exposes machine-readable `show` output:
+     * CONT_<name>=<pid>. One call replaces an expensive `run echo ok` probe
+     * for every container and also gives us the actual init PID.
+     */
+    private fun getRunningContainers(): Map<String, Int> {
+        return try {
+            val result = Shell.cmd("${Constants.DS_BINARY_PATH} --format show 2>/dev/null").exec()
+            if (!result.isSuccess) return emptyMap()
+
+            buildMap {
+                result.out.forEach { raw ->
+                    val line = raw.trim()
+                    if (!line.startsWith("CONT_")) return@forEach
+                    val separator = line.lastIndexOf('=')
+                    if (separator <= 5) return@forEach
+
+                    val name = line.substring(5, separator)
+                    val pid = line.substring(separator + 1).toIntOrNull() ?: return@forEach
+                    put(name, pid)
+                }
+            }
+        } catch (_: Exception) {
+            emptyMap()
+        }
     }
 
     private fun isContainerRunning(name: String): Boolean {
-        return try {
-            val r = Shell.cmd(
-                "${Constants.DS_BINARY_PATH} --name='$name' run 'echo ok' 2>/dev/null"
-            ).exec()
-            r.isSuccess && r.out.any { it.trim() == "ok" }
-        } catch (_: Exception) { false }
+        return getRunningContainers().containsKey(name)
+    }
+
+    private fun parseConfigLines(
+        lines: List<String>,
+        defaultName: String,
+        path: String
+    ): ContainerInfo? {
+        val m = mutableMapOf<String, String>()
+        lines.forEach { line ->
+            val t = line.trim()
+            if (t.isEmpty() || t.startsWith("#")) return@forEach
+            val p = t.split("=", limit = 2)
+            if (p.size == 2) m[p[0].trim()] = p[1].trim()
+        }
+
+        val name = m["name"] ?: defaultName
+        val sparse = m["use_sparse_image"] == "1"
+        val rootfs = m["rootfs_path"] ?: if (sparse) {
+            "${Constants.CONTAINERS_DIR}/$defaultName/rootfs.img"
+        } else {
+            "${Constants.CONTAINERS_DIR}/$defaultName/rootfs"
+        }
+        if (rootfs.isBlank()) return null
+
+        return ContainerInfo(
+            name = name,
+            rootfsPath = rootfs,
+            configPath = path,
+            hostname = m["hostname"] ?: "",
+            enableTermuxX11 = m["enable_termux_x11"] == "1",
+            enableLegacyTermuxX11 = m["enable_legacy_termux_x11"] == "1",
+            enableHwAccess = m["enable_hw_access"] == "1",
+            enablePulseAudio = m["enable_pulseaudio"] == "1",
+            netMode = m["net_mode"] ?: "nat",
+            bindMounts = m["bind_mounts"] ?: ""
+        )
     }
 
     private fun loadConfig(path: String, defaultName: String): ContainerInfo? {
         return try {
             val r = Shell.cmd("cat '$path' 2>/dev/null").exec()
             if (!r.isSuccess || r.out.isEmpty()) return null
-
-            val m = mutableMapOf<String, String>()
-            r.out.forEach { line ->
-                val t = line.trim()
-                if (t.isEmpty() || t.startsWith("#")) return@forEach
-                val p = t.split("=", limit = 2)
-                if (p.size == 2) m[p[0].trim()] = p[1].trim()
-            }
-
-            val name = m["name"] ?: defaultName
-            val sparse = m["use_sparse_image"] == "1"
-            val rootfs = m["rootfs_path"] ?: if (sparse) {
-                "${Constants.CONTAINERS_DIR}/$defaultName/rootfs.img"
-            } else {
-                "${Constants.CONTAINERS_DIR}/$defaultName/rootfs"
-            }
-            if (rootfs.isBlank()) return null
-
-            ContainerInfo(
-                name = name, rootfsPath = rootfs, configPath = path,
-                hostname = m["hostname"] ?: "",
-                enableTermuxX11 = m["enable_termux_x11"] == "1",
-                enableLegacyTermuxX11 = m["enable_legacy_termux_x11"] == "1",
-                enableHwAccess = m["enable_hw_access"] == "1",
-                enablePulseAudio = m["enable_pulseaudio"] == "1",
-                netMode = m["net_mode"] ?: "nat",
-                bindMounts = m["bind_mounts"] ?: ""
-            )
-        } catch (_: Exception) { null }
+            parseConfigLines(r.out, defaultName, path)
+        } catch (_: Exception) {
+            null
+        }
     }
 
     suspend fun getContainerInfo(name: String): ContainerInfo? = withContext(Dispatchers.IO) {
         val path = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
         if (!Shell.cmd("test -f '$path'").exec().isSuccess) return@withContext null
         val c = loadConfig(path, name) ?: return@withContext null
-        val running = isContainerRunning(c.name)
+        val pid = getRunningContainers()[c.name]
         val initSys = detectInitSystem(c.rootfsPath)
-        c.copy(status = if (running) ContainerStatus.RUNNING else ContainerStatus.STOPPED, initSystem = initSys)
+        c.copy(
+            status = if (pid != null) ContainerStatus.RUNNING else ContainerStatus.STOPPED,
+            pid = pid,
+            initSystem = initSys
+        )
     }
 
     private fun detectInitSystem(rootfsPath: String): InitSystem {
@@ -143,12 +219,10 @@ object ContainerManager {
                 } else {
                     lines.add("bind_mounts=$PA_BIND")
                 }
-            } else {
-                if (bindIdx >= 0) {
-                    val cur = lines[bindIdx].substringAfter("bind_mounts=")
-                    val new = cur.replace(",$PA_BIND", "").replace("$PA_BIND,", "").replace(PA_BIND, "").trim()
-                    if (new.isEmpty()) lines.removeAt(bindIdx) else lines[bindIdx] = "bind_mounts=$new"
-                }
+            } else if (bindIdx >= 0) {
+                val cur = lines[bindIdx].substringAfter("bind_mounts=")
+                val new = cur.replace(",$PA_BIND", "").replace("$PA_BIND,", "").replace(PA_BIND, "").trim()
+                if (new.isEmpty()) lines.removeAt(bindIdx) else lines[bindIdx] = "bind_mounts=$new"
             }
 
             val tmpFile = File(cacheDir, "container_$name.config")
@@ -163,8 +237,8 @@ object ContainerManager {
     }
 
     suspend fun checkContainerStatusPublic(name: String): Pair<Boolean, Int?> = withContext(Dispatchers.IO) {
-        val running = isContainerRunning(name)
-        Pair(running, null)
+        val pid = getRunningContainers()[name]
+        Pair(pid != null, pid)
     }
 
     suspend fun updateInitSystem(
