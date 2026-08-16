@@ -57,15 +57,16 @@ object ContainerManager {
      * spawning a root command for each installed container.
      */
     private fun loadConfigsBatch(): List<ContainerInfo> {
-        val script = """
-            for cfg in '${Constants.CONTAINERS_DIR}'/*/${Constants.CONFIG_FILE}; do
-                [ -f "\$cfg" ] || continue
-                dir=\${cfg%/${Constants.CONFIG_FILE}}
-                fallback=\${dir##*/}
-                printf '%s%s\n' '$CONFIG_MARKER' "\$fallback"
-                cat "\$cfg"
-            done
-        """.trimIndent()
+        val containersDir = Constants.CONTAINERS_DIR
+        val configFile = Constants.CONFIG_FILE
+        val marker = CONFIG_MARKER
+        val script = "for cfg in '$containersDir'/*/$configFile; do " +
+            "[ -f \"\$cfg\" ] || continue; " +
+            "dir=\${cfg%/$configFile}; " +
+            "fallback=\${dir##*/}; " +
+            "printf '%s%s\\n' '$marker' \"\$fallback\"; " +
+            "cat \"\$cfg\"; " +
+            "done"
 
         val result = Shell.cmd(script).exec()
         if (!result.isSuccess || result.out.isEmpty()) return emptyList()
