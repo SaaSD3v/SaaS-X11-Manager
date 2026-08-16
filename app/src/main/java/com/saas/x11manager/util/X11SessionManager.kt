@@ -25,6 +25,15 @@ object X11SessionManager {
         }
     }
 
+    private fun isPidAlive(pid: Int): Boolean {
+        if (pid <= 0) return false
+        return try {
+            Shell.cmd("test -d /proc/$pid 2>/dev/null").exec().isSuccess
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun clearX11SocketFiles() {
         Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/X* 2>/dev/null").exec()
         Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/*-lock 2>/dev/null").exec()
@@ -84,7 +93,7 @@ object X11SessionManager {
                 "CLASSPATH=${Constants.LOADER_APK} /system/bin/app_process " +
                     "-Xnoimage-dex2oat / " +
                     "--nice-name=termux-x11 com.termux.x11.Loader :0 " +
-                    ">/dev/null 2>&1 & echo \\$!"
+                    ">/dev/null 2>&1 & echo ${'$'}!"
             ).exec()
             launchAttempted = true
             capturedPid = launch.out.asReversed()
@@ -105,13 +114,13 @@ object X11SessionManager {
 
             val currentPids = getProcessPids("termux-x11")
             val ownedPids = currentPids.filter { it !in pidsBeforeLaunch }.toMutableList()
-            if (capturedPid != null && capturedPid in currentPids && capturedPid !in ownedPids) {
+            if (capturedPid != null && isPidAlive(capturedPid) && capturedPid !in ownedPids) {
                 ownedPids.add(capturedPid)
             }
 
             if (socketReady) {
                 val pid = when {
-                    capturedPid != null && capturedPid in currentPids -> capturedPid
+                    capturedPid != null && isPidAlive(capturedPid) -> capturedPid
                     ownedPids.isNotEmpty() -> ownedPids.first()
                     else -> currentPids.firstOrNull()
                 }
@@ -133,7 +142,7 @@ object X11SessionManager {
             if (launchAttempted) {
                 val currentPids = getProcessPids("termux-x11")
                 val ownedPids = currentPids.filter { it !in pidsBeforeLaunch }.toMutableList()
-                if (capturedPid != null && capturedPid in currentPids && capturedPid !in ownedPids) {
+                if (capturedPid != null && isPidAlive(capturedPid) && capturedPid !in ownedPids) {
                     ownedPids.add(capturedPid)
                 }
                 killPids(ownedPids)
@@ -198,7 +207,8 @@ object X11SessionManager {
                 logger?.e("[-] Loader failed: ${loaderResult.exceptionOrNull()?.message}")
                 return@withContext
             }
-            loaderLease = loaderResult.getOrThrow()
+            val activeLoaderLease = loaderResult.getOrThrow()
+            loaderLease = activeLoaderLease
 
             logger?.i("")
             logger?.i("[*] Starting container...")
@@ -209,7 +219,7 @@ object X11SessionManager {
                 val (runningAfterFailure, _) = ContainerManager.checkContainerStatusPublic(containerName)
                 if (!runningAfterFailure) {
                     logger?.e("[-] Container start failed")
-                    rollbackLoader(loaderLease, logger)
+                    rollbackLoader(activeLoaderLease, logger)
                     return@withContext
                 }
 
