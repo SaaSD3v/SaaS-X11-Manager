@@ -32,38 +32,7 @@ object ContainerConfigManager {
             }
 
             val original = read.out.toList()
-            val updated = original.toMutableList()
-            var x11FlagFound = false
-            var bindMountsFound = false
-
-            for (index in updated.indices) {
-                val raw = updated[index]
-                val trimmed = raw.trim()
-                if (trimmed.isEmpty() || trimmed.startsWith("#") || !trimmed.contains('=')) continue
-
-                val key = trimmed.substringBefore('=').trim()
-                when (key) {
-                    "enable_termux_x11" -> {
-                        x11FlagFound = true
-                        updated[index] = "enable_termux_x11=0"
-                    }
-                    "bind_mounts" -> {
-                        bindMountsFound = true
-                        val value = trimmed.substringAfter('=', "")
-                        val entries = value.split(',')
-                            .map { it.trim() }
-                            .filter { it.isNotEmpty() }
-                            .filterNot { bindDestination(it) == X11_CONTAINER_SOCKET_DIR }
-                            .toMutableList()
-
-                        if (x11Bind !in entries) entries.add(x11Bind)
-                        updated[index] = "bind_mounts=${entries.distinct().joinToString(",")}"
-                    }
-                }
-            }
-
-            if (!x11FlagFound) updated.add("enable_termux_x11=0")
-            if (!bindMountsFound) updated.add("bind_mounts=$x11Bind")
+            val updated = buildManualX11Config(original)
 
             val originalText = original.joinToString("\n") + "\n"
             val updatedText = updated.joinToString("\n") + "\n"
@@ -91,6 +60,43 @@ object ContainerConfigManager {
             logger?.e("[-] X11 config error: ${e.message}")
             false
         }
+    }
+
+    internal fun buildManualX11Config(original: List<String>): List<String> {
+        val updated = original.toMutableList()
+        var x11FlagFound = false
+        var bindMountsFound = false
+
+        for (index in updated.indices) {
+            val raw = updated[index]
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#") || !trimmed.contains('=')) continue
+
+            val key = trimmed.substringBefore('=').trim()
+            when (key) {
+                "enable_termux_x11" -> {
+                    x11FlagFound = true
+                    updated[index] = "enable_termux_x11=0"
+                }
+                "bind_mounts" -> {
+                    bindMountsFound = true
+                    val value = trimmed.substringAfter('=', "")
+                    val entries = value.split(',')
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() }
+                        .filterNot { bindDestination(it) == X11_CONTAINER_SOCKET_DIR }
+                        .toMutableList()
+
+                    if (x11Bind !in entries) entries.add(x11Bind)
+                    updated[index] = "bind_mounts=${entries.distinct().joinToString(",")}"
+                }
+            }
+        }
+
+        if (!x11FlagFound) updated.add("enable_termux_x11=0")
+        if (!bindMountsFound) updated.add("bind_mounts=$x11Bind")
+
+        return updated
     }
 
     private fun bindDestination(entry: String): String? {
