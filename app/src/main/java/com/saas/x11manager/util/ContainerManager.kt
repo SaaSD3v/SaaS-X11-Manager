@@ -291,28 +291,105 @@ object ContainerManager {
     }
 
     private fun applyOpenRcInitFiles(root: String, cacheDir: File): Boolean {
-        Shell.cmd("mkdir -p '$root/usr/local/bin'").exec()
-        Shell.cmd("mkdir -p '$root/etc/init.d'").exec()
-        Shell.cmd("mkdir -p '$root/etc/runlevels/default'").exec()
+        if (!Shell.cmd("test -x '$root/sbin/openrc-run'").exec().isSuccess) {
+            return false
+        }
 
-        val tmpSh = File(cacheDir, "x11-session.sh")
-        tmpSh.writeText("#!/bin/sh\nexport DISPLAY=:0\nexport HOME=/root\nexport USER=root\nexport SHELL=/bin/sh\nexport XDG_SESSION_TYPE=x11\nexport XDG_RUNTIME_DIR=/tmp/runtime-root\nmkdir -p \"\$XDG_RUNTIME_DIR\"\nexec startxfce4\n")
-        Shell.cmd("cp '${tmpSh.absolutePath}' '$root/usr/local/bin/x11-session.sh' && chmod 755 '$root/usr/local/bin/x11-session.sh'").exec()
-        tmpSh.delete()
+        val sessionFile = File.createTempFile("x11-session-openrc-", ".sh", cacheDir)
+        val setupFile = File.createTempFile("x11-setup-openrc-", "", cacheDir)
+        val xfceFile = File.createTempFile("x11-xfce-openrc-", "", cacheDir)
 
-        val tmpSetup = File(cacheDir, "x11-setup")
-        tmpSetup.writeText("#!/sbin/openrc-run\n\ndescription=\"Setup X11 socket directory and bind mount\"\n\ndepend() {\n    before x11-xfce\n    keyword -stop\n}\n\nstart() {\n    ebegin \"Setting up X11 socket\"\n    mkdir -p /tmp/.X11-unix\n    if ! mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n        mount --bind /usr/.X11-unix /tmp/.X11-unix 2>/dev/null\n    fi\n    mkdir -p /tmp/runtime-root\n    eend $?\n}\n\nstop() {\n    ebegin \"Unmounting X11 socket\"\n    if mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n        umount /tmp/.X11-unix 2>/dev/null\n    fi\n    eend $?\n}\n")
-        Shell.cmd("cp '${tmpSetup.absolutePath}' '$root/etc/init.d/x11-setup' && chmod 755 '$root/etc/init.d/x11-setup'").exec()
-        tmpSetup.delete()
+        return try {
+            sessionFile.writeText(
+                "#!/bin/sh\n" +
+                    "export DISPLAY=:0\n" +
+                    "export HOME=/root\n" +
+                    "export USER=root\n" +
+                    "export SHELL=/bin/sh\n" +
+                    "export XDG_SESSION_TYPE=x11\n" +
+                    "export XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
+                    "mkdir -p \"\$XDG_RUNTIME_DIR\"\n" +
+                    "exec startxfce4\n"
+            )
 
-        val tmpXfce = File(cacheDir, "x11-xfce")
-        tmpXfce.writeText("#!/sbin/openrc-run\n\ndescription=\"X11 XFCE Desktop on Termux:X11\"\n\ndepend() {\n    after x11-setup\n    keyword -stop\n}\n\nstart() {\n    ebegin \"Starting XFCE on X11\"\n    /usr/local/bin/x11-session.sh &\n    eend $?\n}\n\nstop() {\n    ebegin \"Stopping XFCE\"\n    pkill -f startxfce4 2>/dev/null\n    pkill -f xfce4-session 2>/dev/null\n    eend $?\n}\n")
-        Shell.cmd("cp '${tmpXfce.absolutePath}' '$root/etc/init.d/x11-xfce' && chmod 755 '$root/etc/init.d/x11-xfce'").exec()
-        tmpXfce.delete()
+            setupFile.writeText(
+                "#!/sbin/openrc-run\n\n" +
+                    "description=\"Setup X11 socket directory and bind mount\"\n\n" +
+                    "depend() {\n" +
+                    "    before x11-xfce\n" +
+                    "}\n\n" +
+                    "start() {\n" +
+                    "    ebegin \"Setting up X11 socket\"\n" +
+                    "    if [ ! -d /usr/.X11-unix ]; then\n" +
+                    "        eerror \"X11 source socket directory /usr/.X11-unix is missing\"\n" +
+                    "        eend 1\n" +
+                    "        return 1\n" +
+                    "    fi\n" +
+                    "    mkdir -p /tmp/.X11-unix /tmp/runtime-root || { eend 1; return 1; }\n" +
+                    "    if mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n" +
+                    "        eend 0\n" +
+                    "        return 0\n" +
+                    "    fi\n" +
+                    "    mount --bind /usr/.X11-unix /tmp/.X11-unix\n" +
+                    "    rc=$?\n" +
+                    "    eend \$rc\n" +
+                    "    return \$rc\n" +
+                    "}\n\n" +
+                    "stop() {\n" +
+                    "    ebegin \"Unmounting X11 socket\"\n" +
+                    "    if mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n" +
+                    "        umount /tmp/.X11-unix\n" +
+                    "        rc=$?\n" +
+                    "        eend \$rc\n" +
+                    "        return \$rc\n" +
+                    "    fi\n" +
+                    "    eend 0\n" +
+                    "}\n"
+            )
 
-        Shell.cmd("ln -sf /etc/init.d/x11-setup '$root/etc/runlevels/default/x11-setup'").exec()
-        Shell.cmd("ln -sf /etc/init.d/x11-xfce '$root/etc/runlevels/default/x11-xfce'").exec()
-        return true
+            xfceFile.writeText(
+                "#!/sbin/openrc-run\n\n" +
+                    "description=\"X11 XFCE Desktop on Termux:X11\"\n" +
+                    "command=\"/usr/local/bin/x11-session.sh\"\n" +
+                    "command_background=\"yes\"\n" +
+                    "pidfile=\"/run/x11-xfce.pid\"\n" +
+                    "stopgroup=\"yes\"\n\n" +
+                    "depend() {\n" +
+                    "    need x11-setup\n" +
+                    "}\n"
+            )
+
+            val install = Shell.cmd(
+                "rm -f '$root/etc/systemd/system/setup-x11-socket.service' " +
+                    "'$root/etc/systemd/system/x11-xfce.service' " +
+                    "'$root/etc/systemd/system/multi-user.target.wants/setup-x11-socket.service' " +
+                    "'$root/etc/systemd/system/graphical.target.wants/x11-xfce.service' 2>/dev/null; " +
+                    "mkdir -p '$root/usr/local/bin' '$root/etc/init.d' '$root/etc/runlevels/default' && " +
+                    "cp '${sessionFile.absolutePath}' '$root/usr/local/bin/x11-session.sh' && " +
+                    "chmod 755 '$root/usr/local/bin/x11-session.sh' && " +
+                    "cp '${setupFile.absolutePath}' '$root/etc/init.d/x11-setup' && " +
+                    "chmod 755 '$root/etc/init.d/x11-setup' && " +
+                    "cp '${xfceFile.absolutePath}' '$root/etc/init.d/x11-xfce' && " +
+                    "chmod 755 '$root/etc/init.d/x11-xfce' && " +
+                    "ln -sf /etc/init.d/x11-setup '$root/etc/runlevels/default/x11-setup' && " +
+                    "ln -sf /etc/init.d/x11-xfce '$root/etc/runlevels/default/x11-xfce'"
+            ).exec()
+            if (!install.isSuccess) return false
+
+            Shell.cmd(
+                "test -x '$root/usr/local/bin/x11-session.sh' && " +
+                    "test -x '$root/etc/init.d/x11-setup' && " +
+                    "test -x '$root/etc/init.d/x11-xfce' && " +
+                    "test -L '$root/etc/runlevels/default/x11-setup' && " +
+                    "test -L '$root/etc/runlevels/default/x11-xfce'"
+            ).exec().isSuccess
+        } catch (_: Exception) {
+            false
+        } finally {
+            sessionFile.delete()
+            setupFile.delete()
+            xfceFile.delete()
+        }
     }
 
     private fun applySystemdInitFiles(root: String, cacheDir: File): Boolean {
