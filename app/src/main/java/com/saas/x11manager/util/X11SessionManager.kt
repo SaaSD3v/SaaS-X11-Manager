@@ -8,6 +8,12 @@ enum class LoaderStatus { Running, Stopped }
 
 object X11SessionManager {
 
+    private data class LoaderLease(
+        val pid: Int?,
+        val ownedPids: List<Int>,
+        val reused: Boolean
+    )
+
     private fun getProcessPids(processName: String): List<Int> {
         return try {
             Shell.cmd("pidof $processName 2>/dev/null").exec().out
@@ -16,6 +22,18 @@ object X11SessionManager {
                 .distinct()
         } catch (_: Exception) {
             emptyList()
+        }
+    }
+
+    private fun clearX11SocketFiles() {
+        Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/X* 2>/dev/null").exec()
+        Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/*-lock 2>/dev/null").exec()
+    }
+
+    private fun killPids(pids: Collection<Int>) {
+        val targets = pids.filter { it > 0 }.distinct()
+        if (targets.isNotEmpty()) {
+            Shell.cmd("kill -9 ${targets.joinToString(" ")} 2>/dev/null").exec()
         }
     }
 
@@ -31,7 +49,13 @@ object X11SessionManager {
         getProcessPids("termux-x11").firstOrNull()
     }
 
-    suspend fun startLoader(logger: ContainerLogger? = null): Result<Int> = withContext(Dispatchers.IO) {
+    private suspend fun startLoaderTracked(
+        logger: ContainerLogger? = null
+    ): Result<LoaderLease> = withContext(Dispatchers.IO) {
+        var launchAttempted = false
+        var pidsBeforeLaunch = emptySet<Int>()
+        var capturedPid: Int? = null
+
         try {
             logger?.i("[*] Preparing X11 environment...")
 
@@ -39,60 +63,107 @@ object X11SessionManager {
             val existingPid = getLoaderPid()
             if (existingStatus == LoaderStatus.Running && existingPid != null && existingPid > 0) {
                 logger?.i("[+] Reusing X11 loader (PID=$existingPid)")
-                return@withContext Result.success(existingPid)
+                return@withContext Result.success(
+                    LoaderLease(pid = existingPid, ownedPids = emptyList(), reused = true)
+                )
             }
 
             val stalePids = getProcessPids("termux-x11")
             if (stalePids.isNotEmpty()) {
-                Shell.cmd("kill -9 ${stalePids.joinToString(" ")} 2>/dev/null").exec()
+                killPids(stalePids)
                 logger?.i("[+] Killed stale loader PIDs=${stalePids.joinToString(",")}")
             }
 
-            Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/X* 2>/dev/null").exec()
-            Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/*-lock 2>/dev/null").exec()
+            clearX11SocketFiles()
             Shell.cmd("mkdir -p '${Constants.X11_SOCK_DIR}' 2>/dev/null").exec()
 
+            pidsBeforeLaunch = getProcessPids("termux-x11").toSet()
             logger?.i("[*] Starting X11 loader...")
 
-            Shell.cmd(
+            val launch = Shell.cmd(
                 "CLASSPATH=${Constants.LOADER_APK} /system/bin/app_process " +
                     "-Xnoimage-dex2oat / " +
-                    "--nice-name=termux-x11 com.termux.x11.Loader :0 &"
+                    "--nice-name=termux-x11 com.termux.x11.Loader :0 " +
+                    ">/dev/null 2>&1 & echo \\$!"
             ).exec()
+            launchAttempted = true
+            capturedPid = launch.out.asReversed()
+                .firstNotNullOfOrNull { it.trim().toIntOrNull() }
 
             logger?.i("[*] Waiting for socket (10s)...")
             var wait = 0
+            var socketReady = false
             while (wait < 10) {
                 Thread.sleep(1000)
                 wait++
                 val r = Shell.cmd("test -S '${Constants.X11_SOCK_FILE}' && echo ok").exec()
-                if (r.isSuccess && r.out.isNotEmpty() && r.out[0].contains("ok")) break
+                if (r.isSuccess && r.out.any { it.contains("ok") }) {
+                    socketReady = true
+                    break
+                }
             }
 
-            val r = Shell.cmd("test -S '${Constants.X11_SOCK_FILE}' && echo ok").exec()
-            if (r.isSuccess && r.out.isNotEmpty() && r.out[0].contains("ok")) {
-                val pid = getLoaderPid() ?: 0
-                logger?.i("[+] X11 loader active (PID=$pid)")
-                Result.success(pid)
+            val currentPids = getProcessPids("termux-x11")
+            val ownedPids = currentPids.filter { it !in pidsBeforeLaunch }.toMutableList()
+            if (capturedPid != null && capturedPid in currentPids && capturedPid !in ownedPids) {
+                ownedPids.add(capturedPid)
+            }
+
+            if (socketReady) {
+                val pid = when {
+                    capturedPid != null && capturedPid in currentPids -> capturedPid
+                    ownedPids.isNotEmpty() -> ownedPids.first()
+                    else -> currentPids.firstOrNull()
+                }
+                logger?.i("[+] X11 loader active (PID=${pid ?: "unknown"})")
+                Result.success(
+                    LoaderLease(
+                        pid = pid,
+                        ownedPids = ownedPids.distinct(),
+                        reused = false
+                    )
+                )
             } else {
+                killPids(ownedPids)
+                clearX11SocketFiles()
                 logger?.e("[-] Socket X0 not created")
                 Result.failure(Exception("Socket X0 not created"))
             }
         } catch (e: Exception) {
+            if (launchAttempted) {
+                val currentPids = getProcessPids("termux-x11")
+                val ownedPids = currentPids.filter { it !in pidsBeforeLaunch }.toMutableList()
+                if (capturedPid != null && capturedPid in currentPids && capturedPid !in ownedPids) {
+                    ownedPids.add(capturedPid)
+                }
+                killPids(ownedPids)
+                clearX11SocketFiles()
+            }
             logger?.e("[-] Loader error: ${e.message}")
             Result.failure(e)
         }
+    }
+
+    suspend fun startLoader(logger: ContainerLogger? = null): Result<Int> {
+        return startLoaderTracked(logger).map { it.pid ?: 0 }
+    }
+
+    private fun rollbackLoader(lease: LoaderLease, logger: ContainerLogger? = null) {
+        if (lease.reused) return
+
+        killPids(lease.ownedPids)
+        clearX11SocketFiles()
+        logger?.i("[+] Rolled back X11 loader from failed session start")
     }
 
     suspend fun stopLoader(logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
         try {
             val pids = getProcessPids("termux-x11")
             if (pids.isNotEmpty()) {
-                Shell.cmd("kill -9 ${pids.joinToString(" ")} 2>/dev/null").exec()
+                killPids(pids)
                 logger?.i("[+] Stopped loader (PIDs=${pids.joinToString(",")})")
             }
-            Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/X* 2>/dev/null").exec()
-            Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/*-lock 2>/dev/null").exec()
+            clearX11SocketFiles()
             true
         } catch (_: Exception) { false }
     }
@@ -107,6 +178,9 @@ object X11SessionManager {
         containerName: String,
         logger: ContainerLogger? = null
     ) = withContext(Dispatchers.IO) {
+        var loaderLease: LoaderLease? = null
+        var containerStartAccepted = false
+
         try {
             logger?.i("--- Starting Session ---")
             logger?.i("")
@@ -119,18 +193,28 @@ object X11SessionManager {
             }
             logger?.i("")
 
-            val loaderResult = startLoader(logger)
-            loaderResult.onFailure { e ->
-                logger?.e("[-] Loader failed: ${e.message}")
+            val loaderResult = startLoaderTracked(logger)
+            if (loaderResult.isFailure) {
+                logger?.e("[-] Loader failed: ${loaderResult.exceptionOrNull()?.message}")
                 return@withContext
             }
+            loaderLease = loaderResult.getOrThrow()
 
             logger?.i("")
             logger?.i("[*] Starting container...")
             val started = ContainerManager.startContainer(containerName, logger)
-            if (!started) {
-                logger?.e("[-] Container start failed")
-                return@withContext
+            if (started) {
+                containerStartAccepted = true
+            } else {
+                val (runningAfterFailure, _) = ContainerManager.checkContainerStatusPublic(containerName)
+                if (!runningAfterFailure) {
+                    logger?.e("[-] Container start failed")
+                    rollbackLoader(loaderLease, logger)
+                    return@withContext
+                }
+
+                containerStartAccepted = true
+                logger?.w("[!] Start command reported failure, but container is running")
             }
 
             logger?.i("[*] Waiting for boot (15s)...")
@@ -149,11 +233,16 @@ object X11SessionManager {
             if (!isRunning) logger?.w("[!] Container may still be booting")
 
             logger?.i("[*] Opening Termux:X11...")
-            openTermuxX11()
+            if (!openTermuxX11()) {
+                logger?.w("[!] Could not open Termux:X11 activity")
+            }
 
             logger?.i("")
             logger?.i("[+] Session started")
         } catch (e: Exception) {
+            if (!containerStartAccepted) {
+                loaderLease?.let { rollbackLoader(it, logger) }
+            }
             logger?.e("[-] Error: ${e.message}")
         }
     }
