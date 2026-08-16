@@ -39,7 +39,6 @@ fun EditContainerScreen(
     val name = viewModel.name
     val hostname = viewModel.hostname
     val status = viewModel.status
-    val enablePulseAudio = viewModel.enablePulseAudio
     val initSystem = viewModel.initSystem
     val logs = viewModel.logs
     val isSaving = viewModel.isSaving
@@ -67,7 +66,6 @@ fun EditContainerScreen(
         ) {
             Spacer(Modifier.height(8.dp))
 
-            // Init System Radio Group
             Card(
                 Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -136,48 +134,6 @@ fun EditContainerScreen(
                 }
             }
 
-            // PulseAudio Fix (mutually exclusive - disables when OpenRC is active)
-            val paEnabled = initSystem == InitSystem.SYSTEMD
-            Card(
-                Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                ),
-                shape = RoundedCornerShape(20.dp),
-                elevation = CardDefaults.cardElevation(0.dp)
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "PulseAudio Fix",
-                            color = if (paEnabled) MaterialTheme.colorScheme.onSurface
-                                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                            fontSize = 14.sp
-                        )
-                        Text(
-                            if (paEnabled) "Adds PA socket bind mount"
-                            else "Disabled when OpenRC is active",
-                            color = if (paEnabled) MaterialTheme.colorScheme.onSurfaceVariant
-                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                            fontSize = 11.sp
-                        )
-                    }
-                    Switch(
-                        checked = enablePulseAudio,
-                        onCheckedChange = { if (paEnabled) viewModel.enablePulseAudio = it },
-                        enabled = paEnabled,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = MaterialTheme.colorScheme.primary,
-                            checkedTrackColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                        )
-                    )
-                }
-            }
-
-            // Status
             Card(
                 Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -206,7 +162,6 @@ fun EditContainerScreen(
                 }
             }
 
-            // Save button
             val buttonColor by animateColorAsState(
                 targetValue = if (isSaving) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.primary,
                 animationSpec = tween(200)

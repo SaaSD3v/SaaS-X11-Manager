@@ -17,7 +17,6 @@ class EditContainerViewModel : ViewModel() {
     var name by mutableStateOf("")
     var hostname by mutableStateOf("")
     var status by mutableStateOf(ContainerStatus.UNKNOWN)
-    var enablePulseAudio by mutableStateOf(false)
     var initSystem by mutableStateOf(InitSystem.SYSTEMD)
         private set
     var logs by mutableStateOf<List<Pair<Int, String>>>(emptyList())
@@ -41,17 +40,12 @@ class EditContainerViewModel : ViewModel() {
             hostname = info.hostname
             status = info.status
             initSystem = info.initSystem
-            enablePulseAudio = initSystem == InitSystem.SYSTEMD &&
-                info.bindMounts.contains("/tmp/.pulse-socket")
             logs = emptyList()
         }
     }
 
     fun selectInitSystem(system: InitSystem) {
         initSystem = system
-        if (system == InitSystem.OPENRC) {
-            enablePulseAudio = false
-        }
     }
 
     fun save() {
@@ -70,28 +64,19 @@ class EditContainerViewModel : ViewModel() {
 
                 logs = logs + (Log.INFO to "[*] Saving configuration...")
 
-                val effectivePulseAudio = enablePulseAudio && initSystem == InitSystem.SYSTEMD
-                val paOk = ContainerManager.updatePulseAudioBindMount(
-                    name = containerName,
-                    enable = effectivePulseAudio,
-                    cacheDir = cd
-                )
-
                 val initOk = ContainerManager.updateInitSystem(
                     name = containerName,
                     target = initSystem,
                     cacheDir = cd
                 )
 
-                if (paOk && initOk) {
+                if (initOk) {
                     logs = logs + (Log.INFO to "[+] Config saved successfully")
                     saveError = "OK: Config saved"
                     val info = ContainerManager.getContainerInfo(containerName)
                     if (info != null) {
                         status = info.status
                         initSystem = info.initSystem
-                        enablePulseAudio = initSystem == InitSystem.SYSTEMD &&
-                            info.bindMounts.contains("/tmp/.pulse-socket")
                     }
                 } else {
                     logs = logs + (Log.ERROR to "[-] Failed to write config")
