@@ -2,6 +2,7 @@ package com.saas.x11manager.util
 
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 enum class LoaderStatus { Running, Stopped }
@@ -103,7 +104,7 @@ object X11SessionManager {
             var wait = 0
             var socketReady = false
             while (wait < 10) {
-                Thread.sleep(1000)
+                delay(1000)
                 wait++
                 val r = Shell.cmd("test -S '${Constants.X11_SOCK_FILE}' && echo ok").exec()
                 if (r.isSuccess && r.out.any { it.contains("ok") }) {
@@ -183,6 +184,24 @@ object X11SessionManager {
         } catch (_: Exception) { false }
     }
 
+    private suspend fun waitForContainerRuntime(
+        containerName: String,
+        timeoutMillis: Long = 5_000L,
+        pollIntervalMillis: Long = 500L
+    ): Pair<Boolean, Int?> {
+        val deadline = System.nanoTime() + timeoutMillis * 1_000_000L
+        var latest = ContainerManager.checkContainerStatusPublic(containerName)
+        if (latest.first) return latest
+
+        while (System.nanoTime() < deadline) {
+            delay(pollIntervalMillis)
+            latest = ContainerManager.checkContainerStatusPublic(containerName)
+            if (latest.first) return latest
+        }
+
+        return latest
+    }
+
     suspend fun startX11Session(
         containerName: String,
         logger: ContainerLogger? = null
@@ -227,20 +246,13 @@ object X11SessionManager {
                 logger?.w("[!] Start command reported failure, but container is running")
             }
 
-            logger?.i("[*] Waiting for boot (15s)...")
-            var wait = 0
-            while (wait < 15) {
-                Thread.sleep(1000)
-                wait++
-                val (isRunning, _) = ContainerManager.checkContainerStatusPublic(containerName)
-                if (isRunning) {
-                    logger?.i("[+] Container ready (${wait}s)")
-                    break
-                }
+            logger?.i("[*] Confirming container runtime...")
+            val (isRunning, pid) = waitForContainerRuntime(containerName)
+            if (isRunning) {
+                logger?.i("[+] Container runtime active${if (pid != null) " (PID=$pid)" else ""}")
+            } else {
+                logger?.w("[!] Runtime status not confirmed yet; start command was accepted")
             }
-
-            val (isRunning, _) = ContainerManager.checkContainerStatusPublic(containerName)
-            if (!isRunning) logger?.w("[!] Container may still be booting")
 
             logger?.i("[*] Opening Termux:X11...")
             if (!openTermuxX11()) {
