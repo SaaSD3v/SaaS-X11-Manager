@@ -101,8 +101,8 @@ object X11SessionManager {
 
             Shell.cmd(
                 "CLASSPATH=${Constants.LOADER_APK} /system/bin/app_process " +
-                "-Xnoimage-dex2oat / " +
-                "--nice-name=termux-x11 com.termux.x11.Loader :0 &"
+                    "-Xnoimage-dex2oat / " +
+                    "--nice-name=termux-x11 com.termux.x11.Loader :0 &"
             ).exec()
 
             logger?.i("[*] Waiting for socket (10s)...")
@@ -155,6 +155,14 @@ object X11SessionManager {
     ) = withContext(Dispatchers.IO) {
         try {
             logger?.i("--- Starting Session ---")
+            logger?.i("")
+
+            logger?.i("[*] Preparing container X11 config...")
+            val configReady = ContainerConfigManager.ensureManualX11Config(containerName, logger)
+            if (!configReady) {
+                logger?.e("[-] Container X11 config is not ready")
+                return@withContext
+            }
             logger?.i("")
 
             if (enablePulseAudioFix) {
