@@ -138,9 +138,16 @@ class HomeViewModel : ViewModel() {
         }
     }
 
+    private fun tryBeginOperation(containerName: String): Boolean {
+        if (runningOperationContainer != null) return false
+        runningOperationContainer = containerName
+        return true
+    }
+
     fun startX11(container: ContainerInfo) {
+        if (!tryBeginOperation(container.name)) return
+
         viewModelScope.launch {
-            runningOperationContainer = container.name
             val logs = logsFor(container.name)
             logs.clear()
             showLogViewerFor = container.name
@@ -173,8 +180,9 @@ class HomeViewModel : ViewModel() {
     }
 
     fun stopContainer(container: ContainerInfo) {
+        if (!tryBeginOperation(container.name)) return
+
         viewModelScope.launch {
-            runningOperationContainer = container.name
             val logs = logsFor(container.name)
             logs.clear()
             showLogViewerFor = container.name
@@ -196,6 +204,8 @@ class HomeViewModel : ViewModel() {
     }
 
     fun stopAll() {
+        if (!tryBeginOperation("__all__")) return
+
         viewModelScope.launch {
             val logger = ViewModelLogger { _, _ -> }
             try {
@@ -206,6 +216,7 @@ class HomeViewModel : ViewModel() {
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "stopAll failed", e)
             } finally {
+                runningOperationContainer = null
                 _loaderStatus.value = LoaderStatus.Stopped
                 _loaderPid.value = null
                 refreshContainers()
