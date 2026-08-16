@@ -54,10 +54,6 @@ object ContainerManager {
         }
     }
 
-    /**
-     * Reads every container.config using one root shell invocation instead of
-     * spawning a root command for each installed container.
-     */
     private fun loadConfigsBatch(): List<ContainerInfo> {
         val containersDir = Constants.CONTAINERS_DIR
         val configFile = Constants.CONFIG_FILE
@@ -100,12 +96,6 @@ object ContainerManager {
         return containers
     }
 
-    /**
-     * Resolve runtime state by capability rather than by a runtime version.
-     * Prefer a single machine-readable `show`, fall back to plain `show`, and
-     * finally query `pid` per container. Unsupported output is never treated as
-     * STOPPED: unresolved containers remain UNKNOWN.
-     */
     private fun getContainerRuntimeStates(containerNames: List<String>): Map<String, RuntimeState> {
         val names = containerNames.filter { it.isNotBlank() }.distinct()
         if (names.isEmpty()) return emptyMap()
@@ -336,49 +326,55 @@ object ContainerManager {
             val config = loadConfig(
                 "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}", name
             ) ?: return@withContext false
-            val rootfs = config.rootfsPath
-            val mnt = "/mnt/ds_init_edit"
 
-            if (target == InitSystem.OPENRC) {
-                Shell.cmd("mkdir -p '$mnt' 2>/dev/null").exec()
-                val mount = Shell.cmd("mount -o loop,rw '$rootfs' '$mnt' 2>/dev/null").exec()
-                if (!mount.isSuccess) return@withContext false
+            RootfsAccessor.use(
+                rootfsPath = config.rootfsPath,
+                tag = "init_${name}_${target.name.lowercase()}"
+            ) { root ->
+                when (target) {
+                    InitSystem.OPENRC -> applyOpenRcInitFiles(root, cacheDir)
+                    InitSystem.SYSTEMD -> applyCurrentSystemdInitFiles(root)
+                }
+            } ?: false
+        } catch (_: Exception) {
+            false
+        }
+    }
 
-                Shell.cmd("mkdir -p '$mnt/usr/local/bin'").exec()
-                Shell.cmd("mkdir -p '$mnt/etc/init.d'").exec()
-                Shell.cmd("mkdir -p '$mnt/etc/runlevels/default'").exec()
+    private fun applyOpenRcInitFiles(root: String, cacheDir: File): Boolean {
+        Shell.cmd("mkdir -p '$root/usr/local/bin'").exec()
+        Shell.cmd("mkdir -p '$root/etc/init.d'").exec()
+        Shell.cmd("mkdir -p '$root/etc/runlevels/default'").exec()
 
-                val tmpSh = File(cacheDir, "x11-session.sh")
-                tmpSh.writeText("#!/bin/sh\nexport DISPLAY=:0\nexport HOME=/root\nexport USER=root\nexport SHELL=/bin/sh\nexport XDG_SESSION_TYPE=x11\nexport XDG_RUNTIME_DIR=/tmp/runtime-root\nmkdir -p \"\$XDG_RUNTIME_DIR\"\nexec startxfce4\n")
-                Shell.cmd("cp '${tmpSh.absolutePath}' '$mnt/usr/local/bin/x11-session.sh' && chmod 755 '$mnt/usr/local/bin/x11-session.sh'").exec()
-                tmpSh.delete()
+        val tmpSh = File(cacheDir, "x11-session.sh")
+        tmpSh.writeText("#!/bin/sh\nexport DISPLAY=:0\nexport HOME=/root\nexport USER=root\nexport SHELL=/bin/sh\nexport XDG_SESSION_TYPE=x11\nexport XDG_RUNTIME_DIR=/tmp/runtime-root\nmkdir -p \"\$XDG_RUNTIME_DIR\"\nexec startxfce4\n")
+        Shell.cmd("cp '${tmpSh.absolutePath}' '$root/usr/local/bin/x11-session.sh' && chmod 755 '$root/usr/local/bin/x11-session.sh'").exec()
+        tmpSh.delete()
 
-                val tmpSetup = File(cacheDir, "x11-setup")
-                tmpSetup.writeText("#!/sbin/openrc-run\n\ndescription=\"Setup X11 socket directory and bind mount\"\n\ndepend() {\n    before x11-xfce\n    keyword -stop\n}\n\nstart() {\n    ebegin \"Setting up X11 socket\"\n    mkdir -p /tmp/.X11-unix\n    if ! mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n        mount --bind /usr/.X11-unix /tmp/.X11-unix 2>/dev/null\n    fi\n    mkdir -p /tmp/runtime-root\n    eend $?\n}\n\nstop() {\n    ebegin \"Unmounting X11 socket\"\n    if mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n        umount /tmp/.X11-unix 2>/dev/null\n    fi\n    eend $?\n}\n")
-                Shell.cmd("cp '${tmpSetup.absolutePath}' '$mnt/etc/init.d/x11-setup' && chmod 755 '$mnt/etc/init.d/x11-setup'").exec()
-                tmpSetup.delete()
+        val tmpSetup = File(cacheDir, "x11-setup")
+        tmpSetup.writeText("#!/sbin/openrc-run\n\ndescription=\"Setup X11 socket directory and bind mount\"\n\ndepend() {\n    before x11-xfce\n    keyword -stop\n}\n\nstart() {\n    ebegin \"Setting up X11 socket\"\n    mkdir -p /tmp/.X11-unix\n    if ! mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n        mount --bind /usr/.X11-unix /tmp/.X11-unix 2>/dev/null\n    fi\n    mkdir -p /tmp/runtime-root\n    eend $?\n}\n\nstop() {\n    ebegin \"Unmounting X11 socket\"\n    if mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n        umount /tmp/.X11-unix 2>/dev/null\n    fi\n    eend $?\n}\n")
+        Shell.cmd("cp '${tmpSetup.absolutePath}' '$root/etc/init.d/x11-setup' && chmod 755 '$root/etc/init.d/x11-setup'").exec()
+        tmpSetup.delete()
 
-                val tmpXfce = File(cacheDir, "x11-xfce")
-                tmpXfce.writeText("#!/sbin/openrc-run\n\ndescription=\"X11 XFCE Desktop on Termux:X11\"\n\ndepend() {\n    after x11-setup\n    keyword -stop\n}\n\nstart() {\n    ebegin \"Starting XFCE on X11\"\n    /usr/local/bin/x11-session.sh &\n    eend $?\n}\n\nstop() {\n    ebegin \"Stopping XFCE\"\n    pkill -f startxfce4 2>/dev/null\n    pkill -f xfce4-session 2>/dev/null\n    eend $?\n}\n")
-                Shell.cmd("cp '${tmpXfce.absolutePath}' '$mnt/etc/init.d/x11-xfce' && chmod 755 '$mnt/etc/init.d/x11-xfce'").exec()
-                tmpXfce.delete()
+        val tmpXfce = File(cacheDir, "x11-xfce")
+        tmpXfce.writeText("#!/sbin/openrc-run\n\ndescription=\"X11 XFCE Desktop on Termux:X11\"\n\ndepend() {\n    after x11-setup\n    keyword -stop\n}\n\nstart() {\n    ebegin \"Starting XFCE on X11\"\n    /usr/local/bin/x11-session.sh &\n    eend $?\n}\n\nstop() {\n    ebegin \"Stopping XFCE\"\n    pkill -f startxfce4 2>/dev/null\n    pkill -f xfce4-session 2>/dev/null\n    eend $?\n}\n")
+        Shell.cmd("cp '${tmpXfce.absolutePath}' '$root/etc/init.d/x11-xfce' && chmod 755 '$root/etc/init.d/x11-xfce'").exec()
+        tmpXfce.delete()
 
-                Shell.cmd("ln -sf /etc/init.d/x11-setup '$mnt/etc/runlevels/default/x11-setup'").exec()
-                Shell.cmd("ln -sf /etc/init.d/x11-xfce '$mnt/etc/runlevels/default/x11-xfce'").exec()
+        Shell.cmd("ln -sf /etc/init.d/x11-setup '$root/etc/runlevels/default/x11-setup'").exec()
+        Shell.cmd("ln -sf /etc/init.d/x11-xfce '$root/etc/runlevels/default/x11-xfce'").exec()
+        return true
+    }
 
-                Shell.cmd("umount '$mnt' 2>/dev/null; rmdir '$mnt' 2>/dev/null").exec()
-                true
-            } else {
-                Shell.cmd("mkdir -p '$mnt' 2>/dev/null").exec()
-                val mount = Shell.cmd("mount -o loop,rw '$rootfs' '$mnt' 2>/dev/null").exec()
-                if (!mount.isSuccess) return@withContext false
-
-                Shell.cmd("rm -f '$mnt/etc/init.d/x11-setup' '$mnt/etc/init.d/x11-xfce' '$mnt/etc/runlevels/default/x11-setup' '$mnt/etc/runlevels/default/x11-xfce' '$mnt/usr/local/bin/x11-session.sh' 2>/dev/null").exec()
-
-                Shell.cmd("umount '$mnt' 2>/dev/null; rmdir '$mnt' 2>/dev/null").exec()
-                true
-            }
-        } catch (_: Exception) { false }
+    private fun applyCurrentSystemdInitFiles(root: String): Boolean {
+        Shell.cmd(
+            "rm -f '$root/etc/init.d/x11-setup' " +
+                "'$root/etc/init.d/x11-xfce' " +
+                "'$root/etc/runlevels/default/x11-setup' " +
+                "'$root/etc/runlevels/default/x11-xfce' " +
+                "'$root/usr/local/bin/x11-session.sh' 2>/dev/null"
+        ).exec()
+        return true
     }
 
     suspend fun startContainer(name: String, logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
