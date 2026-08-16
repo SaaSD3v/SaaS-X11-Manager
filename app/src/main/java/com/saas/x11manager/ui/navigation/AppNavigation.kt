@@ -52,7 +52,7 @@ fun AppNavigation(viewModel: HomeViewModel) {
             containerName = navigateToEdit,
             onDismiss = {
                 viewModel.onEditNavigated()
-                viewModel.refresh()
+                viewModel.refreshRuntimeState()
             }
         )
     } else {
