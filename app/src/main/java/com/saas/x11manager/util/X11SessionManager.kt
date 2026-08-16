@@ -31,51 +31,6 @@ object X11SessionManager {
         getProcessPids("termux-x11").firstOrNull()
     }
 
-    suspend fun startPulseAudio(logger: ContainerLogger? = null): Result<Int> = withContext(Dispatchers.IO) {
-        try {
-            logger?.i("[*] Starting PulseAudio...")
-
-            val r = Shell.cmd("sh ${Constants.PA_SCRIPT} 2>&1").exec()
-            val out = r.out.joinToString("\n")
-            val err = r.err.joinToString("\n")
-
-            for (line in out.lines()) {
-                val t = line.trim()
-                if (t.isNotEmpty()) logger?.i(t)
-            }
-
-            val check = Shell.cmd("test -S '${Constants.PULSE_SOCK}' && echo ok").exec()
-            if (check.isSuccess && check.out.isNotEmpty() && check.out[0].contains("ok")) {
-                val pid = getPulseAudioPid() ?: 0
-                logger?.i("[+] PulseAudio active (PID=$pid)")
-                Result.success(pid)
-            } else {
-                logger?.e("[-] PA script output: $out")
-                if (err.isNotBlank()) logger?.e("[-] stderr: $err")
-                Result.failure(Exception("PA socket not created"))
-            }
-        } catch (e: Exception) {
-            logger?.e("[-] PA error: ${e.message}")
-            Result.failure(e)
-        }
-    }
-
-    suspend fun getPulseAudioPid(): Int? = withContext(Dispatchers.IO) {
-        getProcessPids("pulseaudio").firstOrNull()
-    }
-
-    suspend fun stopPulseAudio(logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val pids = getProcessPids("pulseaudio")
-            if (pids.isNotEmpty()) {
-                Shell.cmd("kill -9 ${pids.joinToString(" ")} 2>/dev/null").exec()
-                logger?.i("[+] Stopped PulseAudio (PIDs=${pids.joinToString(",")})")
-            }
-            Shell.cmd("rm -f '${Constants.PULSE_SOCK}' 2>/dev/null").exec()
-            true
-        } catch (_: Exception) { false }
-    }
-
     suspend fun startLoader(logger: ContainerLogger? = null): Result<Int> = withContext(Dispatchers.IO) {
         try {
             logger?.i("[*] Preparing X11 environment...")
@@ -150,7 +105,6 @@ object X11SessionManager {
 
     suspend fun startX11Session(
         containerName: String,
-        enablePulseAudioFix: Boolean = false,
         logger: ContainerLogger? = null
     ) = withContext(Dispatchers.IO) {
         try {
@@ -164,11 +118,6 @@ object X11SessionManager {
                 return@withContext
             }
             logger?.i("")
-
-            if (enablePulseAudioFix) {
-                startPulseAudio(logger)
-                logger?.i("")
-            }
 
             val loaderResult = startLoader(logger)
             loaderResult.onFailure { e ->
@@ -212,7 +161,6 @@ object X11SessionManager {
     suspend fun stopAll(logger: ContainerLogger? = null) = withContext(Dispatchers.IO) {
         try {
             logger?.i("--- Stopping All ---")
-            stopPulseAudio(logger)
             stopLoader(logger)
             val containers = ContainerManager.listContainers()
             for (c in containers) {

@@ -156,7 +156,6 @@ class HomeViewModel : ViewModel() {
             try {
                 X11SessionManager.startX11Session(
                     containerName = container.name,
-                    enablePulseAudioFix = container.enablePulseAudio,
                     logger = logger
                 )
 
