@@ -221,14 +221,15 @@ object ContainerManager {
             val config = loadConfig(
                 "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}", name
             ) ?: return@withContext false
+            val session = ContainerSettingsManager.getGraphicSession(name) ?: GraphicSession.XFCE
 
             val applied = RootfsAccessor.use(
                 rootfsPath = config.rootfsPath,
                 tag = "init_${name}_${target.name.lowercase()}"
             ) { root ->
                 when (target) {
-                    InitSystem.OPENRC -> applyOpenRcInitFiles(root, cacheDir)
-                    InitSystem.SYSTEMD -> applySystemdInitFiles(root, cacheDir)
+                    InitSystem.OPENRC -> applyOpenRcInitFiles(root, cacheDir, session)
+                    InitSystem.SYSTEMD -> applySystemdInitFiles(root, cacheDir, session)
                 }
             } ?: false
 
@@ -239,165 +240,88 @@ object ContainerManager {
         }
     }
 
-    private fun applyOpenRcInitFiles(root: String, cacheDir: File): Boolean {
+    private fun applyOpenRcInitFiles(
+        root: String,
+        cacheDir: File,
+        session: GraphicSession
+    ): Boolean {
         if (!Shell.cmd("test -x '$root/sbin/openrc-run'").exec().isSuccess) {
             return false
         }
 
         val sessionFile = File.createTempFile("x11-session-openrc-", ".sh", cacheDir)
         val setupFile = File.createTempFile("x11-setup-openrc-", "", cacheDir)
-        val xfceFile = File.createTempFile("x11-xfce-openrc-", "", cacheDir)
+        val sessionServiceFile = File.createTempFile("x11-session-openrc-", "", cacheDir)
 
         return try {
             sessionFile.writeText(
-                "#!/bin/sh\n" +
-                    "export DISPLAY=:0\n" +
-                    "export HOME=/root\n" +
-                    "export USER=root\n" +
-                    "export SHELL=/bin/sh\n" +
-                    "export XDG_SESSION_TYPE=x11\n" +
-                    "export XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
-                    "mkdir -p \"\$XDG_RUNTIME_DIR\"\n" +
-                    "exec startxfce4\n"
+                GraphicSessionInitFiles.sessionScript(session, "/bin/sh")
             )
-
-            setupFile.writeText(
-                "#!/sbin/openrc-run\n\n" +
-                    "description=\"Setup X11 socket directory and bind mount\"\n\n" +
-                    "depend() {\n" +
-                    "    before x11-xfce\n" +
-                    "}\n\n" +
-                    "start() {\n" +
-                    "    ebegin \"Setting up X11 socket\"\n" +
-                    "    if [ ! -d /usr/.X11-unix ]; then\n" +
-                    "        eerror \"X11 source socket directory /usr/.X11-unix is missing\"\n" +
-                    "        eend 1\n" +
-                    "        return 1\n" +
-                    "    fi\n" +
-                    "    mkdir -p /tmp/.X11-unix /tmp/runtime-root || { eend 1; return 1; }\n" +
-                    "    if mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n" +
-                    "        eend 0\n" +
-                    "        return 0\n" +
-                    "    fi\n" +
-                    "    mount --bind /usr/.X11-unix /tmp/.X11-unix\n" +
-                    "    rc=$?\n" +
-                    "    eend \$rc\n" +
-                    "    return \$rc\n" +
-                    "}\n\n" +
-                    "stop() {\n" +
-                    "    ebegin \"Unmounting X11 socket\"\n" +
-                    "    if mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n" +
-                    "        umount /tmp/.X11-unix\n" +
-                    "        rc=$?\n" +
-                    "        eend \$rc\n" +
-                    "        return \$rc\n" +
-                    "    fi\n" +
-                    "    eend 0\n" +
-                    "}\n"
-            )
-
-            xfceFile.writeText(
-                "#!/sbin/openrc-run\n\n" +
-                    "description=\"X11 XFCE Desktop on Termux:X11\"\n" +
-                    "command=\"/usr/local/bin/x11-session.sh\"\n" +
-                    "command_background=\"yes\"\n" +
-                    "pidfile=\"/run/x11-xfce.pid\"\n" +
-                    "stopgroup=\"yes\"\n\n" +
-                    "depend() {\n" +
-                    "    need x11-setup\n" +
-                    "}\n"
-            )
+            setupFile.writeText(GraphicSessionInitFiles.openRcSetupService())
+            sessionServiceFile.writeText(GraphicSessionInitFiles.openRcSessionService(session))
 
             val install = Shell.cmd(
                 "rm -f '$root/etc/systemd/system/setup-x11-socket.service' " +
                     "'$root/etc/systemd/system/x11-xfce.service' " +
+                    "'$root/etc/systemd/system/x11-session.service' " +
                     "'$root/etc/systemd/system/multi-user.target.wants/setup-x11-socket.service' " +
-                    "'$root/etc/systemd/system/graphical.target.wants/x11-xfce.service' 2>/dev/null; " +
+                    "'$root/etc/systemd/system/graphical.target.wants/x11-xfce.service' " +
+                    "'$root/etc/systemd/system/graphical.target.wants/x11-session.service' " +
+                    "'$root/etc/init.d/x11-xfce' " +
+                    "'$root/etc/runlevels/default/x11-xfce' 2>/dev/null; " +
                     "mkdir -p '$root/usr/local/bin' '$root/etc/init.d' '$root/etc/runlevels/default' && " +
                     "cp '${sessionFile.absolutePath}' '$root/usr/local/bin/x11-session.sh' && " +
                     "chmod 755 '$root/usr/local/bin/x11-session.sh' && " +
                     "cp '${setupFile.absolutePath}' '$root/etc/init.d/x11-setup' && " +
                     "chmod 755 '$root/etc/init.d/x11-setup' && " +
-                    "cp '${xfceFile.absolutePath}' '$root/etc/init.d/x11-xfce' && " +
-                    "chmod 755 '$root/etc/init.d/x11-xfce' && " +
+                    "cp '${sessionServiceFile.absolutePath}' '$root/etc/init.d/x11-session' && " +
+                    "chmod 755 '$root/etc/init.d/x11-session' && " +
                     "ln -sf /etc/init.d/x11-setup '$root/etc/runlevels/default/x11-setup' && " +
-                    "ln -sf /etc/init.d/x11-xfce '$root/etc/runlevels/default/x11-xfce'"
+                    "ln -sf /etc/init.d/x11-session '$root/etc/runlevels/default/x11-session'"
             ).exec()
             if (!install.isSuccess) return false
 
             Shell.cmd(
                 "test -x '$root/usr/local/bin/x11-session.sh' && " +
                     "test -x '$root/etc/init.d/x11-setup' && " +
-                    "test -x '$root/etc/init.d/x11-xfce' && " +
+                    "test -x '$root/etc/init.d/x11-session' && " +
                     "test -L '$root/etc/runlevels/default/x11-setup' && " +
-                    "test -L '$root/etc/runlevels/default/x11-xfce'"
+                    "test -L '$root/etc/runlevels/default/x11-session'"
             ).exec().isSuccess
         } catch (_: Exception) {
             false
         } finally {
             sessionFile.delete()
             setupFile.delete()
-            xfceFile.delete()
+            sessionServiceFile.delete()
         }
     }
 
-    private fun applySystemdInitFiles(root: String, cacheDir: File): Boolean {
+    private fun applySystemdInitFiles(
+        root: String,
+        cacheDir: File,
+        session: GraphicSession
+    ): Boolean {
         val sessionFile = File.createTempFile("x11-session-systemd-", ".sh", cacheDir)
         val socketServiceFile = File.createTempFile("setup-x11-socket-", ".service", cacheDir)
-        val xfceServiceFile = File.createTempFile("x11-xfce-", ".service", cacheDir)
+        val sessionServiceFile = File.createTempFile("x11-session-", ".service", cacheDir)
 
         return try {
             sessionFile.writeText(
-                "#!/bin/bash\n" +
-                    "export DISPLAY=:0\n" +
-                    "export HOME=/root\n" +
-                    "export USER=root\n" +
-                    "export SHELL=/bin/bash\n" +
-                    "export XDG_SESSION_TYPE=x11\n" +
-                    "export XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
-                    "mkdir -p \"\$XDG_RUNTIME_DIR\"\n" +
-                    "exec startxfce4\n"
+                GraphicSessionInitFiles.sessionScript(session, "/bin/bash")
             )
-
-            socketServiceFile.writeText(
-                "[Unit]\n" +
-                    "Description=Setup X11 socket directory\n" +
-                    "Before=x11-xfce.service\n\n" +
-                    "[Service]\n" +
-                    "Type=oneshot\n" +
-                    "ExecStart=/bin/mkdir -p /tmp/.X11-unix\n" +
-                    "ExecStart=/bin/mount --bind /usr/.X11-unix /tmp/.X11-unix\n" +
-                    "ExecStart=/bin/mkdir -p /tmp/runtime-root\n" +
-                    "RemainAfterExit=yes\n\n" +
-                    "[Install]\n" +
-                    "WantedBy=multi-user.target\n"
-            )
-
-            xfceServiceFile.writeText(
-                "[Unit]\n" +
-                    "Description=X11 XFCE Desktop on Termux:X11\n" +
-                    "After=network.target setup-x11-socket.service\n" +
-                    "Requires=setup-x11-socket.service\n\n" +
-                    "[Service]\n" +
-                    "Type=simple\n" +
-                    "Environment=DISPLAY=:0\n" +
-                    "Environment=HOME=/root\n" +
-                    "Environment=USER=root\n" +
-                    "Environment=SHELL=/bin/bash\n" +
-                    "Environment=XDG_SESSION_TYPE=x11\n" +
-                    "Environment=XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
-                    "ExecStart=/usr/local/bin/x11-session.sh\n" +
-                    "Restart=on-failure\n" +
-                    "RestartSec=3\n\n" +
-                    "[Install]\n" +
-                    "WantedBy=graphical.target\n"
-            )
+            socketServiceFile.writeText(GraphicSessionInitFiles.systemdSocketService())
+            sessionServiceFile.writeText(GraphicSessionInitFiles.systemdSessionService(session))
 
             val install = Shell.cmd(
                 "rm -f '$root/etc/init.d/x11-setup' " +
                     "'$root/etc/init.d/x11-xfce' " +
+                    "'$root/etc/init.d/x11-session' " +
                     "'$root/etc/runlevels/default/x11-setup' " +
-                    "'$root/etc/runlevels/default/x11-xfce' 2>/dev/null; " +
+                    "'$root/etc/runlevels/default/x11-xfce' " +
+                    "'$root/etc/runlevels/default/x11-session' " +
+                    "'$root/etc/systemd/system/x11-xfce.service' " +
+                    "'$root/etc/systemd/system/graphical.target.wants/x11-xfce.service' 2>/dev/null; " +
                     "mkdir -p '$root/usr/local/bin' " +
                     "'$root/etc/systemd/system/multi-user.target.wants' " +
                     "'$root/etc/systemd/system/graphical.target.wants' && " +
@@ -405,28 +329,28 @@ object ContainerManager {
                     "chmod 755 '$root/usr/local/bin/x11-session.sh' && " +
                     "cp '${socketServiceFile.absolutePath}' '$root/etc/systemd/system/setup-x11-socket.service' && " +
                     "chmod 644 '$root/etc/systemd/system/setup-x11-socket.service' && " +
-                    "cp '${xfceServiceFile.absolutePath}' '$root/etc/systemd/system/x11-xfce.service' && " +
-                    "chmod 644 '$root/etc/systemd/system/x11-xfce.service' && " +
+                    "cp '${sessionServiceFile.absolutePath}' '$root/etc/systemd/system/x11-session.service' && " +
+                    "chmod 644 '$root/etc/systemd/system/x11-session.service' && " +
                     "ln -sf /etc/systemd/system/setup-x11-socket.service " +
                     "'$root/etc/systemd/system/multi-user.target.wants/setup-x11-socket.service' && " +
-                    "ln -sf /etc/systemd/system/x11-xfce.service " +
-                    "'$root/etc/systemd/system/graphical.target.wants/x11-xfce.service'"
+                    "ln -sf /etc/systemd/system/x11-session.service " +
+                    "'$root/etc/systemd/system/graphical.target.wants/x11-session.service'"
             ).exec()
             if (!install.isSuccess) return false
 
             Shell.cmd(
                 "test -f '$root/usr/local/bin/x11-session.sh' && " +
                     "test -f '$root/etc/systemd/system/setup-x11-socket.service' && " +
-                    "test -f '$root/etc/systemd/system/x11-xfce.service' && " +
+                    "test -f '$root/etc/systemd/system/x11-session.service' && " +
                     "test -L '$root/etc/systemd/system/multi-user.target.wants/setup-x11-socket.service' && " +
-                    "test -L '$root/etc/systemd/system/graphical.target.wants/x11-xfce.service'"
+                    "test -L '$root/etc/systemd/system/graphical.target.wants/x11-session.service'"
             ).exec().isSuccess
         } catch (_: Exception) {
             false
         } finally {
             sessionFile.delete()
             socketServiceFile.delete()
-            xfceServiceFile.delete()
+            sessionServiceFile.delete()
         }
     }
 
