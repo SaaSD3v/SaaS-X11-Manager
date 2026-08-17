@@ -74,6 +74,20 @@ class GraphicSessionInstallPlansTest {
     }
 
     @Test
+    fun debIcewmUsesMinimalTermuxX11PackageSet() {
+        val plan = requireNotNull(GraphicSessionInstallPlans.forSelection(
+            ContainerPlatform.UBUNTU,
+            GraphicSession.ICEWM
+        ))
+
+        assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
+        assertEquals("icewm-session", plan.verificationCommand)
+        assertEquals(listOf("icewm", "xterm"), plan.packages)
+        assertFalse(plan.installRecommendedPackages)
+        assertSafeAptPlan(plan)
+    }
+
+    @Test
     fun alpineXfceUsesCommunityDesktopAndDbus() {
         val plan = requireNotNull(GraphicSessionInstallPlans.forSelection(
             ContainerPlatform.ALPINE,
@@ -125,6 +139,20 @@ class GraphicSessionInstallPlansTest {
             "pulseaudio"
         )
         assertTrue(plan.packages.none { it in unnecessaryForDirectTermuxX11 })
+    }
+
+    @Test
+    fun alpineIcewmUsesMinimalTermuxX11PackageSet() {
+        val plan = requireNotNull(GraphicSessionInstallPlans.forSelection(
+            ContainerPlatform.ALPINE,
+            GraphicSession.ICEWM
+        ))
+
+        assertEquals(RepositoryRequirement.APK_COMMUNITY, plan.repositoryRequirement)
+        assertEquals("icewm-session", plan.verificationCommand)
+        assertEquals(listOf("icewm", "xterm"), plan.packages)
+        assertTrue(plan.installRecommendedPackages)
+        assertNoDisplayManager(plan)
     }
 
     @Test

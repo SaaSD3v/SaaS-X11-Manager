@@ -25,5 +25,6 @@ enum class GraphicSession(
     XFCE("XFCE", "startxfce4"),
     LXQT("LXQt", "startlxqt"),
     OPENBOX("Openbox", "openbox-session"),
+    ICEWM("IceWM", "icewm-session"),
     NONE("None", "")
 }

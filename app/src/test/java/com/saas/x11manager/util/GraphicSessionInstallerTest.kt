@@ -15,6 +15,14 @@ class GraphicSessionInstallerTest {
         return GraphicSessionInstaller.stepsFor(plan)
     }
 
+    private fun icewmSteps(platform: ContainerPlatform): List<GraphicSessionInstallStep> {
+        val plan = requireNotNull(GraphicSessionInstallPlans.forSelection(
+            platform,
+            GraphicSession.ICEWM
+        ))
+        return GraphicSessionInstaller.stepsFor(plan)
+    }
+
     @Test
     fun alpineOpenboxWorkflowUsesApkAndMinimalPackages() {
         val commands = openboxSteps(ContainerPlatform.ALPINE).map { it.command }
@@ -49,6 +57,37 @@ class GraphicSessionInstallerTest {
     }
 
     @Test
+    fun alpineIcewmWorkflowUsesApkAndMinimalPackages() {
+        val commands = icewmSteps(ContainerPlatform.ALPINE).map { it.command }
+
+        assertEquals("command -v apk >/dev/null", commands.first())
+        assertTrue("apk update" in commands)
+        assertTrue("apk add icewm" in commands)
+        assertTrue("apk add xterm" in commands)
+        assertTrue("command -v icewm-session" in commands)
+        assertFalse(commands.any { it.contains("apt-get") })
+    }
+
+    @Test
+    fun debIcewmWorkflowUsesAptDpkgWithoutRecommends() {
+        val commands = icewmSteps(ContainerPlatform.UBUNTU).map { it.command }
+
+        assertEquals(
+            "command -v apt-get >/dev/null && command -v dpkg >/dev/null",
+            commands.first()
+        )
+        assertTrue(commands.contains("DEBIAN_FRONTEND=noninteractive apt-get update"))
+        assertTrue(commands.contains(
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends icewm"
+        ))
+        assertTrue(commands.contains(
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xterm"
+        ))
+        assertTrue("command -v icewm-session" in commands)
+        assertFalse(commands.any { it.contains("apk ") })
+    }
+
+    @Test
     fun openboxConfigCopyNeverOverwritesExistingUserFiles() {
         ContainerPlatform.entries.forEach { platform ->
             val commands = openboxSteps(platform).map { it.command }
@@ -76,6 +115,18 @@ class GraphicSessionInstallerTest {
     }
 
     @Test
+    fun icewmInstallerValidatesButNeverLaunchesSession() {
+        ContainerPlatform.entries.forEach { platform ->
+            val commands = icewmSteps(platform).map { it.command }
+
+            assertTrue(commands.contains("command -v icewm-session"))
+            assertFalse(commands.any { it.trim() == "icewm-session" })
+            assertFalse(commands.any { it.contains("exec icewm-session") })
+            assertFalse(commands.any { it.contains("mkdir ") || it.contains("cp ") })
+        }
+    }
+
+    @Test
     fun openrcStartupWritesGenericOpenboxSessionFiles() {
         ContainerPlatform.entries.forEach { platform ->
             val steps = GraphicSessionInstaller.startupStepsFor(
@@ -91,6 +142,24 @@ class GraphicSessionInstallerTest {
             assertTrue(joined.contains("exec openbox-session"))
             assertTrue(joined.contains("/run/x11-session.pid"))
             assertFalse(steps.any { it.command.trim() == "openbox-session" })
+        }
+    }
+
+    @Test
+    fun existingStartupTemplatesAcceptIcewmWithoutSpecialInitPath() {
+        ContainerPlatform.entries.forEach { platform ->
+            InitSystem.entries.forEach { initSystem ->
+                val steps = GraphicSessionInstaller.startupStepsFor(
+                    platform,
+                    initSystem,
+                    GraphicSession.ICEWM
+                )
+                val joined = steps.joinToString("\n") { it.command }
+
+                assertTrue(joined.contains("exec icewm-session"))
+                assertTrue(joined.contains("/usr/local/bin/x11-session.sh"))
+                assertFalse(steps.any { it.command.trim() == "icewm-session" })
+            }
         }
     }
 
@@ -169,6 +238,30 @@ class GraphicSessionInstallerTest {
     }
 
     @Test
+    fun icewmVerificationIsReadOnlyOnBothPackageFamilies() {
+        ContainerPlatform.entries.forEach { platform ->
+            InitSystem.entries.forEach { initSystem ->
+                val commands = GraphicSessionInstaller.verificationStepsFor(
+                    platform,
+                    GraphicSession.ICEWM,
+                    initSystem
+                ).map { it.command }
+                val joined = commands.joinToString("\n")
+
+                assertFalse(joined.contains("apk update"))
+                assertFalse(joined.contains("apk add "))
+                assertFalse(joined.contains("apt-get update"))
+                assertFalse(joined.contains("apt-get install"))
+                assertFalse(joined.contains("rm -f"))
+                assertFalse(joined.contains("ln -s"))
+                assertFalse(joined.contains("chmod "))
+                assertFalse(joined.contains("cp "))
+                assertFalse(joined.contains("mkdir "))
+            }
+        }
+    }
+
+    @Test
     fun verificationUsesPlatformSpecificPackageQueries() {
         val alpine = GraphicSessionInstaller.verificationStepsFor(
             ContainerPlatform.ALPINE,
@@ -191,5 +284,29 @@ class GraphicSessionInstallerTest {
         assertFalse(deb.contains("apk info"))
         assertTrue(deb.contains("command -v openbox-session"))
         assertTrue(deb.contains("grep -Fqx 'exec openbox-session' /usr/local/bin/x11-session.sh"))
+    }
+
+    @Test
+    fun icewmVerificationUsesPlatformSpecificPackageQueries() {
+        val alpine = GraphicSessionInstaller.verificationStepsFor(
+            ContainerPlatform.ALPINE,
+            GraphicSession.ICEWM,
+            InitSystem.OPENRC
+        ).joinToString("\n") { it.command }
+        val deb = GraphicSessionInstaller.verificationStepsFor(
+            ContainerPlatform.UBUNTU,
+            GraphicSession.ICEWM,
+            InitSystem.SYSTEMD
+        ).joinToString("\n") { it.command }
+
+        assertTrue(alpine.contains("apk info -e icewm"))
+        assertTrue(alpine.contains("apk info -e xterm"))
+        assertFalse(alpine.contains("dpkg -s"))
+
+        assertTrue(deb.contains("dpkg -s icewm"))
+        assertTrue(deb.contains("dpkg -s xterm"))
+        assertFalse(deb.contains("apk info"))
+        assertTrue(deb.contains("command -v icewm-session"))
+        assertTrue(deb.contains("grep -Fqx 'exec icewm-session' /usr/local/bin/x11-session.sh"))
     }
 }

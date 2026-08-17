@@ -77,6 +77,18 @@ object GraphicSessionInstallPlans {
                 installRecommendedPackages = false
             )
 
+            GraphicSession.ICEWM -> GraphicSessionInstallPlan(
+                platform = platform,
+                session = session,
+                repositoryRequirement = RepositoryRequirement.APT_UNIVERSE,
+                packages = listOf(
+                    "icewm",
+                    "xterm"
+                ),
+                verificationCommand = "icewm-session",
+                installRecommendedPackages = false
+            )
+
             GraphicSession.NONE -> null
         }
 
@@ -118,6 +130,18 @@ object GraphicSessionInstallPlans {
                     "font-terminus"
                 ),
                 verificationCommand = "openbox-session",
+                installRecommendedPackages = true
+            )
+
+            GraphicSession.ICEWM -> GraphicSessionInstallPlan(
+                platform = platform,
+                session = session,
+                repositoryRequirement = RepositoryRequirement.APK_COMMUNITY,
+                packages = listOf(
+                    "icewm",
+                    "xterm"
+                ),
+                verificationCommand = "icewm-session",
                 installRecommendedPackages = true
             )
 

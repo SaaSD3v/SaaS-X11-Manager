@@ -22,8 +22,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.saas.x11manager.ui.component.TerminalDialog
+import com.saas.x11manager.util.ContainerPlatform
 import com.saas.x11manager.util.ContainerStatus
 import com.saas.x11manager.util.GraphicSession
+import com.saas.x11manager.util.GraphicSessionInstallPlans
 import com.saas.x11manager.util.InitSystem
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,12 +46,23 @@ fun EditContainerScreen(
     val initSystem = viewModel.initSystem
     val graphicSession = viewModel.graphicSession
     val openboxInstalled = viewModel.openboxInstalled
+    val icewmInstalled = viewModel.icewmInstalled
     val logs = viewModel.logs
     val isSaving = viewModel.isSaving
     val saveError = viewModel.saveError
     val isInstalling = viewModel.isInstallingSession
     val installResult = viewModel.installResult
+    val installResultSession = viewModel.installResultSession
     var openboxExpanded by rememberSaveable(containerName) { mutableStateOf(false) }
+    var icewmExpanded by rememberSaveable(containerName) { mutableStateOf(false) }
+
+    fun sessionVisibleForSelectedInit(session: GraphicSession): Boolean {
+        val packagePlatform = when (initSystem) {
+            InitSystem.OPENRC -> ContainerPlatform.ALPINE
+            InitSystem.SYSTEMD -> ContainerPlatform.UBUNTU
+        }
+        return GraphicSessionInstallPlans.forSelection(packagePlatform, session) != null
+    }
 
     if (viewModel.showInstallTerminal) {
         TerminalDialog(
@@ -193,121 +206,250 @@ fun EditContainerScreen(
                     )
                     Spacer(Modifier.height(12.dp))
 
-                    val openboxSelected = graphicSession == GraphicSession.OPENBOX
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = !isInstalling) {
-                                openboxExpanded = !openboxExpanded
-                            },
-                        shape = RoundedCornerShape(14.dp),
-                        color = if (openboxSelected) {
-                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHigh
-                        },
-                        border = BorderStroke(
-                            1.dp,
-                            if (openboxSelected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                        )
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = openboxSelected,
-                                onClick = {
-                                    if (openboxInstalled && !isInstalling && !isSaving) {
-                                        viewModel.toggleOpenboxSelection()
-                                    }
+                    if (sessionVisibleForSelectedInit(GraphicSession.OPENBOX)) {
+                        val openboxSelected = graphicSession == GraphicSession.OPENBOX
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = !isInstalling) {
+                                    openboxExpanded = !openboxExpanded
                                 },
-                                enabled = openboxInstalled && !isInstalling && !isSaving,
-                                colors = RadioButtonDefaults.colors(
-                                    selectedColor = MaterialTheme.colorScheme.primary,
-                                    unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (openboxSelected) {
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHigh
+                            },
+                            border = BorderStroke(
+                                1.dp,
+                                if (openboxSelected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
                             )
-                            Spacer(Modifier.width(10.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("Openbox", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
-                                Text(
-                                    when {
-                                        openboxInstalled && openboxSelected -> "Installed · Selected"
-                                        openboxInstalled -> "Installed · Not selected"
-                                        else -> "Not installed"
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = openboxSelected,
+                                    onClick = {
+                                        if (openboxInstalled && !isInstalling && !isSaving) {
+                                            viewModel.toggleOpenboxSelection()
+                                        }
                                     },
+                                    enabled = openboxInstalled && !isInstalling && !isSaving,
+                                    colors = RadioButtonDefaults.colors(
+                                        selectedColor = MaterialTheme.colorScheme.primary,
+                                        unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("Openbox", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+                                    Text(
+                                        when {
+                                            openboxInstalled && openboxSelected -> "Installed · Selected"
+                                            openboxInstalled -> "Installed · Not selected"
+                                            else -> "Not installed"
+                                        },
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 10.sp
+                                    )
+                                }
+                                Text(
+                                    if (openboxExpanded) "▲" else "▼",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontSize = 10.sp
+                                    fontSize = 12.sp
                                 )
                             }
+                        }
+
+                        if (openboxExpanded) {
+                            Spacer(Modifier.height(10.dp))
                             Text(
-                                if (openboxExpanded) "▲" else "▼",
+                                if (openboxInstalled) {
+                                    "Openbox can be verified, reinstalled, selected or deselected without uninstalling its packages."
+                                } else {
+                                    "Install Openbox and its minimal terminal/font packages. Installation logs stream in real time."
+                                },
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 12.sp
+                                fontSize = 10.sp
                             )
+                            Spacer(Modifier.height(10.dp))
+
+                            if (openboxInstalled) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.verifyOpenbox() },
+                                        modifier = Modifier.weight(1f).height(44.dp),
+                                        enabled = !isInstalling && !isSaving && name.isNotEmpty(),
+                                        shape = RoundedCornerShape(14.dp)
+                                    ) {
+                                        Text("Verify")
+                                    }
+                                    Button(
+                                        onClick = { viewModel.installOpenbox() },
+                                        modifier = Modifier.weight(1f).height(44.dp),
+                                        enabled = !isInstalling && !isSaving && name.isNotEmpty(),
+                                        shape = RoundedCornerShape(14.dp)
+                                    ) {
+                                        Text("Reinstall")
+                                    }
+                                }
+                            } else {
+                                Button(
+                                    onClick = { viewModel.installOpenbox() },
+                                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                                    enabled = !isInstalling && !isSaving && name.isNotEmpty(),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Text("Install")
+                                }
+                            }
+
+                            if (installResult != null && installResultSession == GraphicSession.OPENBOX) {
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    installResult,
+                                    color = when {
+                                        installResult.startsWith("OK") -> MaterialTheme.colorScheme.primary
+                                        installResult.startsWith("Warning") -> MaterialTheme.colorScheme.tertiary
+                                        else -> MaterialTheme.colorScheme.error
+                                    },
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
                         }
                     }
 
-                    if (openboxExpanded) {
+                    if (
+                        sessionVisibleForSelectedInit(GraphicSession.OPENBOX) &&
+                        sessionVisibleForSelectedInit(GraphicSession.ICEWM)
+                    ) {
                         Spacer(Modifier.height(10.dp))
-                        Text(
-                            if (openboxInstalled) {
-                                "Openbox can be verified, reinstalled, selected or deselected without uninstalling its packages."
-                            } else {
-                                "Install Openbox and its minimal terminal/font packages. Installation logs stream in real time."
-                            },
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 10.sp
-                        )
-                        Spacer(Modifier.height(10.dp))
+                    }
 
-                        if (openboxInstalled) {
+                    if (sessionVisibleForSelectedInit(GraphicSession.ICEWM)) {
+                        val icewmSelected = graphicSession == GraphicSession.ICEWM
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = !isInstalling) {
+                                    icewmExpanded = !icewmExpanded
+                                },
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (icewmSelected) {
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHigh
+                            },
+                            border = BorderStroke(
+                                1.dp,
+                                if (icewmSelected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                            )
+                        ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                OutlinedButton(
-                                    onClick = { viewModel.verifyOpenbox() },
-                                    modifier = Modifier.weight(1f).height(44.dp),
-                                    enabled = !isInstalling && !isSaving && name.isNotEmpty(),
-                                    shape = RoundedCornerShape(14.dp)
-                                ) {
-                                    Text("Verify")
+                                RadioButton(
+                                    selected = icewmSelected,
+                                    onClick = {
+                                        if (icewmInstalled && !isInstalling && !isSaving) {
+                                            viewModel.toggleIcewmSelection()
+                                        }
+                                    },
+                                    enabled = icewmInstalled && !isInstalling && !isSaving,
+                                    colors = RadioButtonDefaults.colors(
+                                        selectedColor = MaterialTheme.colorScheme.primary,
+                                        unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("IceWM", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+                                    Text(
+                                        when {
+                                            icewmInstalled && icewmSelected -> "Installed · Selected"
+                                            icewmInstalled -> "Installed · Not selected"
+                                            else -> "Not installed"
+                                        },
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 10.sp
+                                    )
                                 }
-                                Button(
-                                    onClick = { viewModel.installOpenbox() },
-                                    modifier = Modifier.weight(1f).height(44.dp),
-                                    enabled = !isInstalling && !isSaving && name.isNotEmpty(),
-                                    shape = RoundedCornerShape(14.dp)
-                                ) {
-                                    Text("Reinstall")
-                                }
-                            }
-                        } else {
-                            Button(
-                                onClick = { viewModel.installOpenbox() },
-                                modifier = Modifier.fillMaxWidth().height(44.dp),
-                                enabled = !isInstalling && !isSaving && name.isNotEmpty(),
-                                shape = RoundedCornerShape(14.dp)
-                            ) {
-                                Text("Install")
+                                Text(
+                                    if (icewmExpanded) "▲" else "▼",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 12.sp
+                                )
                             }
                         }
 
-                        if (installResult != null) {
-                            Spacer(Modifier.height(8.dp))
+                        if (icewmExpanded) {
+                            Spacer(Modifier.height(10.dp))
                             Text(
-                                installResult,
-                                color = when {
-                                    installResult.startsWith("OK") -> MaterialTheme.colorScheme.primary
-                                    installResult.startsWith("Warning") -> MaterialTheme.colorScheme.tertiary
-                                    else -> MaterialTheme.colorScheme.error
+                                if (icewmInstalled) {
+                                    "IceWM can be verified, reinstalled, selected or deselected without uninstalling its packages."
+                                } else {
+                                    "Install IceWM and a minimal X11 terminal. Installation logs stream in real time."
                                 },
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 10.sp
                             )
+                            Spacer(Modifier.height(10.dp))
+
+                            if (icewmInstalled) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.verifyIcewm() },
+                                        modifier = Modifier.weight(1f).height(44.dp),
+                                        enabled = !isInstalling && !isSaving && name.isNotEmpty(),
+                                        shape = RoundedCornerShape(14.dp)
+                                    ) {
+                                        Text("Verify")
+                                    }
+                                    Button(
+                                        onClick = { viewModel.installIcewm() },
+                                        modifier = Modifier.weight(1f).height(44.dp),
+                                        enabled = !isInstalling && !isSaving && name.isNotEmpty(),
+                                        shape = RoundedCornerShape(14.dp)
+                                    ) {
+                                        Text("Reinstall")
+                                    }
+                                }
+                            } else {
+                                Button(
+                                    onClick = { viewModel.installIcewm() },
+                                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                                    enabled = !isInstalling && !isSaving && name.isNotEmpty(),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Text("Install")
+                                }
+                            }
+
+                            if (installResult != null && installResultSession == GraphicSession.ICEWM) {
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    installResult,
+                                    color = when {
+                                        installResult.startsWith("OK") -> MaterialTheme.colorScheme.primary
+                                        installResult.startsWith("Warning") -> MaterialTheme.colorScheme.tertiary
+                                        else -> MaterialTheme.colorScheme.error
+                                    },
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
                         }
                     }
                 }

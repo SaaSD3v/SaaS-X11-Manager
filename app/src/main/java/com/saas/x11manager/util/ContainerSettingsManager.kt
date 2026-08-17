@@ -65,6 +65,7 @@ object ContainerSettingsManager {
             "xfce" -> GraphicSession.XFCE
             "lxqt" -> GraphicSession.LXQT
             "openbox" -> GraphicSession.OPENBOX
+            "icewm" -> GraphicSession.ICEWM
             "none" -> GraphicSession.NONE
             else -> null
         }

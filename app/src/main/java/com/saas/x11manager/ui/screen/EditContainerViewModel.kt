@@ -30,6 +30,8 @@ class EditContainerViewModel : ViewModel() {
         private set
     var openboxInstalled by mutableStateOf(false)
         private set
+    var icewmInstalled by mutableStateOf(false)
+        private set
 
     var logs by mutableStateOf<List<Pair<Int, String>>>(emptyList())
     val installLogs = mutableStateListOf<Pair<Int, String>>()
@@ -44,6 +46,8 @@ class EditContainerViewModel : ViewModel() {
     var sessionOperationTitle by mutableStateOf("Openbox")
         private set
     var installResult by mutableStateOf<String?>(null)
+        private set
+    var installResultSession by mutableStateOf<GraphicSession?>(null)
         private set
 
     private var loaded = false
@@ -66,18 +70,25 @@ class EditContainerViewModel : ViewModel() {
 
             val sessionState = withContext(Dispatchers.IO) {
                 val saved = ContainerSettingsManager.getGraphicSession(containerName)
-                val installed = ContainerSettingsManager.isGraphicSessionInstalled(
+                val openbox = ContainerSettingsManager.isGraphicSessionInstalled(
                     containerName,
                     GraphicSession.OPENBOX
                 )
-                Pair(saved, installed)
+                val icewm = ContainerSettingsManager.isGraphicSessionInstalled(
+                    containerName,
+                    GraphicSession.ICEWM
+                )
+                Triple(saved, openbox, icewm)
             }
 
             graphicSession = sessionState.first ?: GraphicSession.XFCE
             savedGraphicSession = graphicSession
             openboxInstalled = sessionState.second || graphicSession == GraphicSession.OPENBOX
+            icewmInstalled = sessionState.third || graphicSession == GraphicSession.ICEWM
             logs = emptyList()
             installLogs.clear()
+            installResult = null
+            installResultSession = null
         }
     }
 
@@ -92,6 +103,7 @@ class EditContainerViewModel : ViewModel() {
         } else {
             GraphicSession.OPENBOX
         }
+        installResultSession = GraphicSession.OPENBOX
         installResult = if (graphicSession == GraphicSession.OPENBOX) {
             "Openbox selected — tap Save to apply"
         } else {
@@ -99,15 +111,34 @@ class EditContainerViewModel : ViewModel() {
         }
     }
 
+    fun toggleIcewmSelection() {
+        if (!icewmInstalled || isInstallingSession || isSaving) return
+        graphicSession = if (graphicSession == GraphicSession.ICEWM) {
+            GraphicSession.NONE
+        } else {
+            GraphicSession.ICEWM
+        }
+        installResultSession = GraphicSession.ICEWM
+        installResult = if (graphicSession == GraphicSession.ICEWM) {
+            "IceWM selected — tap Save to apply"
+        } else {
+            "IceWM deselected — tap Save to apply"
+        }
+    }
+
     fun installOpenbox() {
         if (isInstallingSession || isSaving) return
 
         val cd = cacheDir ?: run {
-            showOperationSetupError("Installing Openbox", "cacheDir not set")
+            showOperationSetupError(
+                "Installing Openbox",
+                "cacheDir not set",
+                GraphicSession.OPENBOX
+            )
             return
         }
 
-        beginSessionOperation("Installing Openbox")
+        beginSessionOperation("Installing Openbox", GraphicSession.OPENBOX)
         val selectedInitSystem = initSystem
         val logger = operationLogger()
 
@@ -174,10 +205,89 @@ class EditContainerViewModel : ViewModel() {
         }
     }
 
+    fun installIcewm() {
+        if (isInstallingSession || isSaving) return
+
+        val cd = cacheDir ?: run {
+            showOperationSetupError(
+                "Installing IceWM",
+                "cacheDir not set",
+                GraphicSession.ICEWM
+            )
+            return
+        }
+
+        beginSessionOperation("Installing IceWM", GraphicSession.ICEWM)
+        val selectedInitSystem = initSystem
+        val logger = operationLogger()
+
+        viewModelScope.launch {
+            try {
+                val installed = GraphicSessionInstaller.install(
+                    containerName = containerName,
+                    platform = null,
+                    session = GraphicSession.ICEWM,
+                    initSystem = selectedInitSystem,
+                    cacheDir = cd,
+                    logger = logger
+                )
+
+                if (installed) {
+                    initSystem = selectedInitSystem
+                    graphicSession = GraphicSession.ICEWM
+                    savedGraphicSession = GraphicSession.ICEWM
+                    icewmInstalled = true
+
+                    val markerSaved = withContext(Dispatchers.IO) {
+                        ContainerSettingsManager.setGraphicSessionInstalled(
+                            containerName = containerName,
+                            graphicSession = GraphicSession.ICEWM,
+                            installed = true,
+                            cacheDir = cd
+                        )
+                    }
+                    if (!markerSaved) {
+                        logger.w("[!] IceWM is installed, but its installed marker could not be saved")
+                    }
+
+                    logger.i("")
+                    val (statusBeforeFinalStop, _) =
+                        ContainerManager.getContainerRuntimeStatePublic(containerName)
+                    val stopAccepted = if (statusBeforeFinalStop == ContainerStatus.STOPPED) {
+                        logger.i("[+] Container already stopped after installation")
+                        true
+                    } else {
+                        logger.i("[*] Stopping container after installation...")
+                        ContainerManager.stopContainer(containerName, logger)
+                    }
+                    val (statusAfterStop, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
+                    if (stopAccepted || statusAfterStop == ContainerStatus.STOPPED) {
+                        logger.i("[+] Container stopped")
+                        logger.i("")
+                        logger.i("[+] IceWM installation completed successfully")
+                        logger.i("[+] Click Start X11 to launch the session")
+                        installResult = "OK: IceWM installed. Click Start X11."
+                    } else {
+                        logger.w("[!] IceWM was installed, but the container could not be confirmed stopped")
+                        logger.w("[!] Stop the container before clicking Start X11")
+                        installResult = "Warning: IceWM installed; stop container before Start X11"
+                    }
+                } else {
+                    installResult = "Error: IceWM installation failed"
+                }
+            } catch (e: Exception) {
+                logOperationException(e, "IceWM installation failed")
+            } finally {
+                refreshRuntimeStatus()
+                isInstallingSession = false
+            }
+        }
+    }
+
     fun verifyOpenbox() {
         if (isInstallingSession || isSaving) return
 
-        beginSessionOperation("Verifying Openbox")
+        beginSessionOperation("Verifying Openbox", GraphicSession.OPENBOX)
         val selectedInitSystem = initSystem
         val logger = operationLogger()
 
@@ -216,9 +326,52 @@ class EditContainerViewModel : ViewModel() {
         }
     }
 
-    private fun beginSessionOperation(title: String) {
+    fun verifyIcewm() {
+        if (isInstallingSession || isSaving) return
+
+        beginSessionOperation("Verifying IceWM", GraphicSession.ICEWM)
+        val selectedInitSystem = initSystem
+        val logger = operationLogger()
+
+        viewModelScope.launch {
+            try {
+                val verified = GraphicSessionInstaller.verify(
+                    containerName = containerName,
+                    platform = null,
+                    session = GraphicSession.ICEWM,
+                    initSystem = selectedInitSystem,
+                    logger = logger
+                )
+
+                if (verified) {
+                    icewmInstalled = true
+                    cacheDir?.let { cd ->
+                        withContext(Dispatchers.IO) {
+                            ContainerSettingsManager.setGraphicSessionInstalled(
+                                containerName,
+                                GraphicSession.ICEWM,
+                                true,
+                                cd
+                            )
+                        }
+                    }
+                    installResult = "OK: IceWM verified"
+                } else {
+                    installResult = "Error: IceWM verification failed"
+                }
+            } catch (e: Exception) {
+                logOperationException(e, "IceWM verification failed")
+            } finally {
+                refreshRuntimeStatus()
+                isInstallingSession = false
+            }
+        }
+    }
+
+    private fun beginSessionOperation(title: String, session: GraphicSession) {
         installLogs.clear()
         installResult = null
+        installResultSession = session
         sessionOperationTitle = title
         showInstallTerminal = true
         isInstallingSession = true
@@ -228,11 +381,16 @@ class EditContainerViewModel : ViewModel() {
         installLogs.add(level to message)
     }
 
-    private fun showOperationSetupError(title: String, message: String) {
+    private fun showOperationSetupError(
+        title: String,
+        message: String,
+        session: GraphicSession
+    ) {
         installLogs.clear()
         installLogs.add(Log.ERROR to "[-] FAIL")
         installLogs.add(Log.ERROR to "[-] $message")
         installResult = "Error: $message"
+        installResultSession = session
         sessionOperationTitle = title
         showInstallTerminal = true
     }
