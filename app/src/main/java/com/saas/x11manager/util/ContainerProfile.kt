@@ -85,5 +85,6 @@ enum class GraphicSession(
     BERRY("Berry WM", "berry"),
     DK("dk", "dk"),
     GNOME_XORG("GNOME Xorg", "saas-gnome-xorg-session"),
+    GNOME_FLASHBACK("GNOME Flashback", "saas-gnome-flashback-session"),
     NONE("None", "")
 }

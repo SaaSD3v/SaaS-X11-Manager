@@ -235,6 +235,27 @@ object GraphicSessionSupport {
             executable = "gnome-session",
             wrapper = "saas-gnome-xorg-session"
         ),
+        GraphicSession.GNOME_FLASHBACK to GraphicSessionSupportSpec(
+            session = GraphicSession.GNOME_FLASHBACK,
+            postInstallCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Creating GNOME Flashback session launcher",
+                    "printf '%s\\n' '#!/bin/sh' " +
+                        "'export DESKTOP_SESSION=gnome-flashback-metacity' " +
+                        "'export XDG_SESSION_DESKTOP=gnome-flashback-metacity' " +
+                        "'export XDG_CURRENT_DESKTOP=GNOME-Flashback:GNOME' " +
+                        "'exec dbus-run-session -- gnome-session --session=gnome-flashback-metacity' " +
+                        "> /usr/local/bin/saas-gnome-flashback-session && chmod 755 /usr/local/bin/saas-gnome-flashback-session"
+                )
+            ),
+            verificationCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Checking GNOME Flashback session",
+                    "command -v gnome-session >/dev/null && " +
+                        "test -f /usr/share/gnome-session/sessions/gnome-flashback-metacity.session"
+                )
+            )
+        ),
         GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE),
         GraphicSession.LXQT to GraphicSessionSupportSpec(GraphicSession.LXQT)
     )

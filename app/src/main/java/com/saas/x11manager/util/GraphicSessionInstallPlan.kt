@@ -151,7 +151,8 @@ object GraphicSessionInstallPlans {
         apk(GraphicSession.TWO_BWM, listOf("2bwm", "xterm")),
         apk(GraphicSession.BERRY, listOf("berry", "xterm")),
         apk(GraphicSession.DK, listOf("dk", "xterm")),
-        apt(GraphicSession.GNOME_XORG, listOf("gnome-session", "gnome-session-xsession", "dbus-x11", "xterm"))
+        apt(GraphicSession.GNOME_XORG, listOf("gnome-session", "gnome-session-xsession", "dbus-x11", "xterm")),
+        apt(GraphicSession.GNOME_FLASHBACK, listOf("gnome-session-flashback", "dbus-x11", "xterm"))
     )
 
     fun forSelection(
