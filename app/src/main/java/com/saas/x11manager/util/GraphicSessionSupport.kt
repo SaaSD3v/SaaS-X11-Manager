@@ -261,6 +261,29 @@ object GraphicSessionSupport {
             executable = "gnome-session-classic",
             wrapper = "saas-gnome-classic-xorg-session"
         ),
+        GraphicSession.UNITY7 to GraphicSessionSupportSpec(
+            session = GraphicSession.UNITY7,
+            postInstallCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Creating Unity 7 session launcher",
+                    "printf '%s\\n' '#!/bin/sh' " +
+                        "'export DESKTOP_SESSION=unity' " +
+                        "'export XDG_SESSION_DESKTOP=unity' " +
+                        "'export XDG_CURRENT_DESKTOP=Unity:Unity7' " +
+                        "'if command -v unity-session >/dev/null 2>&1; then exec dbus-run-session -- unity-session; fi' " +
+                        "'exec dbus-run-session -- gnome-session --session=unity' " +
+                        "> /usr/local/bin/saas-unity7-session && chmod 755 /usr/local/bin/saas-unity7-session"
+                )
+            ),
+            verificationCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Checking Unity 7 session",
+                    "command -v unity >/dev/null && test -f /usr/share/xsessions/unity.desktop && " +
+                        "(command -v unity-session >/dev/null 2>&1 || " +
+                        "(command -v gnome-session >/dev/null && test -f /usr/share/gnome-session/sessions/unity.session))"
+                )
+            )
+        ),
         GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE),
         GraphicSession.LXQT to GraphicSessionSupportSpec(GraphicSession.LXQT)
     )
