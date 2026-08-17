@@ -35,66 +35,70 @@ object GraphicSessionInstallPlans {
     fun forSelection(
         platform: ContainerPlatform,
         session: GraphicSession
-    ): GraphicSessionInstallPlan = when (platform to session) {
-        ContainerPlatform.UBUNTU to GraphicSession.XFCE -> GraphicSessionInstallPlan(
-            platform = platform,
-            session = session,
-            repositoryRequirement = RepositoryRequirement.APT_UNIVERSE,
-            packages = listOf(
-                "dbus-x11",
-                "libxfce4ui-utils",
-                "thunar",
-                "xfce4-appfinder",
-                "xfce4-panel",
-                "xfce4-session",
-                "xfce4-settings",
-                "xfconf",
-                "xfdesktop4",
-                "xfwm4",
-                "xfce4-terminal"
-            ),
-            verificationCommand = "startxfce4",
-            installRecommendedPackages = false
-        )
+    ): GraphicSessionInstallPlan = when (platform) {
+        ContainerPlatform.UBUNTU -> when (session) {
+            GraphicSession.XFCE -> GraphicSessionInstallPlan(
+                platform = platform,
+                session = session,
+                repositoryRequirement = RepositoryRequirement.APT_UNIVERSE,
+                packages = listOf(
+                    "dbus-x11",
+                    "libxfce4ui-utils",
+                    "thunar",
+                    "xfce4-appfinder",
+                    "xfce4-panel",
+                    "xfce4-session",
+                    "xfce4-settings",
+                    "xfconf",
+                    "xfdesktop4",
+                    "xfwm4",
+                    "xfce4-terminal"
+                ),
+                verificationCommand = "startxfce4",
+                installRecommendedPackages = false
+            )
 
-        ContainerPlatform.UBUNTU to GraphicSession.LXQT -> GraphicSessionInstallPlan(
-            platform = platform,
-            session = session,
-            repositoryRequirement = RepositoryRequirement.APT_UNIVERSE,
-            packages = listOf(
-                "dbus-x11",
-                "lxqt-core",
-                "openbox"
-            ),
-            verificationCommand = "startlxqt",
-            installRecommendedPackages = false
-        )
+            GraphicSession.LXQT -> GraphicSessionInstallPlan(
+                platform = platform,
+                session = session,
+                repositoryRequirement = RepositoryRequirement.APT_UNIVERSE,
+                packages = listOf(
+                    "dbus-x11",
+                    "lxqt-core",
+                    "openbox"
+                ),
+                verificationCommand = "startlxqt",
+                installRecommendedPackages = false
+            )
+        }
 
-        ContainerPlatform.ALPINE to GraphicSession.XFCE -> GraphicSessionInstallPlan(
-            platform = platform,
-            session = session,
-            repositoryRequirement = RepositoryRequirement.APK_COMMUNITY,
-            packages = listOf(
-                "dbus",
-                "dbus-x11",
-                "xfce4",
-                "xfce4-terminal"
-            ),
-            verificationCommand = "startxfce4",
-            installRecommendedPackages = true
-        )
+        ContainerPlatform.ALPINE -> when (session) {
+            GraphicSession.XFCE -> GraphicSessionInstallPlan(
+                platform = platform,
+                session = session,
+                repositoryRequirement = RepositoryRequirement.APK_COMMUNITY,
+                packages = listOf(
+                    "dbus",
+                    "dbus-x11",
+                    "xfce4",
+                    "xfce4-terminal"
+                ),
+                verificationCommand = "startxfce4",
+                installRecommendedPackages = true
+            )
 
-        ContainerPlatform.ALPINE to GraphicSession.LXQT -> GraphicSessionInstallPlan(
-            platform = platform,
-            session = session,
-            repositoryRequirement = RepositoryRequirement.APK_COMMUNITY,
-            packages = listOf(
-                "dbus",
-                "dbus-x11",
-                "lxqt-desktop"
-            ),
-            verificationCommand = "startlxqt",
-            installRecommendedPackages = true
-        )
+            GraphicSession.LXQT -> GraphicSessionInstallPlan(
+                platform = platform,
+                session = session,
+                repositoryRequirement = RepositoryRequirement.APK_COMMUNITY,
+                packages = listOf(
+                    "dbus",
+                    "dbus-x11",
+                    "lxqt-desktop"
+                ),
+                verificationCommand = "startlxqt",
+                installRecommendedPackages = true
+            )
+        }
     }
 }
