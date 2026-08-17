@@ -230,6 +230,11 @@ object GraphicSessionSupport {
         GraphicSession.TWO_BWM to GraphicSessionSupportSpec(GraphicSession.TWO_BWM),
         GraphicSession.BERRY to GraphicSessionSupportSpec(GraphicSession.BERRY),
         GraphicSession.DK to GraphicSessionSupportSpec(GraphicSession.DK),
+        GraphicSession.GNOME_XORG to dbusWrappedSpec(
+            session = GraphicSession.GNOME_XORG,
+            executable = "gnome-session",
+            wrapper = "saas-gnome-xorg-session"
+        ),
         GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE),
         GraphicSession.LXQT to GraphicSessionSupportSpec(GraphicSession.LXQT)
     )

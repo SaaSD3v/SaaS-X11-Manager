@@ -84,5 +84,6 @@ enum class GraphicSession(
     TWO_BWM("2bwm", "2bwm"),
     BERRY("Berry WM", "berry"),
     DK("dk", "dk"),
+    GNOME_XORG("GNOME Xorg", "saas-gnome-xorg-session"),
     NONE("None", "")
 }
