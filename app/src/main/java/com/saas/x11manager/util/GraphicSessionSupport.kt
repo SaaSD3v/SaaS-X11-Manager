@@ -61,7 +61,22 @@ object GraphicSessionSupport {
             )
         ),
         GraphicSession.HERBSTLUFTWM to GraphicSessionSupportSpec(GraphicSession.HERBSTLUFTWM),
-        GraphicSession.SPECTRWM to GraphicSessionSupportSpec(GraphicSession.SPECTRWM)
+        GraphicSession.SPECTRWM to GraphicSessionSupportSpec(GraphicSession.SPECTRWM),
+        GraphicSession.I3 to GraphicSessionSupportSpec(
+            session = GraphicSession.I3,
+            postInstallCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Preparing i3 configuration",
+                    "mkdir -p /root/.config/i3 && ([ -f /root/.config/i3/config ] || [ -f /root/.i3/config ] || cp /etc/i3/config /root/.config/i3/config)"
+                )
+            ),
+            verificationCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Checking i3 configuration",
+                    "if [ -f /root/.config/i3/config ]; then i3 -C -c /root/.config/i3/config; elif [ -f /root/.i3/config ]; then i3 -C -c /root/.i3/config; else i3 -C -c /etc/i3/config; fi"
+                )
+            )
+        )
     )
 
     val installableSessions: List<GraphicSession>

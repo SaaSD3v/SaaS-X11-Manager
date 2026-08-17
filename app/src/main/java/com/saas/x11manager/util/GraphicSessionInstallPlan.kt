@@ -82,7 +82,9 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.HERBSTLUFTWM, listOf("herbstluftwm", "xterm")),
         apk(GraphicSession.HERBSTLUFTWM, listOf("herbstluftwm", "xterm")),
         apt(GraphicSession.SPECTRWM, listOf("spectrwm", "xterm")),
-        apk(GraphicSession.SPECTRWM, listOf("spectrwm", "xterm"))
+        apk(GraphicSession.SPECTRWM, listOf("spectrwm", "xterm")),
+        apt(GraphicSession.I3, listOf("i3-wm", "xterm")),
+        apk(GraphicSession.I3, listOf("i3wm", "xterm"))
     )
 
     fun forSelection(
