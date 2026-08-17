@@ -28,5 +28,6 @@ enum class GraphicSession(
     ICEWM("IceWM", "icewm-session"),
     JWM("JWM", "jwm"),
     FLUXBOX("Fluxbox", "startfluxbox"),
+    CWM("cwm", "cwm"),
     NONE("None", "")
 }

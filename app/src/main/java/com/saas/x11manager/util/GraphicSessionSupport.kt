@@ -50,7 +50,16 @@ object GraphicSessionSupport {
                 GraphicSessionProvisionCommand("Checking JWM configuration", "jwm -p")
             )
         ),
-        GraphicSession.FLUXBOX to GraphicSessionSupportSpec(GraphicSession.FLUXBOX)
+        GraphicSession.FLUXBOX to GraphicSessionSupportSpec(GraphicSession.FLUXBOX),
+        GraphicSession.CWM to GraphicSessionSupportSpec(
+            session = GraphicSession.CWM,
+            postInstallCommands = listOf(
+                GraphicSessionProvisionCommand("Validating cwm configuration", "cwm -n")
+            ),
+            verificationCommands = listOf(
+                GraphicSessionProvisionCommand("Checking cwm configuration", "cwm -n")
+            )
+        )
     )
 
     val installableSessions: List<GraphicSession>
