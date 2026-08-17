@@ -84,6 +84,16 @@ object GraphicSessionSupport {
             )
         ),
         GraphicSession.RATPOISON to GraphicSessionSupportSpec(GraphicSession.RATPOISON),
+        GraphicSession.TWM to GraphicSessionSupportSpec(GraphicSession.TWM),
+        GraphicSession.WINDOW_MAKER to GraphicSessionSupportSpec(GraphicSession.WINDOW_MAKER),
+        GraphicSession.FVWM to GraphicSessionSupportSpec(GraphicSession.FVWM),
+        GraphicSession.PEKWM to GraphicSessionSupportSpec(GraphicSession.PEKWM),
+        GraphicSession.BLACKBOX to GraphicSessionSupportSpec(GraphicSession.BLACKBOX),
+        GraphicSession.CTWM to GraphicSessionSupportSpec(GraphicSession.CTWM),
+        GraphicSession.EVILWM to GraphicSessionSupportSpec(GraphicSession.EVILWM),
+        GraphicSession.MATCHBOX to GraphicSessionSupportSpec(GraphicSession.MATCHBOX),
+        GraphicSession.SAWFISH to GraphicSessionSupportSpec(GraphicSession.SAWFISH),
+        GraphicSession.XMONAD to GraphicSessionSupportSpec(GraphicSession.XMONAD),
         GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE),
         GraphicSession.LXQT to GraphicSessionSupportSpec(GraphicSession.LXQT)
     )

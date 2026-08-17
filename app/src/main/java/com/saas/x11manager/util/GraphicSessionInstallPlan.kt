@@ -88,7 +88,19 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.AWESOME, listOf("awesome", "xterm")),
         apk(GraphicSession.AWESOME, listOf("awesome", "xterm")),
         apt(GraphicSession.RATPOISON, listOf("ratpoison", "xterm")),
-        apk(GraphicSession.RATPOISON, listOf("ratpoison", "xterm"))
+        apk(GraphicSession.RATPOISON, listOf("ratpoison", "xterm")),
+        apt(GraphicSession.TWM, listOf("twm", "xterm")),
+        apk(GraphicSession.TWM, listOf("twm", "xterm")),
+        apt(GraphicSession.WINDOW_MAKER, listOf("wmaker", "xterm")),
+        apk(GraphicSession.WINDOW_MAKER, listOf("windowmaker", "xterm")),
+        apt(GraphicSession.FVWM, listOf("fvwm", "xterm")),
+        apt(GraphicSession.PEKWM, listOf("pekwm", "xterm")),
+        apt(GraphicSession.BLACKBOX, listOf("blackbox", "xterm")),
+        apt(GraphicSession.CTWM, listOf("ctwm", "xterm")),
+        apt(GraphicSession.EVILWM, listOf("evilwm", "xterm")),
+        apt(GraphicSession.MATCHBOX, listOf("matchbox-window-manager", "xterm")),
+        apt(GraphicSession.SAWFISH, listOf("sawfish", "xterm")),
+        apt(GraphicSession.XMONAD, listOf("xmonad", "xterm"))
     )
 
     fun forSelection(

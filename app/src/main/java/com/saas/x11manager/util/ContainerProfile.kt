@@ -34,5 +34,15 @@ enum class GraphicSession(
     I3("i3", "i3"),
     AWESOME("AwesomeWM", "awesome"),
     RATPOISON("Ratpoison", "ratpoison"),
+    TWM("TWM", "twm"),
+    WINDOW_MAKER("Window Maker", "wmaker"),
+    FVWM("FVWM", "fvwm"),
+    PEKWM("pekwm", "pekwm"),
+    BLACKBOX("Blackbox", "blackbox"),
+    CTWM("ctwm", "ctwm"),
+    EVILWM("evilwm", "evilwm"),
+    MATCHBOX("Matchbox", "matchbox-window-manager"),
+    SAWFISH("Sawfish", "sawfish"),
+    XMONAD("XMonad", "xmonad"),
     NONE("None", "")
 }
