@@ -326,6 +326,7 @@ object GraphicSessionSupport {
                 )
             )
         ),
+        GraphicSession.NWM to GraphicSessionSupportSpec(GraphicSession.NWM),
         GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE),
         GraphicSession.LXQT to GraphicSessionSupportSpec(GraphicSession.LXQT)
     )

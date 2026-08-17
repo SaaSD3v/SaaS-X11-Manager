@@ -160,7 +160,8 @@ object GraphicSessionInstallPlans {
             listOf("ukui-session-manager", "ukwm", "ukui-panel", "ukui-settings-daemon", "dbus-x11", "xterm")
         ),
         apt(GraphicSession.EXWM, listOf("elpa-exwm", "emacs-gtk", "dbus-x11", "xterm")),
-        apt(GraphicSession.GNUSTEP_GWORKSPACE, listOf("gworkspace.app", "wmaker", "dbus-x11", "xterm"))
+        apt(GraphicSession.GNUSTEP_GWORKSPACE, listOf("gworkspace.app", "wmaker", "dbus-x11", "xterm")),
+        apt(GraphicSession.NWM, listOf("nwm"))
     )
 
     fun forSelection(
