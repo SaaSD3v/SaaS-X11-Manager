@@ -118,6 +118,44 @@ object GraphicSessionSupport {
         GraphicSession.MIWM to GraphicSessionSupportSpec(GraphicSession.MIWM),
         GraphicSession.VTWM to GraphicSessionSupportSpec(GraphicSession.VTWM),
         GraphicSession.W9WM to GraphicSessionSupportSpec(GraphicSession.W9WM),
+        GraphicSession.WINDOWLAB to GraphicSessionSupportSpec(GraphicSession.WINDOWLAB),
+        GraphicSession.WM2 to GraphicSessionSupportSpec(GraphicSession.WM2),
+        GraphicSession.STUMPWM to GraphicSessionSupportSpec(GraphicSession.STUMPWM),
+        GraphicSession.NOTION to GraphicSessionSupportSpec(GraphicSession.NOTION),
+        GraphicSession.MWM to GraphicSessionSupportSpec(GraphicSession.MWM),
+        GraphicSession.MARCO to GraphicSessionSupportSpec(GraphicSession.MARCO),
+        GraphicSession.METACITY to GraphicSessionSupportSpec(GraphicSession.METACITY),
+        GraphicSession.XFWM4 to GraphicSessionSupportSpec(GraphicSession.XFWM4),
+        GraphicSession.KWIN_X11 to GraphicSessionSupportSpec(
+            session = GraphicSession.KWIN_X11,
+            postInstallCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Creating KWin X11 session launcher",
+                    "printf '%s\n' '#!/bin/sh' 'exec dbus-run-session -- kwin_x11' > /usr/local/bin/saas-kwin-x11-session && chmod 755 /usr/local/bin/saas-kwin-x11-session"
+                )
+            ),
+            verificationCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Checking KWin X11 executable",
+                    "command -v kwin_x11 >/dev/null && command -v dbus-run-session >/dev/null"
+                )
+            )
+        ),
+        GraphicSession.ENLIGHTENMENT to GraphicSessionSupportSpec(
+            session = GraphicSession.ENLIGHTENMENT,
+            postInstallCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Creating Enlightenment session launcher",
+                    "printf '%s\n' '#!/bin/sh' 'exec dbus-run-session -- enlightenment_start' > /usr/local/bin/saas-enlightenment-session && chmod 755 /usr/local/bin/saas-enlightenment-session"
+                )
+            ),
+            verificationCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Checking Enlightenment executable",
+                    "command -v enlightenment_start >/dev/null && command -v dbus-run-session >/dev/null"
+                )
+            )
+        ),
         GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE),
         GraphicSession.LXQT to GraphicSessionSupportSpec(GraphicSession.LXQT)
     )

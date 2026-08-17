@@ -54,5 +54,15 @@ enum class GraphicSession(
     MIWM("miwm", "miwm"),
     VTWM("vtwm", "vtwm"),
     W9WM("w9wm", "w9wm"),
+    WINDOWLAB("WindowLab", "windowlab"),
+    WM2("wm2", "wm2"),
+    STUMPWM("StumpWM", "stumpwm"),
+    NOTION("Notion", "notion"),
+    MWM("MWM", "mwm"),
+    MARCO("Marco", "marco"),
+    METACITY("Metacity", "metacity"),
+    XFWM4("Xfwm4", "xfwm4"),
+    KWIN_X11("KWin X11", "saas-kwin-x11-session"),
+    ENLIGHTENMENT("Enlightenment", "saas-enlightenment-session"),
     NONE("None", "")
 }

@@ -116,7 +116,17 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.LWM, listOf("lwm", "xterm")),
         apt(GraphicSession.MIWM, listOf("miwm", "xterm")),
         apt(GraphicSession.VTWM, listOf("vtwm", "xterm")),
-        apt(GraphicSession.W9WM, listOf("w9wm", "xterm"))
+        apt(GraphicSession.W9WM, listOf("w9wm", "xterm")),
+        apt(GraphicSession.WINDOWLAB, listOf("windowlab", "xterm")),
+        apt(GraphicSession.WM2, listOf("wm2", "xterm")),
+        apt(GraphicSession.STUMPWM, listOf("stumpwm", "xterm")),
+        apt(GraphicSession.NOTION, listOf("notion", "xterm")),
+        apt(GraphicSession.MWM, listOf("mwm", "xterm")),
+        apt(GraphicSession.MARCO, listOf("marco", "xterm")),
+        apt(GraphicSession.METACITY, listOf("metacity", "xterm")),
+        apt(GraphicSession.XFWM4, listOf("xfwm4", "xterm")),
+        apt(GraphicSession.KWIN_X11, listOf("dbus-x11", "kwin-x11", "xterm")),
+        apt(GraphicSession.ENLIGHTENMENT, listOf("dbus-x11", "enlightenment", "xterm"))
     )
 
     fun forSelection(
