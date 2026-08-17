@@ -27,6 +27,11 @@ import com.saas.x11manager.util.InitSystem
 import com.saas.x11manager.util.X11SessionManager
 import kotlinx.coroutines.launch
 
+private enum class RunningWarningMode {
+    ENTRY,
+    CONFIGURATION
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditContainerScreen(
@@ -38,6 +43,7 @@ fun EditContainerScreen(
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(containerName) {
+        viewModel.dismissConfigurationWizard()
         viewModel.load(containerName, context.cacheDir)
     }
 
@@ -49,112 +55,274 @@ fun EditContainerScreen(
     val isSaving = viewModel.isSaving
     val saveError = viewModel.saveError
 
-    var showManualRestartWarning by remember { mutableStateOf(false) }
+    var runningWarningMode by remember(containerName) {
+        mutableStateOf<RunningWarningMode?>(null)
+    }
+    var entryRunningWarningHandled by remember(containerName) { mutableStateOf(false) }
     var installedActionSession by remember { mutableStateOf<GraphicSession?>(null) }
     var selectingInstalledSession by remember { mutableStateOf<GraphicSession?>(null) }
     var quickStartingSelectedSession by remember { mutableStateOf(false) }
 
-    LaunchedEffect(name, viewModel.wizardStarted) {
-        if (name.isNotEmpty() && !viewModel.wizardStarted) {
-            viewModel.startConfigurationWizard()
+    LaunchedEffect(name, status, containerName) {
+        if (!entryRunningWarningHandled && name == containerName) {
+            when (status) {
+                ContainerStatus.RUNNING -> {
+                    entryRunningWarningHandled = true
+                    viewModel.dismissConfigurationWizard()
+                    runningWarningMode = RunningWarningMode.ENTRY
+                }
+
+                ContainerStatus.STOPPED -> entryRunningWarningHandled = true
+                ContainerStatus.UNKNOWN -> Unit
+            }
         }
     }
 
-    if (viewModel.showInstallTerminal) {
-        TerminalDialog(
-            title = viewModel.sessionOperationTitle,
-            logs = viewModel.installLogs,
-            onDismiss = {
-                viewModel.dismissInstallTerminal()
-                onDismiss()
-            },
-            onClear = { viewModel.clearInstallLogs() },
-            isBlocking = isInstalling,
-            primaryActionLabel = if (viewModel.canStartX11FromInstall) "Start X11" else null,
-            onPrimaryAction = if (viewModel.canStartX11FromInstall) {
-                { viewModel.quickStartX11() }
-            } else {
-                null
-            },
-            primaryActionEnabled = !isInstalling
-        )
+    val effectiveRunningWarningMode = runningWarningMode ?: if (
+        viewModel.wizardStage == ConfigurationWizardStage.RUNNING_WARNING
+    ) {
+        RunningWarningMode.CONFIGURATION
+    } else {
+        null
     }
 
-    if (viewModel.wizardError != null) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text("Configuration stopped") },
-            text = { Text(viewModel.wizardError ?: "Configuration could not continue.") },
-            confirmButton = {
-                Button(onClick = onDismiss) {
-                    Text("OK")
-                }
-            }
-        )
-    }
+    when {
+        viewModel.showInstallTerminal -> {
+            TerminalDialog(
+                title = viewModel.sessionOperationTitle,
+                logs = viewModel.installLogs,
+                onDismiss = {
+                    viewModel.dismissInstallTerminal()
+                    onDismiss()
+                },
+                onClear = { viewModel.clearInstallLogs() },
+                isBlocking = isInstalling,
+                primaryActionLabel = if (viewModel.canStartX11FromInstall) "Start X11" else null,
+                onPrimaryAction = if (viewModel.canStartX11FromInstall) {
+                    { viewModel.quickStartX11() }
+                } else {
+                    null
+                },
+                primaryActionEnabled = !isInstalling
+            )
+        }
 
-    if (viewModel.wizardStage == ConfigurationWizardStage.RUNNING_WARNING || showManualRestartWarning) {
-        AlertDialog(
-            onDismissRequest = {
-                if (!viewModel.isPreparingWizard) {
-                    showManualRestartWarning = false
-                    viewModel.dismissConfigurationWizard()
-                }
-            },
-            title = { Text("Replace graphic session") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        "This container is currently running with ${graphicSession.label} " +
-                            "using ${initSystem.name.lowercase()}."
-                    )
-                    Text(
-                        "You are about to replace the current graphic session or change its init setup. " +
-                            "To apply the change safely, the container will be stopped before you continue."
-                    )
-                    Text(
-                        "Next you will choose systemd or OpenRC and then the graphic session. " +
-                            "Sessions that are already installed can be selected without downloading packages again, " +
-                            "or reinstalled if you want to run the full installer again."
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        showManualRestartWarning = false
-                        viewModel.dismissConfigurationWizard()
-                    },
-                    enabled = !viewModel.isPreparingWizard
-                ) {
-                    Text("Cancel")
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showManualRestartWarning = false
-                        viewModel.confirmRunningContainerRestart()
-                    },
-                    enabled = !viewModel.isPreparingWizard
-                ) {
-                    if (viewModel.isPreparingWizard) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(Modifier.width(8.dp))
+        viewModel.wizardError != null -> {
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                title = { Text("Configuration stopped") },
+                text = { Text(viewModel.wizardError ?: "Configuration could not continue.") },
+                confirmButton = {
+                    Button(onClick = onDismiss) {
+                        Text("OK")
                     }
-                    Text("Advance")
                 }
-            }
-        )
-    }
+            )
+        }
 
-    when (viewModel.wizardStage) {
-        ConfigurationWizardStage.RUNNING_WARNING -> Unit
+        effectiveRunningWarningMode != null -> {
+            val isEntryWarning = effectiveRunningWarningMode == RunningWarningMode.ENTRY
+            AlertDialog(
+                onDismissRequest = {
+                    if (!viewModel.isPreparingWizard) {
+                        runningWarningMode = null
+                        viewModel.dismissConfigurationWizard()
+                        if (isEntryWarning) onDismiss()
+                    }
+                },
+                title = {
+                    Text(if (isEntryWarning) "Container is running" else "Replace graphic session")
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "This container is currently running with ${graphicSession.label} " +
+                                "using ${initSystem.name.lowercase()}."
+                        )
+                        if (isEntryWarning) {
+                            Text(
+                                "You can inspect its current settings while it is running. " +
+                                    "Changing the init system or graphic session will require stopping it first."
+                            )
+                            Text("Continue to Edit Container?")
+                        } else {
+                            Text(
+                                "You are about to replace the current graphic session or change its init setup. " +
+                                    "To apply the change safely, the container will be stopped before you continue."
+                            )
+                            Text(
+                                "Next you will choose systemd or OpenRC and then the graphic session. " +
+                                    "Sessions that are already installed can be selected without downloading packages again, " +
+                                    "or reinstalled if you want to run the full installer again."
+                            )
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            runningWarningMode = null
+                            viewModel.dismissConfigurationWizard()
+                            if (isEntryWarning) onDismiss()
+                        },
+                        enabled = !viewModel.isPreparingWizard
+                    ) {
+                        Text(if (isEntryWarning) "Back" else "Cancel")
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            runningWarningMode = null
+                            if (isEntryWarning) {
+                                viewModel.dismissConfigurationWizard()
+                            } else {
+                                viewModel.confirmRunningContainerRestart()
+                            }
+                        },
+                        enabled = !viewModel.isPreparingWizard
+                    ) {
+                        if (!isEntryWarning && viewModel.isPreparingWizard) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text(if (isEntryWarning) "Edit anyway" else "Advance")
+                    }
+                }
+            )
+        }
 
-        ConfigurationWizardStage.INIT_SELECTION -> {
+        installedActionSession != null -> {
+            val session = requireNotNull(installedActionSession)
+            val selectedInit = viewModel.pendingWizardInitSystem ?: initSystem
+            AlertDialog(
+                onDismissRequest = {
+                    installedActionSession = null
+                    viewModel.selectWizardInitSystem(selectedInit)
+                },
+                title = { Text(session.label) },
+                text = {
+                    Text(
+                        "${session.label} is already installed. Select changes only the default graphic session " +
+                            "and ${selectedInit.name.lowercase()} startup configuration, without running apk/apt or " +
+                            "downloading packages. Reinstall runs the full installer again."
+                    )
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            installedActionSession = null
+                            viewModel.selectWizardInitSystem(selectedInit)
+                        }
+                    ) {
+                        Text("Back")
+                    }
+                },
+                confirmButton = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                installedActionSession = null
+                                viewModel.configureWizardSession(session)
+                            }
+                        ) {
+                            Text("Reinstall")
+                        }
+                        Button(
+                            onClick = {
+                                installedActionSession = null
+                                viewModel.selectInitSystem(selectedInit)
+                                if (viewModel.graphicSession != session) {
+                                    viewModel.toggleSessionSelection(session)
+                                }
+                                viewModel.dismissConfigurationWizard()
+                                selectingInstalledSession = session
+                                viewModel.save()
+                            }
+                        ) {
+                            Text("Select")
+                        }
+                    }
+                }
+            )
+        }
+
+        selectingInstalledSession != null -> {
+            val session = requireNotNull(selectingInstalledSession)
+            val selectionSucceeded = !isSaving && saveError?.startsWith("OK") == true
+            val selectionFailed = !isSaving && saveError != null && !selectionSucceeded
+            AlertDialog(
+                onDismissRequest = {
+                    if (!isSaving && !quickStartingSelectedSession) {
+                        selectingInstalledSession = null
+                    }
+                },
+                title = { Text("Selecting ${session.label}") },
+                text = {
+                    when {
+                        isSaving -> Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Text("Applying the existing installation without downloading packages...")
+                        }
+
+                        selectionSucceeded -> Text(
+                            "${session.label} is now the default graphic session. No package installation command was run."
+                        )
+
+                        selectionFailed -> Text(saveError ?: "Could not apply ${session.label}.")
+                        else -> Text("Preparing configuration...")
+                    }
+                },
+                dismissButton = if (selectionSucceeded) {
+                    {
+                        TextButton(
+                            onClick = { selectingInstalledSession = null },
+                            enabled = !quickStartingSelectedSession
+                        ) {
+                            Text("Done")
+                        }
+                    }
+                } else {
+                    {}
+                },
+                confirmButton = {
+                    when {
+                        selectionSucceeded -> Button(
+                            onClick = {
+                                quickStartingSelectedSession = true
+                                scope.launch {
+                                    try {
+                                        X11SessionManager.startX11Session(containerName = containerName)
+                                        onDismiss()
+                                    } finally {
+                                        quickStartingSelectedSession = false
+                                    }
+                                }
+                            },
+                            enabled = !quickStartingSelectedSession
+                        ) {
+                            if (quickStartingSelectedSession) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text("Start X11")
+                        }
+
+                        selectionFailed -> Button(onClick = { selectingInstalledSession = null }) {
+                            Text("OK")
+                        }
+                    }
+                }
+            )
+        }
+
+        viewModel.wizardStage == ConfigurationWizardStage.INIT_SELECTION -> {
             WizardChoiceDialog(
                 title = "Choose init system",
                 subtitle = "This choice controls which Graphic Session catalog is shown next.",
@@ -178,7 +346,7 @@ fun EditContainerScreen(
             }
         }
 
-        ConfigurationWizardStage.SESSION_SELECTION -> {
+        viewModel.wizardStage == ConfigurationWizardStage.SESSION_SELECTION -> {
             val selectedInit = viewModel.pendingWizardInitSystem ?: initSystem
             WizardChoiceDialog(
                 title = "Choose graphic session",
@@ -206,6 +374,7 @@ fun EditContainerScreen(
                         installed = installed,
                         onClick = {
                             if (installed) {
+                                viewModel.dismissConfigurationWizard()
                                 installedActionSession = session
                             } else {
                                 viewModel.configureWizardSession(session)
@@ -215,122 +384,6 @@ fun EditContainerScreen(
                 }
             }
         }
-
-        ConfigurationWizardStage.HIDDEN -> Unit
-    }
-
-    installedActionSession?.let { session ->
-        val selectedInit = viewModel.pendingWizardInitSystem ?: initSystem
-        AlertDialog(
-            onDismissRequest = { installedActionSession = null },
-            title = { Text(session.label) },
-            text = {
-                Text(
-                    "${session.label} is already installed. Select changes only the default graphic session " +
-                        "and ${selectedInit.name.lowercase()} startup configuration, without running apk/apt or " +
-                        "downloading packages. Reinstall runs the full installer again."
-                )
-            },
-            dismissButton = {
-                TextButton(onClick = { installedActionSession = null }) {
-                    Text("Back")
-                }
-            },
-            confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = {
-                            installedActionSession = null
-                            viewModel.configureWizardSession(session)
-                        }
-                    ) {
-                        Text("Reinstall")
-                    }
-                    Button(
-                        onClick = {
-                            installedActionSession = null
-                            viewModel.selectInitSystem(selectedInit)
-                            if (viewModel.graphicSession != session) {
-                                viewModel.toggleSessionSelection(session)
-                            }
-                            viewModel.dismissConfigurationWizard()
-                            selectingInstalledSession = session
-                            viewModel.save()
-                        }
-                    ) {
-                        Text("Select")
-                    }
-                }
-            }
-        )
-    }
-
-    selectingInstalledSession?.let { session ->
-        val selectionSucceeded = !isSaving && saveError?.startsWith("OK") == true
-        val selectionFailed = !isSaving && saveError != null && !selectionSucceeded
-        AlertDialog(
-            onDismissRequest = {
-                if (!isSaving && !quickStartingSelectedSession) {
-                    selectingInstalledSession = null
-                }
-            },
-            title = { Text("Selecting ${session.label}") },
-            text = {
-                when {
-                    isSaving -> Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Text("Applying the existing installation without downloading packages...")
-                    }
-                    selectionSucceeded -> Text(
-                        "${session.label} is now the default graphic session. No package installation command was run."
-                    )
-                    selectionFailed -> Text(saveError ?: "Could not apply ${session.label}.")
-                    else -> Text("Preparing configuration...")
-                }
-            },
-            dismissButton = if (selectionSucceeded) {
-                {
-                    TextButton(
-                        onClick = { selectingInstalledSession = null },
-                        enabled = !quickStartingSelectedSession
-                    ) {
-                        Text("Done")
-                    }
-                }
-            } else {
-                {}
-            },
-            confirmButton = {
-                when {
-                    selectionSucceeded -> Button(
-                        onClick = {
-                            quickStartingSelectedSession = true
-                            scope.launch {
-                                try {
-                                    X11SessionManager.startX11Session(containerName = containerName)
-                                    onDismiss()
-                                } finally {
-                                    quickStartingSelectedSession = false
-                                }
-                            }
-                        },
-                        enabled = !quickStartingSelectedSession
-                    ) {
-                        if (quickStartingSelectedSession) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                        }
-                        Text("Start X11")
-                    }
-                    selectionFailed -> Button(onClick = { selectingInstalledSession = null }) {
-                        Text("OK")
-                    }
-                }
-            }
-        )
     }
 
     Scaffold(
@@ -393,8 +446,11 @@ fun EditContainerScreen(
                         Spacer(Modifier.height(6.dp))
                         Button(
                             onClick = {
+                                installedActionSession = null
+                                selectingInstalledSession = null
+                                viewModel.dismissConfigurationWizard()
                                 if (status == ContainerStatus.RUNNING) {
-                                    showManualRestartWarning = true
+                                    runningWarningMode = RunningWarningMode.CONFIGURATION
                                 } else {
                                     viewModel.backToWizardInitSelection()
                                 }
