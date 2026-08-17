@@ -36,8 +36,8 @@ object X11SessionManager {
     }
 
     private fun clearX11SocketFiles() {
-        Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/X* 2>/dev/null").exec()
-        Shell.cmd("rm -f '${Constants.X11_SOCK_DIR}'/*-lock 2>/dev/null").exec()
+        Shell.cmd("rm -f '${Constants.X11_SOCK_FILE}' 2>/dev/null").exec()
+        Shell.cmd("rm -f '${Constants.TERMUX_PREFIX}/tmp/.X0-lock' 2>/dev/null").exec()
     }
 
     private fun killPids(pids: Collection<Int>) {
