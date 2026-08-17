@@ -83,7 +83,8 @@ object GraphicSessionSupport {
                 GraphicSessionProvisionCommand("Checking AwesomeWM configuration syntax", "awesome --check")
             )
         ),
-        GraphicSession.RATPOISON to GraphicSessionSupportSpec(GraphicSession.RATPOISON)
+        GraphicSession.RATPOISON to GraphicSessionSupportSpec(GraphicSession.RATPOISON),
+        GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE)
     )
 
     val installableSessions: List<GraphicSession>
