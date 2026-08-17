@@ -123,6 +123,7 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.NOTION, listOf("notion", "xterm")),
         apt(GraphicSession.MWM, listOf("mwm", "xterm")),
         apt(GraphicSession.MARCO, listOf("marco", "xterm")),
+        apk(GraphicSession.MARCO, listOf("marco", "xterm")),
         apt(GraphicSession.METACITY, listOf("metacity", "xterm")),
         apt(GraphicSession.XFWM4, listOf("xfwm4", "xterm")),
         apt(GraphicSession.KWIN_X11, listOf("kwin-x11", "dbus-x11", "xterm")),
