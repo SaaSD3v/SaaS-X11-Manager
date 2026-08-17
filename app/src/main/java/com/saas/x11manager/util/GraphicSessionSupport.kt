@@ -128,10 +128,24 @@ object GraphicSessionSupport {
             executable = "kwin_x11",
             wrapper = "saas-kwin-x11-session"
         ),
-        GraphicSession.ENLIGHTENMENT to dbusWrappedSpec(
+        GraphicSession.ENLIGHTENMENT to GraphicSessionSupportSpec(
             session = GraphicSession.ENLIGHTENMENT,
-            executable = "enlightenment_start",
-            wrapper = "saas-enlightenment-session"
+            postInstallCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Creating Enlightenment session launcher",
+                    "printf '%s\\n' '#!/bin/sh' " +
+                        "'if command -v enlightenment_start >/dev/null 2>&1; then exec dbus-run-session -- enlightenment_start; fi' " +
+                        "'exec dbus-run-session -- enlightenment' " +
+                        "> /usr/local/bin/saas-enlightenment-session && chmod 755 /usr/local/bin/saas-enlightenment-session"
+                )
+            ),
+            verificationCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Checking Enlightenment executable",
+                    "(command -v enlightenment_start >/dev/null 2>&1 || command -v enlightenment >/dev/null 2>&1) && " +
+                        "command -v dbus-run-session >/dev/null"
+                )
+            )
         ),
         GraphicSession.BSPWM to GraphicSessionSupportSpec(
             session = GraphicSession.BSPWM,
