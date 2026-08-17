@@ -20,7 +20,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.saas.x11manager.ui.component.TerminalDialog
 import com.saas.x11manager.util.ContainerStatus
+import com.saas.x11manager.util.GraphicSession
 import com.saas.x11manager.util.InitSystem
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,19 +39,31 @@ fun EditContainerScreen(
     }
 
     val name = viewModel.name
-    val hostname = viewModel.hostname
     val status = viewModel.status
     val initSystem = viewModel.initSystem
+    val graphicSession = viewModel.graphicSession
     val logs = viewModel.logs
     val isSaving = viewModel.isSaving
     val saveError = viewModel.saveError
+    val isInstalling = viewModel.isInstallingSession
+    val installResult = viewModel.installResult
+
+    if (viewModel.showInstallTerminal) {
+        TerminalDialog(
+            title = "Installing Openbox",
+            logs = viewModel.installLogs,
+            onDismiss = { viewModel.dismissInstallTerminal() },
+            onClear = { viewModel.clearInstallLogs() },
+            isBlocking = isInstalling
+        )
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(name.ifEmpty { containerName }) },
                 navigationIcon = {
-                    IconButton(onClick = onDismiss) {
+                    IconButton(onClick = onDismiss, enabled = !isInstalling) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                     }
                 },
@@ -61,7 +75,11 @@ fun EditContainerScreen(
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp).verticalScroll(rememberScrollState()),
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 12.dp)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Spacer(Modifier.height(8.dp))
@@ -73,9 +91,18 @@ fun EditContainerScreen(
                 elevation = CardDefaults.cardElevation(0.dp)
             ) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Init System", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Init System",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                     Spacer(Modifier.height(4.dp))
-                    Text("Select which init system to inject", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    Text(
+                        "Select which init system to inject",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp
+                    )
                     Spacer(Modifier.height(12.dp))
 
                     val options = listOf(
@@ -87,17 +114,19 @@ fun EditContainerScreen(
                         val selected = initSystem == sys
                         val borderColor by animateColorAsState(
                             targetValue = if (selected) MaterialTheme.colorScheme.primary
-                                          else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                            animationSpec = tween(200)
+                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                            animationSpec = tween(200),
+                            label = "initBorder"
                         )
                         val bgColor by animateColorAsState(
                             targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                                          else MaterialTheme.colorScheme.surfaceContainerHigh,
-                            animationSpec = tween(200)
+                            else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            animationSpec = tween(200),
+                            label = "initBackground"
                         )
 
                         Surface(
-                            modifier = Modifier.fillMaxWidth().clickable {
+                            modifier = Modifier.fillMaxWidth().clickable(enabled = !isInstalling) {
                                 if (initSystem != sys) viewModel.selectInitSystem(sys)
                             },
                             shape = RoundedCornerShape(14.dp),
@@ -110,7 +139,12 @@ fun EditContainerScreen(
                             ) {
                                 RadioButton(
                                     selected = selected,
-                                    onClick = { if (initSystem != sys) viewModel.selectInitSystem(sys) },
+                                    onClick = {
+                                        if (!isInstalling && initSystem != sys) {
+                                            viewModel.selectInitSystem(sys)
+                                        }
+                                    },
+                                    enabled = !isInstalling,
                                     colors = RadioButtonDefaults.colors(
                                         selectedColor = MaterialTheme.colorScheme.primary,
                                         unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -121,15 +155,113 @@ fun EditContainerScreen(
                                     Text(label, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
                                     Text(
                                         when (sys) {
-                                            InitSystem.SYSTEMD -> "Default for Debian/Ubuntu/Arch"
-                                            InitSystem.OPENRC -> "For Alpine/Artix/Gentoo"
+                                            InitSystem.SYSTEMD -> "User-selected systemd backend"
+                                            InitSystem.OPENRC -> "User-selected OpenRC backend"
                                         },
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 10.sp
                                     )
                                 }
                             }
                         }
                         if (sys != InitSystem.OPENRC) Spacer(Modifier.height(6.dp))
+                    }
+                }
+            }
+
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                shape = RoundedCornerShape(20.dp),
+                elevation = CardDefaults.cardElevation(0.dp)
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(
+                        "Graphic Session",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Openbox is the first Alpine test session. Installation is logged in real time.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp
+                    )
+                    Spacer(Modifier.height(12.dp))
+
+                    val openboxSelected = graphicSession == GraphicSession.OPENBOX
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (openboxSelected) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHigh
+                        },
+                        border = BorderStroke(
+                            1.dp,
+                            if (openboxSelected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                        )
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = openboxSelected,
+                                onClick = null,
+                                colors = RadioButtonDefaults.colors(
+                                    selectedColor = MaterialTheme.colorScheme.primary,
+                                    unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Openbox", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+                                Text(
+                                    if (openboxSelected) "Installed and selected"
+                                    else "Alpine test · openbox + xterm + font-terminus",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = { viewModel.installOpenbox() },
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                        enabled = !isInstalling && !isSaving && name.isNotEmpty(),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        if (isInstalling) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("Installing Openbox...")
+                        } else {
+                            Text(if (openboxSelected) "Reinstall / Verify Openbox" else "Install Openbox")
+                        }
+                    }
+
+                    if (installResult != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            installResult,
+                            color = if (installResult.startsWith("OK")) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
                     }
                 }
             }
@@ -157,14 +289,17 @@ fun EditContainerScreen(
                             ContainerStatus.STOPPED -> MaterialTheme.colorScheme.onSurfaceVariant
                             else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                         },
-                        fontSize = 13.sp, fontFamily = FontFamily.Monospace
+                        fontSize = 13.sp,
+                        fontFamily = FontFamily.Monospace
                     )
                 }
             }
 
             val buttonColor by animateColorAsState(
-                targetValue = if (isSaving) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.primary,
-                animationSpec = tween(200)
+                targetValue = if (isSaving) MaterialTheme.colorScheme.surfaceContainerHigh
+                else MaterialTheme.colorScheme.primary,
+                animationSpec = tween(200),
+                label = "saveColor"
             )
 
             Button(
@@ -172,12 +307,21 @@ fun EditContainerScreen(
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = buttonColor),
                 shape = RoundedCornerShape(20.dp),
-                enabled = !isSaving && name.isNotEmpty()
+                enabled = !isSaving && !isInstalling && name.isNotEmpty()
             ) {
                 if (isSaving) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                    CircularProgressIndicator(
+                        Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
                 } else {
-                    Text("Save", color = MaterialTheme.colorScheme.onPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Save",
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
 
@@ -185,8 +329,10 @@ fun EditContainerScreen(
                 val isError = !saveError.contains("OK")
                 Text(
                     saveError,
-                    color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                    fontSize = 11.sp, fontFamily = FontFamily.Monospace
+                    color = if (isError) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.primary,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace
                 )
             }
 
