@@ -289,6 +289,24 @@ object GraphicSessionSupport {
             executable = "ukui-session",
             wrapper = "saas-ukui-session"
         ),
+        GraphicSession.EXWM to GraphicSessionSupportSpec(
+            session = GraphicSession.EXWM,
+            postInstallCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Creating EXWM session launcher",
+                    "printf '%s\\n' '#!/bin/sh' 'export _JAVA_AWT_WM_NONREPARENTING=1' " +
+                        "\"exec dbus-run-session -- emacs-gtk --eval '(progn (require (quote exwm)) (if (fboundp (quote exwm-wm-mode)) (exwm-wm-mode) (exwm-enable)))'\" " +
+                        "> /usr/local/bin/saas-exwm-session && chmod 755 /usr/local/bin/saas-exwm-session"
+                )
+            ),
+            verificationCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Checking EXWM package",
+                    "command -v emacs-gtk >/dev/null && test -f /usr/share/xsessions/exwm.desktop && " +
+                        "emacs-gtk --batch --eval '(progn (require (quote exwm)) (princ \"ok\"))' >/dev/null"
+                )
+            )
+        ),
         GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE),
         GraphicSession.LXQT to GraphicSessionSupportSpec(GraphicSession.LXQT)
     )

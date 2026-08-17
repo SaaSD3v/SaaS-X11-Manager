@@ -158,7 +158,8 @@ object GraphicSessionInstallPlans {
         apt(
             GraphicSession.UKUI_DESKTOP,
             listOf("ukui-session-manager", "ukwm", "ukui-panel", "ukui-settings-daemon", "dbus-x11", "xterm")
-        )
+        ),
+        apt(GraphicSession.EXWM, listOf("elpa-exwm", "emacs-gtk", "dbus-x11", "xterm"))
     )
 
     fun forSelection(
