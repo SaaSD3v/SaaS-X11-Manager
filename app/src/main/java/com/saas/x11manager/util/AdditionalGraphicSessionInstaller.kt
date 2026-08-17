@@ -17,6 +17,14 @@ object AdditionalGraphicSessionInstaller {
                 add(GraphicSessionInstallStep("Validating Alpine package manager", "command -v apk >/dev/null"))
                 add(GraphicSessionInstallStep("Refreshing package index", "apk update"))
                 plan.packages.forEach { packageName ->
+                    add(
+                        GraphicSessionInstallStep(
+                            "Checking $packageName availability",
+                            "apk search -e $packageName >/dev/null"
+                        )
+                    )
+                }
+                plan.packages.forEach { packageName ->
                     add(GraphicSessionInstallStep("Installing $packageName", "apk add $packageName"))
                 }
             }
@@ -25,7 +33,7 @@ object AdditionalGraphicSessionInstaller {
                 add(
                     GraphicSessionInstallStep(
                         "Validating Debian package manager",
-                        "command -v apt-get >/dev/null && command -v dpkg >/dev/null"
+                        "command -v apt-get >/dev/null && command -v dpkg >/dev/null && command -v apt-cache >/dev/null"
                     )
                 )
                 add(
@@ -34,6 +42,15 @@ object AdditionalGraphicSessionInstaller {
                         "DEBIAN_FRONTEND=noninteractive apt-get update"
                     )
                 )
+                aptRepositoryPreparationStep(plan)?.let(::add)
+                plan.packages.forEach { packageName ->
+                    add(
+                        GraphicSessionInstallStep(
+                            "Checking $packageName availability",
+                            "apt-cache show $packageName >/dev/null 2>&1"
+                        )
+                    )
+                }
                 val recommendsFlag = if (plan.installRecommendedPackages) "" else " --no-install-recommends"
                 plan.packages.forEach { packageName ->
                     add(
@@ -52,6 +69,31 @@ object AdditionalGraphicSessionInstaller {
                 "Validating ${plan.session.label} session command",
                 "command -v ${plan.verificationCommand}"
             )
+    }
+
+    private fun aptRepositoryPreparationStep(
+        plan: GraphicSessionInstallPlan
+    ): GraphicSessionInstallStep? {
+        val probePackage = plan.packages.firstOrNull() ?: return null
+        val component = when (plan.repositoryRequirement) {
+            RepositoryRequirement.APT_UNIVERSE -> "universe"
+            RepositoryRequirement.APT_MULTIVERSE -> "multiverse"
+            RepositoryRequirement.APK_COMMUNITY -> return null
+        }
+        val fallbackDescription = when (plan.repositoryRequirement) {
+            RepositoryRequirement.APT_MULTIVERSE -> "Multiverse/non-free"
+            else -> "Universe or the distro repository containing the package"
+        }
+        val command =
+            "if apt-cache show $probePackage >/dev/null 2>&1; then :; " +
+                "elif grep -Eq '^ID=ubuntu$' /etc/os-release 2>/dev/null && " +
+                "command -v add-apt-repository >/dev/null 2>&1; then " +
+                "add-apt-repository -y $component && " +
+                "DEBIAN_FRONTEND=noninteractive apt-get update && " +
+                "apt-cache show $probePackage >/dev/null 2>&1; " +
+                "else echo 'Required apt repository is unavailable for $probePackage. " +
+                "Enable $fallbackDescription for this image.' >&2; exit 1; fi"
+        return GraphicSessionInstallStep("Checking required apt repository", command)
     }
 
     internal fun verificationStepsFor(
