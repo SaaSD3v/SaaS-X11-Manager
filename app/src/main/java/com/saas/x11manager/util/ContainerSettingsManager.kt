@@ -8,13 +8,15 @@ import java.io.File
  *
  * Keeping app metadata in a sidecar avoids adding private keys to the
  * DroidSpaces config format and makes the settings travel with the container
- * directory. Unknown keys are preserved so this file can grow with future
- * settings such as graphic_session.
+ * directory. Unknown keys are preserved so this file can grow without
+ * rewriting unrelated settings.
  */
 object ContainerSettingsManager {
 
     private const val SETTINGS_FILE = ".saas-x11-manager.conf"
     private const val INIT_SYSTEM_KEY = "init_system"
+    private const val PLATFORM_KEY = "platform"
+    private const val GRAPHIC_SESSION_KEY = "graphic_session"
 
     fun getInitSystem(containerName: String): InitSystem? {
         return when (readValue(containerName, INIT_SYSTEM_KEY)?.lowercase()) {
@@ -35,6 +37,44 @@ object ContainerSettingsManager {
         }
         return setValue(containerName, INIT_SYSTEM_KEY, value, cacheDir)
     }
+
+    fun getPlatform(containerName: String): ContainerPlatform? {
+        return when (readValue(containerName, PLATFORM_KEY)?.lowercase()) {
+            "ubuntu" -> ContainerPlatform.UBUNTU
+            "alpine" -> ContainerPlatform.ALPINE
+            else -> null
+        }
+    }
+
+    fun setPlatform(
+        containerName: String,
+        platform: ContainerPlatform,
+        cacheDir: File
+    ): Boolean = setValue(
+        containerName = containerName,
+        key = PLATFORM_KEY,
+        value = platform.name.lowercase(),
+        cacheDir = cacheDir
+    )
+
+    fun getGraphicSession(containerName: String): GraphicSession? {
+        return when (readValue(containerName, GRAPHIC_SESSION_KEY)?.lowercase()) {
+            "xfce" -> GraphicSession.XFCE
+            "lxqt" -> GraphicSession.LXQT
+            else -> null
+        }
+    }
+
+    fun setGraphicSession(
+        containerName: String,
+        graphicSession: GraphicSession,
+        cacheDir: File
+    ): Boolean = setValue(
+        containerName = containerName,
+        key = GRAPHIC_SESSION_KEY,
+        value = graphicSession.name.lowercase(),
+        cacheDir = cacheDir
+    )
 
     private fun readValue(containerName: String, key: String): String? {
         return readLines(containerName)
