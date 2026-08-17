@@ -11,7 +11,7 @@ internal data class AdditionalContainerLease(
 
 internal object AdditionalGraphicSessionRuntime {
 
-    fun resolvePlatform(
+    suspend fun resolvePlatform(
         containerName: String,
         requestedPlatform: ContainerPlatform?,
         logger: ContainerLogger?

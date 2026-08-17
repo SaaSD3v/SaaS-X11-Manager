@@ -233,7 +233,7 @@ object AdditionalGraphicSessionInstaller {
         }
     }
 
-    private fun persistSelection(
+    private suspend fun persistSelection(
         containerName: String,
         platform: ContainerPlatform,
         initSystem: InitSystem,
