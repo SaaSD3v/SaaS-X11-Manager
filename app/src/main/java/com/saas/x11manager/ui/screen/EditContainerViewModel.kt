@@ -141,15 +141,22 @@ class EditContainerViewModel : ViewModel() {
                     }
 
                     logger.i("")
-                    logger.i("[*] Stopping container after installation...")
-                    val stopped = ContainerManager.stopContainer(containerName, logger)
+                    val (statusBeforeFinalStop, _) =
+                        ContainerManager.getContainerRuntimeStatePublic(containerName)
+                    val stopAccepted = if (statusBeforeFinalStop == ContainerStatus.STOPPED) {
+                        logger.i("[+] Container already stopped after installation")
+                        true
+                    } else {
+                        logger.i("[*] Stopping container after installation...")
+                        ContainerManager.stopContainer(containerName, logger)
+                    }
                     val (statusAfterStop, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
-                    if (stopped || statusAfterStop == ContainerStatus.STOPPED) {
+                    if (stopAccepted || statusAfterStop == ContainerStatus.STOPPED) {
                         logger.i("[+] Container stopped")
                         logger.i("")
                         logger.i("[+] Openbox installation completed successfully")
                         logger.i("[+] Click Start X11 to launch the session")
-                        installResult = "OK: Openbox installed — click Start X11"
+                        installResult = "OK: Openbox installed. Click Start X11."
                     } else {
                         logger.w("[!] Openbox was installed, but the container could not be confirmed stopped")
                         logger.w("[!] Stop the container before clicking Start X11")
