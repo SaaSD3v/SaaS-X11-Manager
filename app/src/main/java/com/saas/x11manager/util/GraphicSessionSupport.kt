@@ -84,7 +84,8 @@ object GraphicSessionSupport {
             )
         ),
         GraphicSession.RATPOISON to GraphicSessionSupportSpec(GraphicSession.RATPOISON),
-        GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE)
+        GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE),
+        GraphicSession.LXQT to GraphicSessionSupportSpec(GraphicSession.LXQT)
     )
 
     val installableSessions: List<GraphicSession>
