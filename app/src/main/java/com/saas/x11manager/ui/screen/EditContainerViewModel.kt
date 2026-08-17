@@ -88,6 +88,7 @@ class EditContainerViewModel : ViewModel() {
         showInstallTerminal = true
         isInstallingSession = true
 
+        val selectedInitSystem = initSystem
         val logger = ViewModelLogger { level, message ->
             installLogs.add(level to message)
         }
@@ -98,11 +99,13 @@ class EditContainerViewModel : ViewModel() {
                     containerName = containerName,
                     platform = ContainerPlatform.ALPINE,
                     session = GraphicSession.OPENBOX,
+                    initSystem = selectedInitSystem,
                     cacheDir = cd,
                     logger = logger
                 )
 
                 if (installed) {
+                    initSystem = selectedInitSystem
                     graphicSession = GraphicSession.OPENBOX
                     installResult = "OK: Openbox installed"
                 } else {

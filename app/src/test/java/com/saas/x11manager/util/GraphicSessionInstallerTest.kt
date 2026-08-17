@@ -74,11 +74,60 @@ class GraphicSessionInstallerTest {
     }
 
     @Test
-    fun installerValidatesButNeverLaunchesOpenbox() {
+    fun packageInstallerValidatesButNeverLaunchesOpenbox() {
         val commands = alpineOpenboxSteps().map { it.command }
 
         assertTrue(commands.contains("command -v openbox-session"))
         assertFalse(commands.any { it.trim() == "openbox-session" })
         assertFalse(commands.any { it.contains("exec openbox-session") })
+    }
+
+    @Test
+    fun openrcStartupWritesGenericOpenboxSessionFiles() {
+        val steps = GraphicSessionInstaller.startupStepsFor(
+            InitSystem.OPENRC,
+            GraphicSession.OPENBOX
+        )
+        val commands = steps.map { it.command }
+        val joined = commands.joinToString("\n")
+
+        assertTrue(steps.first().command == "test -x /sbin/openrc-run")
+        assertTrue(joined.contains("/etc/init.d/x11-session"))
+        assertTrue(joined.contains("/etc/runlevels/default/x11-session"))
+        assertTrue(joined.contains("exec openbox-session"))
+        assertTrue(joined.contains("/run/x11-session.pid"))
+        assertFalse(commands.any { it.trim() == "openbox-session" })
+    }
+
+    @Test
+    fun systemdStartupUsesGenericOpenboxUnitAndEnsuresBash() {
+        val steps = GraphicSessionInstaller.startupStepsFor(
+            InitSystem.SYSTEMD,
+            GraphicSession.OPENBOX
+        )
+        val commands = steps.map { it.command }
+        val joined = commands.joinToString("\n")
+
+        assertTrue(commands.contains("command -v systemctl"))
+        assertTrue(commands.contains("apk add bash"))
+        assertTrue(joined.contains("/etc/systemd/system/x11-session.service"))
+        assertTrue(joined.contains("graphical.target.wants/x11-session.service"))
+        assertTrue(joined.contains("exec openbox-session"))
+        assertFalse(commands.any { it.trim() == "openbox-session" })
+    }
+
+    @Test
+    fun startupMigrationRemovesLegacyXfceServiceNames() {
+        val openrc = GraphicSessionInstaller.startupStepsFor(
+            InitSystem.OPENRC,
+            GraphicSession.OPENBOX
+        ).joinToString("\n") { it.command }
+        val systemd = GraphicSessionInstaller.startupStepsFor(
+            InitSystem.SYSTEMD,
+            GraphicSession.OPENBOX
+        ).joinToString("\n") { it.command }
+
+        assertTrue(openrc.contains("rm -f") && openrc.contains("x11-xfce"))
+        assertTrue(systemd.contains("rm -f") && systemd.contains("x11-xfce"))
     }
 }

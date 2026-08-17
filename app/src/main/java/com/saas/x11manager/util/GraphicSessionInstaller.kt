@@ -13,11 +13,9 @@ internal data class GraphicSessionInstallStep(
 )
 
 /**
- * Installs graphical session packages inside an already-running container.
- *
- * Installation and session launch are intentionally separate: this object only
- * installs/configures/verifies the selected session and persists the selection.
- * The init backend is responsible for launching x11-session.sh on container boot.
+ * Installs and provisions a graphical session inside an already-running container.
+ * The selected session is configured for the user-selected init backend, but it
+ * is never launched by this installer; the init service launches it on boot.
  */
 object GraphicSessionInstaller {
 
@@ -69,10 +67,125 @@ object GraphicSessionInstaller {
         )
     }
 
+    internal fun startupStepsFor(
+        initSystem: InitSystem,
+        session: GraphicSession
+    ): List<GraphicSessionInstallStep> = when (initSystem) {
+        InitSystem.OPENRC -> listOf(
+            GraphicSessionInstallStep(
+                title = "Validating OpenRC",
+                command = "test -x /sbin/openrc-run"
+            ),
+            GraphicSessionInstallStep(
+                title = "Writing X11 session launcher",
+                command = writeFileCommand(
+                    "/usr/local/bin/x11-session.sh",
+                    GraphicSessionInitFiles.sessionScript(session, "/bin/sh"),
+                    "755"
+                )
+            ),
+            GraphicSessionInstallStep(
+                title = "Writing OpenRC X11 socket service",
+                command = writeFileCommand(
+                    "/etc/init.d/x11-setup",
+                    GraphicSessionInitFiles.openRcSetupService(),
+                    "755"
+                )
+            ),
+            GraphicSessionInstallStep(
+                title = "Writing OpenRC graphic session service",
+                command = writeFileCommand(
+                    "/etc/init.d/x11-session",
+                    GraphicSessionInitFiles.openRcSessionService(session),
+                    "755"
+                )
+            ),
+            GraphicSessionInstallStep(
+                title = "Enabling OpenRC X11 services",
+                command = "rm -f " +
+                    "/etc/init.d/x11-xfce /etc/runlevels/default/x11-xfce " +
+                    "/etc/systemd/system/x11-xfce.service /etc/systemd/system/x11-session.service " +
+                    "/etc/systemd/system/setup-x11-socket.service " +
+                    "/etc/systemd/system/graphical.target.wants/x11-xfce.service " +
+                    "/etc/systemd/system/graphical.target.wants/x11-session.service " +
+                    "/etc/systemd/system/multi-user.target.wants/setup-x11-socket.service 2>/dev/null; " +
+                    "mkdir -p /etc/runlevels/default && " +
+                    "ln -sf /etc/init.d/x11-setup /etc/runlevels/default/x11-setup && " +
+                    "ln -sf /etc/init.d/x11-session /etc/runlevels/default/x11-session"
+            ),
+            GraphicSessionInstallStep(
+                title = "Validating OpenRC X11 startup",
+                command = "test -x /usr/local/bin/x11-session.sh && " +
+                    "test -x /etc/init.d/x11-setup && " +
+                    "test -x /etc/init.d/x11-session && " +
+                    "test -L /etc/runlevels/default/x11-setup && " +
+                    "test -L /etc/runlevels/default/x11-session"
+            )
+        )
+
+        InitSystem.SYSTEMD -> listOf(
+            GraphicSessionInstallStep(
+                title = "Validating systemd",
+                command = "command -v systemctl"
+            ),
+            GraphicSessionInstallStep(
+                title = "Installing bash for systemd session",
+                command = "apk add bash"
+            ),
+            GraphicSessionInstallStep(
+                title = "Writing X11 session launcher",
+                command = writeFileCommand(
+                    "/usr/local/bin/x11-session.sh",
+                    GraphicSessionInitFiles.sessionScript(session, "/bin/bash"),
+                    "755"
+                )
+            ),
+            GraphicSessionInstallStep(
+                title = "Writing systemd X11 socket unit",
+                command = writeFileCommand(
+                    "/etc/systemd/system/setup-x11-socket.service",
+                    GraphicSessionInitFiles.systemdSocketService(),
+                    "644"
+                )
+            ),
+            GraphicSessionInstallStep(
+                title = "Writing systemd graphic session unit",
+                command = writeFileCommand(
+                    "/etc/systemd/system/x11-session.service",
+                    GraphicSessionInitFiles.systemdSessionService(session),
+                    "644"
+                )
+            ),
+            GraphicSessionInstallStep(
+                title = "Enabling systemd X11 services",
+                command = "rm -f " +
+                    "/etc/init.d/x11-setup /etc/init.d/x11-xfce /etc/init.d/x11-session " +
+                    "/etc/runlevels/default/x11-setup /etc/runlevels/default/x11-xfce " +
+                    "/etc/runlevels/default/x11-session /etc/systemd/system/x11-xfce.service " +
+                    "/etc/systemd/system/graphical.target.wants/x11-xfce.service 2>/dev/null; " +
+                    "mkdir -p /etc/systemd/system/multi-user.target.wants " +
+                    "/etc/systemd/system/graphical.target.wants && " +
+                    "ln -sf /etc/systemd/system/setup-x11-socket.service " +
+                    "/etc/systemd/system/multi-user.target.wants/setup-x11-socket.service && " +
+                    "ln -sf /etc/systemd/system/x11-session.service " +
+                    "/etc/systemd/system/graphical.target.wants/x11-session.service"
+            ),
+            GraphicSessionInstallStep(
+                title = "Validating systemd X11 startup",
+                command = "test -x /usr/local/bin/x11-session.sh && " +
+                    "test -f /etc/systemd/system/setup-x11-socket.service && " +
+                    "test -f /etc/systemd/system/x11-session.service && " +
+                    "test -L /etc/systemd/system/multi-user.target.wants/setup-x11-socket.service && " +
+                    "test -L /etc/systemd/system/graphical.target.wants/x11-session.service"
+            )
+        )
+    }
+
     suspend fun install(
         containerName: String,
         platform: ContainerPlatform,
         session: GraphicSession,
+        initSystem: InitSystem,
         cacheDir: File,
         logger: ContainerLogger? = null
     ): Boolean = withContext(Dispatchers.IO) {
@@ -86,8 +199,8 @@ object GraphicSessionInstaller {
             return@withContext false
         }
 
-        val steps = stepsFor(plan)
-        if (steps.isEmpty()) {
+        val installSteps = stepsFor(plan)
+        if (installSteps.isEmpty()) {
             logger?.e("[-] FAIL")
             logger?.e("[-] Installer workflow is not implemented for this selection")
             return@withContext false
@@ -103,21 +216,45 @@ object GraphicSessionInstaller {
         logger?.i("[+] OK")
         logger?.i("")
 
-        for (step in steps) {
+        for (step in installSteps) {
             if (!runStep(containerName, step, logger)) {
                 logger?.e("[-] ${session.label} installation aborted")
                 return@withContext false
             }
         }
 
+        logger?.i("[+] Configuring ${initSystem.name.lowercase()} startup")
+        logger?.i("")
+        for (step in startupStepsFor(initSystem, session)) {
+            if (!runStep(containerName, step, logger)) {
+                logger?.e("[-] ${session.label} startup configuration aborted")
+                return@withContext false
+            }
+        }
+
+        logger?.i("[+] Saving Init System")
+        logger?.i("init_system=${initSystem.name.lowercase()}")
+        val initSaved = ContainerSettingsManager.setInitSystem(
+            containerName = containerName,
+            initSystem = initSystem,
+            cacheDir = cacheDir
+        )
+        if (!initSaved) {
+            logger?.e("[-] FAIL")
+            logger?.e("[-] Could not persist Init System")
+            return@withContext false
+        }
+        logger?.i("[+] OK")
+        logger?.i("")
+
         logger?.i("[+] Saving Graphic Session")
         logger?.i("graphic_session=${session.name.lowercase()}")
-        val saved = ContainerSettingsManager.setGraphicSession(
+        val sessionSaved = ContainerSettingsManager.setGraphicSession(
             containerName = containerName,
             graphicSession = session,
             cacheDir = cacheDir
         )
-        if (!saved) {
+        if (!sessionSaved) {
             logger?.e("[-] FAIL")
             logger?.e("[-] Could not persist Graphic Session")
             return@withContext false
@@ -164,6 +301,13 @@ object GraphicSessionInstaller {
         logger?.i("[+] OK")
         logger?.i("")
         return true
+    }
+
+    private fun writeFileCommand(path: String, content: String, mode: String): String {
+        val parent = path.substringBeforeLast('/')
+        return "mkdir -p ${shellQuote(parent)} && " +
+            "printf '%s' ${shellQuote(content)} > ${shellQuote(path)} && " +
+            "chmod $mode ${shellQuote(path)}"
     }
 
     private fun shellQuote(value: String): String =
