@@ -136,6 +136,7 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.QTILE, listOf("qtile", "xterm")),
         apt(GraphicSession.MUFFIN, listOf("muffin", "dbus-x11", "xterm")),
         apt(GraphicSession.MUTTER, listOf("mutter", "dbus-x11", "xterm")),
+        apk(GraphicSession.MUTTER, listOf("mutter", "dbus", "xterm")),
         apt(GraphicSession.UKWM, listOf("ukwm", "dbus-x11", "xterm")),
         apt(GraphicSession.CINNAMON_SHELL, listOf("cinnamon", "dbus-x11", "xterm")),
         apt(GraphicSession.COMPIZ, listOf("compiz-core", "compiz-plugins-default", "dbus-x11", "xterm")),
