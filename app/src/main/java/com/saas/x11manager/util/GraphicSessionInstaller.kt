@@ -13,11 +13,18 @@ internal data class GraphicSessionInstallStep(
     val command: String
 )
 
+private data class ContainerOperationLease(
+    val restoreStoppedState: Boolean
+)
+
 /**
  * Installs, provisions and verifies a graphical session inside a container.
- * A stopped container is started on demand and must accept commands before an
- * operation begins. Package installation and verification remain separate:
- * verification never changes packages, init files or persisted selections.
+ * A stopped container is started temporarily on demand and must accept commands
+ * before an operation begins. If this object started a container that was known
+ * to be stopped, it restores that stopped state when the operation finishes so
+ * the next X11 start can preserve Loader -> container -> graphical init ordering.
+ * Package installation and verification remain separate: verification never
+ * changes packages, init files or persisted selections.
  */
 object GraphicSessionInstaller {
 
@@ -275,57 +282,60 @@ object GraphicSessionInstaller {
             return@withContext false
         }
 
-        if (!ensureContainerReady(containerName, logger, "installation")) {
-            return@withContext false
-        }
+        val lease = ensureContainerReady(containerName, logger, "installation")
+            ?: return@withContext false
 
-        for (step in installSteps) {
-            if (!runStep(containerName, step, logger)) {
-                logger?.e("[-] ${session.label} installation aborted")
+        try {
+            for (step in installSteps) {
+                if (!runStep(containerName, step, logger)) {
+                    logger?.e("[-] ${session.label} installation aborted")
+                    return@withContext false
+                }
+            }
+
+            logger?.i("[+] Configuring ${initSystem.name.lowercase()} startup")
+            logger?.i("")
+            for (step in startupStepsFor(initSystem, session)) {
+                if (!runStep(containerName, step, logger)) {
+                    logger?.e("[-] ${session.label} startup configuration aborted")
+                    return@withContext false
+                }
+            }
+
+            logger?.i("[+] Saving Init System")
+            logger?.i("init_system=${initSystem.name.lowercase()}")
+            val initSaved = ContainerSettingsManager.setInitSystem(
+                containerName = containerName,
+                initSystem = initSystem,
+                cacheDir = cacheDir
+            )
+            if (!initSaved) {
+                logger?.e("[-] FAIL")
+                logger?.e("[-] Could not persist Init System")
                 return@withContext false
             }
-        }
+            logger?.i("[+] OK")
+            logger?.i("")
 
-        logger?.i("[+] Configuring ${initSystem.name.lowercase()} startup")
-        logger?.i("")
-        for (step in startupStepsFor(initSystem, session)) {
-            if (!runStep(containerName, step, logger)) {
-                logger?.e("[-] ${session.label} startup configuration aborted")
+            logger?.i("[+] Saving Graphic Session")
+            logger?.i("graphic_session=${session.name.lowercase()}")
+            val sessionSaved = ContainerSettingsManager.setGraphicSession(
+                containerName = containerName,
+                graphicSession = session,
+                cacheDir = cacheDir
+            )
+            if (!sessionSaved) {
+                logger?.e("[-] FAIL")
+                logger?.e("[-] Could not persist Graphic Session")
                 return@withContext false
             }
+            logger?.i("[+] OK")
+            logger?.i("")
+            logger?.i("[+] ${session.label} setup completed")
+            true
+        } finally {
+            releaseContainer(containerName, lease, logger)
         }
-
-        logger?.i("[+] Saving Init System")
-        logger?.i("init_system=${initSystem.name.lowercase()}")
-        val initSaved = ContainerSettingsManager.setInitSystem(
-            containerName = containerName,
-            initSystem = initSystem,
-            cacheDir = cacheDir
-        )
-        if (!initSaved) {
-            logger?.e("[-] FAIL")
-            logger?.e("[-] Could not persist Init System")
-            return@withContext false
-        }
-        logger?.i("[+] OK")
-        logger?.i("")
-
-        logger?.i("[+] Saving Graphic Session")
-        logger?.i("graphic_session=${session.name.lowercase()}")
-        val sessionSaved = ContainerSettingsManager.setGraphicSession(
-            containerName = containerName,
-            graphicSession = session,
-            cacheDir = cacheDir
-        )
-        if (!sessionSaved) {
-            logger?.e("[-] FAIL")
-            logger?.e("[-] Could not persist Graphic Session")
-            return@withContext false
-        }
-        logger?.i("[+] OK")
-        logger?.i("")
-        logger?.i("[+] ${session.label} setup completed")
-        true
     }
 
     suspend fun verify(
@@ -345,28 +355,32 @@ object GraphicSessionInstaller {
             return@withContext false
         }
 
-        if (!ensureContainerReady(containerName, logger, "verification")) {
-            return@withContext false
-        }
+        val lease = ensureContainerReady(containerName, logger, "verification")
+            ?: return@withContext false
 
-        for (step in checks) {
-            if (!runStep(containerName, step, logger)) {
-                logger?.e("[-] ${session.label} verification failed")
-                return@withContext false
+        try {
+            for (step in checks) {
+                if (!runStep(containerName, step, logger)) {
+                    logger?.e("[-] ${session.label} verification failed")
+                    return@withContext false
+                }
             }
-        }
 
-        logger?.i("[+] ${session.label} verification completed")
-        true
+            logger?.i("[+] ${session.label} verification completed")
+            true
+        } finally {
+            releaseContainer(containerName, lease, logger)
+        }
     }
 
     private suspend fun ensureContainerReady(
         containerName: String,
         logger: ContainerLogger?,
         purpose: String
-    ): Boolean {
+    ): ContainerOperationLease? {
         logger?.i("[+] Checking container runtime")
         val (initialStatus, initialPid) = ContainerManager.getContainerRuntimeStatePublic(containerName)
+        val restoreStoppedState = initialStatus == ContainerStatus.STOPPED
 
         when (initialStatus) {
             ContainerStatus.RUNNING -> {
@@ -374,14 +388,14 @@ object GraphicSessionInstaller {
             }
 
             ContainerStatus.STOPPED -> {
-                logger?.i("[*] Container is stopped; starting it for $purpose...")
+                logger?.i("[*] Container is stopped; starting it temporarily for $purpose...")
                 val started = ContainerManager.startContainer(containerName, logger)
                 if (!started) {
                     val (statusAfterStart, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
                     if (statusAfterStart == ContainerStatus.STOPPED) {
                         logger?.e("[-] FAIL")
                         logger?.e("[-] Could not start container for $purpose")
-                        return false
+                        return null
                     }
                     logger?.w("[!] Start command was inconclusive; checking command readiness")
                 }
@@ -391,7 +405,7 @@ object GraphicSessionInstaller {
                 if (probeContainerCommandReady(containerName)) {
                     logger?.i("[+] Container command channel already ready")
                     logger?.i("")
-                    return true
+                    return ContainerOperationLease(restoreStoppedState = false)
                 }
 
                 logger?.w("[!] Container runtime status is unknown; requesting start before $purpose")
@@ -406,14 +420,39 @@ object GraphicSessionInstaller {
         if (!waitForContainerCommandReady(containerName)) {
             logger?.e("[-] FAIL")
             logger?.e("[-] Container did not become ready for $purpose commands")
-            return false
+            if (restoreStoppedState) {
+                releaseContainer(
+                    containerName,
+                    ContainerOperationLease(restoreStoppedState = true),
+                    logger
+                )
+            }
+            return null
         }
 
         val (_, pid) = ContainerManager.getContainerRuntimeStatePublic(containerName)
         logger?.i("[+] Container command channel ready${if (pid != null) " (PID=$pid)" else ""}")
         logger?.i("[+] OK")
         logger?.i("")
-        return true
+        return ContainerOperationLease(restoreStoppedState = restoreStoppedState)
+    }
+
+    private suspend fun releaseContainer(
+        containerName: String,
+        lease: ContainerOperationLease,
+        logger: ContainerLogger?
+    ) {
+        if (!lease.restoreStoppedState) return
+
+        logger?.i("")
+        logger?.i("[*] Restoring original stopped container state...")
+        val stopAccepted = ContainerManager.stopContainer(containerName, logger)
+        val (statusAfterStop, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
+        if (stopAccepted || statusAfterStop == ContainerStatus.STOPPED) {
+            logger?.i("[+] Container restored to stopped state")
+        } else {
+            logger?.w("[!] Could not confirm container returned to stopped state")
+        }
     }
 
     private suspend fun waitForContainerCommandReady(
