@@ -86,6 +86,9 @@ object X11SessionManager {
             .distinct()
     }
 
+    private fun shellQuote(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+
     suspend fun getLoaderStatus(): LoaderStatus = withContext(Dispatchers.IO) {
         if (hasX0Socket() && getLiveLoaderPids().isNotEmpty()) {
             LoaderStatus.Running
@@ -268,6 +271,30 @@ object X11SessionManager {
         return latest
     }
 
+    private suspend fun waitForContainerCommandReady(
+        containerName: String,
+        timeoutMillis: Long = 15_000L,
+        pollIntervalMillis: Long = 1_000L
+    ): Boolean {
+        val marker = "__SAAS_X11_READY__"
+        val command =
+            "${Constants.DS_BINARY_PATH} --name=${shellQuote(containerName)} run " +
+                shellQuote("echo $marker") + " 2>/dev/null"
+        val deadline = System.nanoTime() + timeoutMillis * 1_000_000L
+
+        while (true) {
+            val ready = try {
+                val result = Shell.cmd(command).exec()
+                result.isSuccess && result.out.any { it.contains(marker) }
+            } catch (_: Exception) {
+                false
+            }
+            if (ready) return true
+            if (System.nanoTime() >= deadline) return false
+            delay(pollIntervalMillis)
+        }
+    }
+
     suspend fun startX11Session(
         containerName: String,
         logger: ContainerLogger? = null
@@ -347,14 +374,24 @@ object X11SessionManager {
                 }
             }
 
+            logger?.i("[*] Waiting for container command readiness (15s)...")
+            val commandReady = waitForContainerCommandReady(containerName)
+            if (commandReady) {
+                logger?.i("[+] Container command channel ready")
+            } else {
+                logger?.w("[!] Container is not accepting commands yet; X11 init may still be booting")
+            }
+
             logger?.i("[*] Opening Termux:X11...")
             if (!openTermuxX11()) {
                 logger?.w("[!] Could not open Termux:X11 activity")
             }
 
             logger?.i("")
-            if (runtimeStatus == ContainerStatus.RUNNING) {
+            if (runtimeStatus == ContainerStatus.RUNNING && commandReady) {
                 logger?.i("[+] Session started")
+            } else if (runtimeStatus == ContainerStatus.RUNNING) {
+                logger?.w("[!] X11 opened while container init is still becoming ready")
             } else {
                 logger?.w("[!] Session start requested; runtime confirmation is incomplete")
             }
