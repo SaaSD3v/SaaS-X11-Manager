@@ -83,5 +83,6 @@ enum class GraphicSession(
     FVWM3("FVWM3", "fvwm3"),
     TWO_BWM("2bwm", "2bwm"),
     BERRY("Berry WM", "berry"),
+    DK("dk", "dk"),
     NONE("None", "")
 }

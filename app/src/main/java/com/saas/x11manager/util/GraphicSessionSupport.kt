@@ -229,6 +229,7 @@ object GraphicSessionSupport {
         GraphicSession.FVWM3 to GraphicSessionSupportSpec(GraphicSession.FVWM3),
         GraphicSession.TWO_BWM to GraphicSessionSupportSpec(GraphicSession.TWO_BWM),
         GraphicSession.BERRY to GraphicSessionSupportSpec(GraphicSession.BERRY),
+        GraphicSession.DK to GraphicSessionSupportSpec(GraphicSession.DK),
         GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE),
         GraphicSession.LXQT to GraphicSessionSupportSpec(GraphicSession.LXQT)
     )
