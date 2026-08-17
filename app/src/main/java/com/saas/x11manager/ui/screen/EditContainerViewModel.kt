@@ -8,7 +8,6 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saas.x11manager.util.ContainerManager
-import com.saas.x11manager.util.ContainerPlatform
 import com.saas.x11manager.util.ContainerSettingsManager
 import com.saas.x11manager.util.ContainerStatus
 import com.saas.x11manager.util.GraphicSession
@@ -116,7 +115,7 @@ class EditContainerViewModel : ViewModel() {
             try {
                 val installed = GraphicSessionInstaller.install(
                     containerName = containerName,
-                    platform = ContainerPlatform.ALPINE,
+                    platform = null,
                     session = GraphicSession.OPENBOX,
                     initSystem = selectedInitSystem,
                     cacheDir = cd,
@@ -179,7 +178,7 @@ class EditContainerViewModel : ViewModel() {
             try {
                 val verified = GraphicSessionInstaller.verify(
                     containerName = containerName,
-                    platform = ContainerPlatform.ALPINE,
+                    platform = null,
                     session = GraphicSession.OPENBOX,
                     initSystem = selectedInitSystem,
                     logger = logger
