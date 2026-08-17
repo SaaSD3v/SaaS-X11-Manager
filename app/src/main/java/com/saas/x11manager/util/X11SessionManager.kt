@@ -162,8 +162,6 @@ object X11SessionManager {
                 val x0OwnerPid = findX0OwnerPid(currentPids)
 
                 if (x0OwnerPid != null && x0OwnerPid !in ownedPids) {
-                    // Another already-running :0 became available while we were launching.
-                    // Do not leave our launch attempt behind and never touch other displays.
                     killPids(ownedPids)
                     ownedLoaderPids = emptySet()
                     logger?.i("[+] Reusing X11 loader for :0 (PID=$x0OwnerPid)")
@@ -255,15 +253,15 @@ object X11SessionManager {
         containerName: String,
         timeoutMillis: Long = 5_000L,
         pollIntervalMillis: Long = 500L
-    ): Pair<Boolean, Int?> {
+    ): Pair<ContainerStatus, Int?> {
         val deadline = System.nanoTime() + timeoutMillis * 1_000_000L
-        var latest = ContainerManager.checkContainerStatusPublic(containerName)
-        if (latest.first) return latest
+        var latest = ContainerManager.getContainerRuntimeStatePublic(containerName)
+        if (latest.first == ContainerStatus.RUNNING) return latest
 
         while (System.nanoTime() < deadline) {
             delay(pollIntervalMillis)
-            latest = ContainerManager.checkContainerStatusPublic(containerName)
-            if (latest.first) return latest
+            latest = ContainerManager.getContainerRuntimeStatePublic(containerName)
+            if (latest.first == ContainerStatus.RUNNING) return latest
         }
 
         return latest
@@ -275,6 +273,7 @@ object X11SessionManager {
     ) = withContext(Dispatchers.IO) {
         var loaderLease: LoaderLease? = null
         var containerStartAccepted = false
+        var preserveLoaderOnUncertainState = false
 
         try {
             logger?.i("--- Starting Session ---")
@@ -302,23 +301,49 @@ object X11SessionManager {
             if (started) {
                 containerStartAccepted = true
             } else {
-                val (runningAfterFailure, _) = ContainerManager.checkContainerStatusPublic(containerName)
-                if (!runningAfterFailure) {
-                    logger?.e("[-] Container start failed")
-                    rollbackLoader(activeLoaderLease, logger)
-                    return@withContext
-                }
+                val (statusAfterFailure, _) =
+                    ContainerManager.getContainerRuntimeStatePublic(containerName)
 
-                containerStartAccepted = true
-                logger?.w("[!] Start command reported failure, but container is running")
+                when (statusAfterFailure) {
+                    ContainerStatus.RUNNING -> {
+                        containerStartAccepted = true
+                        logger?.w("[!] Start command reported failure, but container is running")
+                    }
+                    ContainerStatus.STOPPED -> {
+                        logger?.e("[-] Container start failed and runtime is stopped")
+                        rollbackLoader(activeLoaderLease, logger)
+                        return@withContext
+                    }
+                    ContainerStatus.UNKNOWN -> {
+                        preserveLoaderOnUncertainState = true
+                        logger?.w(
+                            "[!] Start command reported failure and runtime status is unknown; " +
+                                "preserving X0 while rechecking"
+                        )
+                    }
+                }
             }
 
             logger?.i("[*] Confirming container runtime...")
-            val (isRunning, pid) = waitForContainerRuntime(containerName)
-            if (isRunning) {
-                logger?.i("[+] Container runtime active${if (pid != null) " (PID=$pid)" else ""}")
-            } else {
-                logger?.w("[!] Runtime status not confirmed yet; start command was accepted")
+            val (runtimeStatus, pid) = waitForContainerRuntime(containerName)
+            when (runtimeStatus) {
+                ContainerStatus.RUNNING -> {
+                    containerStartAccepted = true
+                    preserveLoaderOnUncertainState = false
+                    logger?.i("[+] Container runtime active${if (pid != null) " (PID=$pid)" else ""}")
+                }
+                ContainerStatus.STOPPED -> {
+                    if (!started && !containerStartAccepted) {
+                        logger?.e("[-] Container runtime confirmed stopped")
+                        rollbackLoader(activeLoaderLease, logger)
+                        return@withContext
+                    }
+                    logger?.w("[!] Start command was accepted but runtime is currently stopped")
+                }
+                ContainerStatus.UNKNOWN -> {
+                    preserveLoaderOnUncertainState = true
+                    logger?.w("[!] Container runtime status remains unknown")
+                }
             }
 
             logger?.i("[*] Opening Termux:X11...")
@@ -327,9 +352,13 @@ object X11SessionManager {
             }
 
             logger?.i("")
-            logger?.i("[+] Session started")
+            if (runtimeStatus == ContainerStatus.RUNNING) {
+                logger?.i("[+] Session started")
+            } else {
+                logger?.w("[!] Session start requested; runtime confirmation is incomplete")
+            }
         } catch (e: Exception) {
-            if (!containerStartAccepted) {
+            if (!containerStartAccepted && !preserveLoaderOnUncertainState) {
                 loaderLease?.let { rollbackLoader(it, logger) }
             }
             logger?.e("[-] Error: ${e.message}")
