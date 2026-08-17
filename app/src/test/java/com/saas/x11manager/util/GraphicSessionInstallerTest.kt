@@ -21,6 +21,7 @@ class GraphicSessionInstallerTest {
 
         assertEquals(
             listOf(
+                "Validating Alpine environment",
                 "Refreshing package index",
                 "Installing Openbox",
                 "Installing terminal",
@@ -33,6 +34,17 @@ class GraphicSessionInstallerTest {
             ),
             steps.map { it.title }
         )
+    }
+
+    @Test
+    fun openboxWorkflowValidatesAlpineBeforePackageChanges() {
+        val steps = alpineOpenboxSteps()
+
+        assertEquals(
+            "test -f /etc/alpine-release && command -v apk",
+            steps.first().command
+        )
+        assertEquals("apk update", steps[1].command)
     }
 
     @Test

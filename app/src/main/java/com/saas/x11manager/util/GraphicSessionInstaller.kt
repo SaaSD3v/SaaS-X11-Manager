@@ -26,6 +26,10 @@ object GraphicSessionInstaller {
 
         return listOf(
             GraphicSessionInstallStep(
+                title = "Validating Alpine environment",
+                command = "test -f /etc/alpine-release && command -v apk"
+            ),
+            GraphicSessionInstallStep(
                 title = "Refreshing package index",
                 command = "apk update"
             ),
