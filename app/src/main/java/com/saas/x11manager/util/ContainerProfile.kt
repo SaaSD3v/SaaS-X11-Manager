@@ -86,5 +86,6 @@ enum class GraphicSession(
     DK("dk", "dk"),
     GNOME_XORG("GNOME Xorg", "saas-gnome-xorg-session"),
     GNOME_FLASHBACK("GNOME Flashback", "saas-gnome-flashback-session"),
+    GNOME_CLASSIC_XORG("GNOME Classic Xorg", "saas-gnome-classic-xorg-session"),
     NONE("None", "")
 }

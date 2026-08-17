@@ -256,6 +256,11 @@ object GraphicSessionSupport {
                 )
             )
         ),
+        GraphicSession.GNOME_CLASSIC_XORG to dbusWrappedSpec(
+            session = GraphicSession.GNOME_CLASSIC_XORG,
+            executable = "gnome-session-classic",
+            wrapper = "saas-gnome-classic-xorg-session"
+        ),
         GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE),
         GraphicSession.LXQT to GraphicSessionSupportSpec(GraphicSession.LXQT)
     )
