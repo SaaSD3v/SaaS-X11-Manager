@@ -82,5 +82,6 @@ enum class GraphicSession(
     BUDGIE("Budgie", "saas-budgie-session"),
     FVWM3("FVWM3", "fvwm3"),
     TWO_BWM("2bwm", "2bwm"),
+    BERRY("Berry WM", "berry"),
     NONE("None", "")
 }
