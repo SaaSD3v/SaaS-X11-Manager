@@ -61,6 +61,7 @@ object ContainerSettingsManager {
         return when (readValue(containerName, GRAPHIC_SESSION_KEY)?.lowercase()) {
             "xfce" -> GraphicSession.XFCE
             "lxqt" -> GraphicSession.LXQT
+            "openbox" -> GraphicSession.OPENBOX
             else -> null
         }
     }

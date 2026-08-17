@@ -23,19 +23,16 @@ data class GraphicSessionInstallPlan(
  * Package plans intentionally avoid display managers because Termux:X11 is the
  * X server and SaaS-X11-Manager starts the selected session directly.
  *
- * The apt XFCE plan mirrors the useful core of the xfce4 metapackage without
- * xfce4-pulseaudio-plugin. The apt LXQt plan uses lxqt-core rather than the
- * full lxqt metapackage so optional desktop/audio extras are not forced in.
- *
- * Alpine's official xfce4 and lxqt-desktop metapackages are suitable for the
- * direct-session path and live in the community repository.
+ * Openbox is initially enabled only for Alpine. Its minimal package set follows
+ * Alpine's own Openbox guidance while avoiding a second Xorg server inside the
+ * container: openbox, xterm and font-terminus.
  */
 object GraphicSessionInstallPlans {
 
     fun forSelection(
         platform: ContainerPlatform,
         session: GraphicSession
-    ): GraphicSessionInstallPlan = when (platform) {
+    ): GraphicSessionInstallPlan? = when (platform) {
         ContainerPlatform.UBUNTU -> when (session) {
             GraphicSession.XFCE -> GraphicSessionInstallPlan(
                 platform = platform,
@@ -70,6 +67,8 @@ object GraphicSessionInstallPlans {
                 verificationCommand = "startlxqt",
                 installRecommendedPackages = false
             )
+
+            GraphicSession.OPENBOX -> null
         }
 
         ContainerPlatform.ALPINE -> when (session) {
@@ -97,6 +96,19 @@ object GraphicSessionInstallPlans {
                     "lxqt-desktop"
                 ),
                 verificationCommand = "startlxqt",
+                installRecommendedPackages = true
+            )
+
+            GraphicSession.OPENBOX -> GraphicSessionInstallPlan(
+                platform = platform,
+                session = session,
+                repositoryRequirement = RepositoryRequirement.APK_COMMUNITY,
+                packages = listOf(
+                    "openbox",
+                    "xterm",
+                    "font-terminus"
+                ),
+                verificationCommand = "openbox-session",
                 installRecommendedPackages = true
             )
         }

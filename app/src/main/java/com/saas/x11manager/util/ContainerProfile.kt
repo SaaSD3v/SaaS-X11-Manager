@@ -23,5 +23,6 @@ enum class GraphicSession(
     val startCommand: String
 ) {
     XFCE("XFCE", "startxfce4"),
-    LXQT("LXQt", "startlxqt")
+    LXQT("LXQt", "startlxqt"),
+    OPENBOX("Openbox", "openbox-session")
 }

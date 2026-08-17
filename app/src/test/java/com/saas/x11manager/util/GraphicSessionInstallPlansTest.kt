@@ -2,6 +2,7 @@ package com.saas.x11manager.util
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -9,10 +10,10 @@ class GraphicSessionInstallPlansTest {
 
     @Test
     fun ubuntuXfceUsesExplicitCorePackagesWithoutAudioMeta() {
-        val plan = GraphicSessionInstallPlans.forSelection(
+        val plan = requireNotNull(GraphicSessionInstallPlans.forSelection(
             ContainerPlatform.UBUNTU,
             GraphicSession.XFCE
-        )
+        ))
 
         assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
         assertEquals("startxfce4", plan.verificationCommand)
@@ -35,10 +36,10 @@ class GraphicSessionInstallPlansTest {
 
     @Test
     fun ubuntuLxqtUsesCoreSessionAndOpenbox() {
-        val plan = GraphicSessionInstallPlans.forSelection(
+        val plan = requireNotNull(GraphicSessionInstallPlans.forSelection(
             ContainerPlatform.UBUNTU,
             GraphicSession.LXQT
-        )
+        ))
 
         assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
         assertEquals("startlxqt", plan.verificationCommand)
@@ -48,11 +49,19 @@ class GraphicSessionInstallPlansTest {
     }
 
     @Test
+    fun ubuntuOpenboxInstallerIsNotEnabledYet() {
+        assertNull(GraphicSessionInstallPlans.forSelection(
+            ContainerPlatform.UBUNTU,
+            GraphicSession.OPENBOX
+        ))
+    }
+
+    @Test
     fun alpineXfceUsesCommunityDesktopAndDbus() {
-        val plan = GraphicSessionInstallPlans.forSelection(
+        val plan = requireNotNull(GraphicSessionInstallPlans.forSelection(
             ContainerPlatform.ALPINE,
             GraphicSession.XFCE
-        )
+        ))
 
         assertEquals(RepositoryRequirement.APK_COMMUNITY, plan.repositoryRequirement)
         assertEquals("startxfce4", plan.verificationCommand)
@@ -63,10 +72,10 @@ class GraphicSessionInstallPlansTest {
 
     @Test
     fun alpineLxqtUsesCommunityDesktopAndDbus() {
-        val plan = GraphicSessionInstallPlans.forSelection(
+        val plan = requireNotNull(GraphicSessionInstallPlans.forSelection(
             ContainerPlatform.ALPINE,
             GraphicSession.LXQT
-        )
+        ))
 
         assertEquals(RepositoryRequirement.APK_COMMUNITY, plan.repositoryRequirement)
         assertEquals("startlxqt", plan.verificationCommand)
@@ -76,11 +85,38 @@ class GraphicSessionInstallPlansTest {
     }
 
     @Test
-    fun everyPlanVerifiesTheSelectedSessionCommand() {
+    fun alpineOpenboxUsesMinimalTermuxX11PackageSet() {
+        val plan = requireNotNull(GraphicSessionInstallPlans.forSelection(
+            ContainerPlatform.ALPINE,
+            GraphicSession.OPENBOX
+        ))
+
+        assertEquals(RepositoryRequirement.APK_COMMUNITY, plan.repositoryRequirement)
+        assertEquals("openbox-session", plan.verificationCommand)
+        assertEquals(listOf("openbox", "xterm", "font-terminus"), plan.packages)
+        assertTrue(plan.installRecommendedPackages)
+        assertNoDisplayManager(plan)
+
+        val unnecessaryForDirectTermuxX11 = setOf(
+            "xorg-server",
+            "xinit",
+            "xauth",
+            "mesa-egl",
+            "mesa-gles",
+            "mesa-dri-gallium",
+            "py3-xdg",
+            "pulseaudio"
+        )
+        assertTrue(plan.packages.none { it in unnecessaryForDirectTermuxX11 })
+    }
+
+    @Test
+    fun everyImplementedPlanVerifiesTheSelectedSessionCommand() {
         ContainerPlatform.entries.forEach { platform ->
             GraphicSession.entries.forEach { session ->
-                val plan = GraphicSessionInstallPlans.forSelection(platform, session)
-                assertEquals(session.startCommand, plan.verificationCommand)
+                GraphicSessionInstallPlans.forSelection(platform, session)?.let { plan ->
+                    assertEquals(session.startCommand, plan.verificationCommand)
+                }
             }
         }
     }
