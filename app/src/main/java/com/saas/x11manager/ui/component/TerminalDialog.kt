@@ -34,7 +34,10 @@ fun TerminalDialog(
     logs: List<Pair<Int, String>>,
     onDismiss: () -> Unit,
     onClear: (() -> Unit)? = null,
-    isBlocking: Boolean = false
+    isBlocking: Boolean = false,
+    primaryActionLabel: String? = null,
+    onPrimaryAction: (() -> Unit)? = null,
+    primaryActionEnabled: Boolean = true
 ) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
@@ -53,7 +56,7 @@ fun TerminalDialog(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(screenHeight * 0.75f)
+                .height(screenHeight * 0.78f)
                 .padding(horizontal = 16.dp),
             shape = dialogShape,
             color = MaterialTheme.colorScheme.surfaceContainer,
@@ -63,7 +66,6 @@ fun TerminalDialog(
             Column(
                 modifier = Modifier.fillMaxSize().padding(20.dp)
             ) {
-                // Header
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -104,7 +106,6 @@ fun TerminalDialog(
                     }
                 }
 
-                // Action buttons
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -174,12 +175,27 @@ fun TerminalDialog(
                     }
                 }
 
-                // Terminal Console
                 TerminalConsole(
                     logs = logs,
                     isProcessing = isBlocking,
                     modifier = Modifier.fillMaxWidth().weight(1f)
                 )
+
+                if (primaryActionLabel != null && onPrimaryAction != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = onPrimaryAction,
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        enabled = primaryActionEnabled && !isBlocking,
+                        shape = buttonShape
+                    ) {
+                        Text(
+                            primaryActionLabel,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
         }
     }

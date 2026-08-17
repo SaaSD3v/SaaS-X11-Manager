@@ -15,12 +15,21 @@ import com.saas.x11manager.util.ContainerStatus
 import com.saas.x11manager.util.GraphicSession
 import com.saas.x11manager.util.GraphicSessionInstaller
 import com.saas.x11manager.util.GraphicSessionSupport
+import com.saas.x11manager.util.GraphicSessionWizard
 import com.saas.x11manager.util.InitSystem
 import com.saas.x11manager.util.ViewModelLogger
+import com.saas.x11manager.util.X11SessionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+
+enum class ConfigurationWizardStage {
+    HIDDEN,
+    RUNNING_WARNING,
+    INIT_SELECTION,
+    SESSION_SELECTION
+}
 
 class EditContainerViewModel : ViewModel() {
 
@@ -56,6 +65,21 @@ class EditContainerViewModel : ViewModel() {
     var installResult by mutableStateOf<String?>(null)
         private set
     var installResultSession by mutableStateOf<GraphicSession?>(null)
+        private set
+
+    var wizardStage by mutableStateOf(ConfigurationWizardStage.HIDDEN)
+        private set
+    var pendingWizardInitSystem by mutableStateOf<InitSystem?>(null)
+        private set
+    var isPreparingWizard by mutableStateOf(false)
+        private set
+    var wizardError by mutableStateOf<String?>(null)
+        private set
+    var wizardStarted by mutableStateOf(false)
+        private set
+    var canStartX11FromInstall by mutableStateOf(false)
+        private set
+    var quickStartCompleted by mutableStateOf(false)
         private set
 
     private var loaded = false
@@ -95,7 +119,81 @@ class EditContainerViewModel : ViewModel() {
             installLogs.clear()
             installResult = null
             installResultSession = null
+            wizardError = null
+            canStartX11FromInstall = false
+            quickStartCompleted = false
         }
+    }
+
+    fun startConfigurationWizard() {
+        if (wizardStarted || name.isEmpty() || isInstallingSession || isPreparingWizard) return
+        wizardStarted = true
+        pendingWizardInitSystem = initSystem
+        wizardError = null
+        wizardStage = if (status == ContainerStatus.RUNNING) {
+            ConfigurationWizardStage.RUNNING_WARNING
+        } else {
+            ConfigurationWizardStage.INIT_SELECTION
+        }
+    }
+
+    fun dismissConfigurationWizard() {
+        if (isPreparingWizard || isInstallingSession) return
+        wizardStage = ConfigurationWizardStage.HIDDEN
+    }
+
+    fun confirmRunningContainerRestart() {
+        if (isPreparingWizard || isInstallingSession) return
+        if (status != ContainerStatus.RUNNING) {
+            wizardStage = ConfigurationWizardStage.INIT_SELECTION
+            return
+        }
+
+        isPreparingWizard = true
+        wizardError = null
+        viewModelScope.launch {
+            try {
+                val stopped = ContainerManager.stopContainer(containerName)
+                val (runtimeStatus, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
+                if (stopped || runtimeStatus == ContainerStatus.STOPPED) {
+                    status = ContainerStatus.STOPPED
+                    wizardStage = ConfigurationWizardStage.INIT_SELECTION
+                } else {
+                    wizardStage = ConfigurationWizardStage.HIDDEN
+                    wizardError = "Could not stop the running container. Configuration was not started."
+                }
+            } catch (e: Exception) {
+                wizardStage = ConfigurationWizardStage.HIDDEN
+                wizardError = e.message ?: "Could not stop the running container."
+            } finally {
+                isPreparingWizard = false
+            }
+        }
+    }
+
+    fun selectWizardInitSystem(system: InitSystem) {
+        if (isPreparingWizard || isInstallingSession) return
+        pendingWizardInitSystem = system
+        wizardStage = ConfigurationWizardStage.SESSION_SELECTION
+    }
+
+    fun backToWizardInitSelection() {
+        if (isPreparingWizard || isInstallingSession) return
+        wizardStage = ConfigurationWizardStage.INIT_SELECTION
+    }
+
+    fun wizardSessions(): List<GraphicSession> =
+        GraphicSessionWizard.sessionsFor(pendingWizardInitSystem ?: initSystem)
+
+    fun configureWizardSession(session: GraphicSession) {
+        if (isPreparingWizard || isInstallingSession || isSaving) return
+        val selectedInit = pendingWizardInitSystem ?: initSystem
+        if (session !in GraphicSessionWizard.sessionsFor(selectedInit)) {
+            wizardError = "${session.label} is not available for ${selectedInit.name.lowercase()}."
+            return
+        }
+        wizardStage = ConfigurationWizardStage.HIDDEN
+        installSessionWithInit(session, selectedInit)
     }
 
     fun selectInitSystem(system: InitSystem) {
@@ -117,6 +215,10 @@ class EditContainerViewModel : ViewModel() {
     }
 
     fun installSession(session: GraphicSession) {
+        installSessionWithInit(session, initSystem)
+    }
+
+    private fun installSessionWithInit(session: GraphicSession, selectedInitSystem: InitSystem) {
         if (isInstallingSession || isSaving) return
         if (session !in GraphicSessionSupport.installableSessions) return
 
@@ -130,7 +232,6 @@ class EditContainerViewModel : ViewModel() {
         }
 
         beginSessionOperation("Installing ${session.label}", session)
-        val selectedInitSystem = initSystem
         val logger = operationLogger()
 
         viewModelScope.launch {
@@ -184,24 +285,63 @@ class EditContainerViewModel : ViewModel() {
                         ContainerManager.stopContainer(containerName, logger)
                     }
                     val (statusAfterStop, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
+                    status = statusAfterStop
                     if (stopAccepted || statusAfterStop == ContainerStatus.STOPPED) {
                         logger.i("[+] Container stopped")
-                        logger.i("")
-                        logger.i("[+] ${session.label} installation completed successfully")
-                        logger.i("[+] Click Start X11 to launch the session")
-                        installResult = "OK: ${session.label} installed. Click Start X11."
                     } else {
                         logger.w("[!] ${session.label} was installed, but the container could not be confirmed stopped")
-                        logger.w("[!] Stop the container before clicking Start X11")
-                        installResult = "Warning: ${session.label} installed; stop container before Start X11"
                     }
+
+                    logger.i("")
+                    logger.i("[+] ${session.label} installation completed successfully")
+                    logger.i("[+] Use Start X11 below to launch this container now")
+                    installResult = "OK: ${session.label} installed"
+                    canStartX11FromInstall = true
+                    quickStartCompleted = false
                 } else {
                     installResult = "Error: ${session.label} installation failed"
+                    canStartX11FromInstall = false
                 }
             } catch (e: Exception) {
                 logOperationException(e, "${session.label} installation failed")
+                canStartX11FromInstall = false
             } finally {
                 refreshRuntimeStatus()
+                isInstallingSession = false
+            }
+        }
+    }
+
+    fun quickStartX11() {
+        if (isInstallingSession || !canStartX11FromInstall) return
+
+        installLogs.add(Log.INFO to "")
+        installLogs.add(Log.INFO to "--- Starting X11 ---")
+        sessionOperationTitle = "Starting X11: ${graphicSession.label}"
+        isInstallingSession = true
+        quickStartCompleted = false
+        val logger = operationLogger()
+
+        viewModelScope.launch {
+            try {
+                X11SessionManager.startX11Session(
+                    containerName = containerName,
+                    logger = logger
+                )
+                val (runtimeStatus, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
+                status = runtimeStatus
+                if (runtimeStatus == ContainerStatus.RUNNING) {
+                    installResult = "OK: X11 started with ${graphicSession.label}"
+                    canStartX11FromInstall = false
+                    quickStartCompleted = true
+                } else {
+                    installResult = "Warning: X11 start requested, but container state is ${runtimeStatus.name.lowercase()}"
+                    canStartX11FromInstall = true
+                }
+            } catch (e: Exception) {
+                logOperationException(e, "X11 start failed")
+                canStartX11FromInstall = true
+            } finally {
                 isInstallingSession = false
             }
         }
@@ -265,7 +405,6 @@ class EditContainerViewModel : ViewModel() {
             session == GraphicSession.ICEWM ||
             session == GraphicSession.JWM
 
-    // Compatibility wrappers for the cards that existed before the generic flow.
     fun toggleOpenboxSelection() = toggleSessionSelection(GraphicSession.OPENBOX)
     fun toggleIcewmSelection() = toggleSessionSelection(GraphicSession.ICEWM)
     fun toggleJwmSelection() = toggleSessionSelection(GraphicSession.JWM)
@@ -283,6 +422,8 @@ class EditContainerViewModel : ViewModel() {
         sessionOperationTitle = title
         showInstallTerminal = true
         isInstallingSession = true
+        canStartX11FromInstall = false
+        quickStartCompleted = false
     }
 
     private fun operationLogger(): ViewModelLogger = ViewModelLogger { level, message ->
@@ -301,6 +442,7 @@ class EditContainerViewModel : ViewModel() {
         installResultSession = session
         sessionOperationTitle = title
         showInstallTerminal = true
+        canStartX11FromInstall = false
     }
 
     private fun logOperationException(e: Exception, fallback: String) {
