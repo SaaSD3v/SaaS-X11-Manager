@@ -82,7 +82,8 @@ object GraphicSessionSupport {
             verificationCommands = listOf(
                 GraphicSessionProvisionCommand("Checking AwesomeWM configuration syntax", "awesome --check")
             )
-        )
+        ),
+        GraphicSession.RATPOISON to GraphicSessionSupportSpec(GraphicSession.RATPOISON)
     )
 
     val installableSessions: List<GraphicSession>

@@ -86,7 +86,9 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.I3, listOf("i3-wm", "xterm")),
         apk(GraphicSession.I3, listOf("i3wm", "xterm")),
         apt(GraphicSession.AWESOME, listOf("awesome", "xterm")),
-        apk(GraphicSession.AWESOME, listOf("awesome", "xterm"))
+        apk(GraphicSession.AWESOME, listOf("awesome", "xterm")),
+        apt(GraphicSession.RATPOISON, listOf("ratpoison", "xterm")),
+        apk(GraphicSession.RATPOISON, listOf("ratpoison", "xterm"))
     )
 
     fun forSelection(

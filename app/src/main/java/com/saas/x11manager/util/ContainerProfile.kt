@@ -33,5 +33,6 @@ enum class GraphicSession(
     SPECTRWM("spectrwm", "spectrwm"),
     I3("i3", "i3"),
     AWESOME("AwesomeWM", "awesome"),
+    RATPOISON("Ratpoison", "ratpoison"),
     NONE("None", "")
 }
