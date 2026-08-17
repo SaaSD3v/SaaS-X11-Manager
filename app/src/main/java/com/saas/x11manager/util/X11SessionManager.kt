@@ -15,6 +15,8 @@ object X11SessionManager {
         val reused: Boolean
     )
 
+    private var ownedLoaderPids: Set<Int> = emptySet()
+
     private fun getProcessPids(processName: String): List<Int> {
         return try {
             Shell.cmd("pidof $processName 2>/dev/null").exec().out
@@ -47,6 +49,37 @@ object X11SessionManager {
         }
     }
 
+    private fun getX0SocketInode(): String? {
+        return try {
+            val result = Shell.cmd("cat /proc/net/unix 2>/dev/null").exec()
+            if (!result.isSuccess) null
+            else UnixSocketTableParser.findInode(result.out, Constants.X11_SOCK_FILE)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun pidOwnsSocketInode(pid: Int, inode: String): Boolean {
+        if (pid <= 0 || inode.isBlank()) return false
+        return try {
+            val result = Shell.cmd("ls -l /proc/$pid/fd 2>/dev/null").exec()
+            result.out.any { it.contains("socket:[$inode]") }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun findX0OwnerPid(candidatePids: List<Int> = getProcessPids("termux-x11")): Int? {
+        val inode = getX0SocketInode() ?: return null
+        return candidatePids.firstOrNull { pidOwnsSocketInode(it, inode) }
+    }
+
+    private fun aliveOwnedLoaderPids(candidatePids: Collection<Int>): List<Int> {
+        return ownedLoaderPids
+            .filter { it in candidatePids && isPidAlive(it) }
+            .distinct()
+    }
+
     suspend fun getLoaderStatus(): LoaderStatus = withContext(Dispatchers.IO) {
         try {
             val r = Shell.cmd("test -S '${Constants.X11_SOCK_FILE}' && echo ok").exec()
@@ -56,7 +89,8 @@ object X11SessionManager {
     }
 
     suspend fun getLoaderPid(): Int? = withContext(Dispatchers.IO) {
-        getProcessPids("termux-x11").firstOrNull()
+        val candidates = getProcessPids("termux-x11")
+        findX0OwnerPid(candidates) ?: aliveOwnedLoaderPids(candidates).firstOrNull()
     }
 
     private suspend fun startLoaderTracked(
@@ -70,19 +104,24 @@ object X11SessionManager {
             logger?.i("[*] Preparing X11 environment...")
 
             val existingStatus = getLoaderStatus()
-            val existingPid = getLoaderPid()
-            if (existingStatus == LoaderStatus.Running && existingPid != null && existingPid > 0) {
-                logger?.i("[+] Reusing X11 loader (PID=$existingPid)")
+            if (existingStatus == LoaderStatus.Running) {
+                val existingPid = getLoaderPid()
+                logger?.i(
+                    if (existingPid != null) "[+] Reusing X11 loader for :0 (PID=$existingPid)"
+                    else "[+] Reusing active X11 loader for :0"
+                )
                 return@withContext Result.success(
                     LoaderLease(pid = existingPid, ownedPids = emptyList(), reused = true)
                 )
             }
 
-            val stalePids = getProcessPids("termux-x11")
-            if (stalePids.isNotEmpty()) {
-                killPids(stalePids)
-                logger?.i("[+] Killed stale loader PIDs=${stalePids.joinToString(",")}")
+            val existingProcessPids = getProcessPids("termux-x11")
+            val staleOwnedPids = aliveOwnedLoaderPids(existingProcessPids)
+            if (staleOwnedPids.isNotEmpty()) {
+                killPids(staleOwnedPids)
+                logger?.i("[+] Stopped stale app-owned X0 loader PIDs=${staleOwnedPids.joinToString(",")}")
             }
+            ownedLoaderPids = emptySet()
 
             clearX11SocketFiles()
             Shell.cmd("mkdir -p '${Constants.X11_SOCK_DIR}' 2>/dev/null").exec()
@@ -120,21 +159,39 @@ object X11SessionManager {
             }
 
             if (socketReady) {
-                val pid = when {
-                    capturedPid != null && isPidAlive(capturedPid) -> capturedPid
-                    ownedPids.isNotEmpty() -> ownedPids.first()
-                    else -> currentPids.firstOrNull()
+                val x0OwnerPid = findX0OwnerPid(currentPids)
+
+                if (x0OwnerPid != null && x0OwnerPid !in ownedPids) {
+                    // Another already-running :0 became available while we were launching.
+                    // Do not leave our launch attempt behind and never touch other displays.
+                    killPids(ownedPids)
+                    ownedLoaderPids = emptySet()
+                    logger?.i("[+] Reusing X11 loader for :0 (PID=$x0OwnerPid)")
+                    return@withContext Result.success(
+                        LoaderLease(pid = x0OwnerPid, ownedPids = emptyList(), reused = true)
+                    )
                 }
-                logger?.i("[+] X11 loader active (PID=${pid ?: "unknown"})")
+
+                val distinctOwnedPids = ownedPids.distinct()
+                val pid = when {
+                    x0OwnerPid != null -> x0OwnerPid
+                    capturedPid != null && isPidAlive(capturedPid) -> capturedPid
+                    distinctOwnedPids.isNotEmpty() -> distinctOwnedPids.first()
+                    else -> null
+                }
+
+                ownedLoaderPids = distinctOwnedPids.toSet()
+                logger?.i("[+] X11 loader active for :0 (PID=${pid ?: "unknown"})")
                 Result.success(
                     LoaderLease(
                         pid = pid,
-                        ownedPids = ownedPids.distinct(),
+                        ownedPids = distinctOwnedPids,
                         reused = false
                     )
                 )
             } else {
                 killPids(ownedPids)
+                ownedLoaderPids = emptySet()
                 clearX11SocketFiles()
                 logger?.e("[-] Socket X0 not created")
                 Result.failure(Exception("Socket X0 not created"))
@@ -147,6 +204,7 @@ object X11SessionManager {
                     ownedPids.add(capturedPid)
                 }
                 killPids(ownedPids)
+                ownedLoaderPids = emptySet()
                 clearX11SocketFiles()
             }
             logger?.e("[-] Loader error: ${e.message}")
@@ -162,17 +220,26 @@ object X11SessionManager {
         if (lease.reused) return
 
         killPids(lease.ownedPids)
+        ownedLoaderPids = ownedLoaderPids - lease.ownedPids.toSet()
         clearX11SocketFiles()
         logger?.i("[+] Rolled back X11 loader from failed session start")
     }
 
     suspend fun stopLoader(logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
         try {
-            val pids = getProcessPids("termux-x11")
-            if (pids.isNotEmpty()) {
-                killPids(pids)
-                logger?.i("[+] Stopped loader (PIDs=${pids.joinToString(",")})")
+            val candidates = getProcessPids("termux-x11")
+            val x0OwnerPid = findX0OwnerPid(candidates)
+            val rememberedPids = aliveOwnedLoaderPids(candidates)
+            val targets = (listOfNotNull(x0OwnerPid) + rememberedPids).distinct()
+
+            if (targets.isNotEmpty()) {
+                killPids(targets)
+                logger?.i("[+] Stopped X0 loader (PIDs=${targets.joinToString(",")})")
+            } else if (getLoaderStatus() == LoaderStatus.Running) {
+                logger?.w("[!] X0 socket exists but its owning PID could not be resolved")
             }
+
+            ownedLoaderPids = emptySet()
             clearX11SocketFiles()
             true
         } catch (_: Exception) { false }
