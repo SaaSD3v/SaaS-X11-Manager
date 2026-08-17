@@ -3,8 +3,14 @@ package com.saas.x11manager.util
 /** Pure templates for init-owned X11 session files. */
 internal object GraphicSessionInitFiles {
 
-    fun sessionScript(session: GraphicSession, shell: String): String =
-        "#!$shell\n" +
+    fun sessionScript(session: GraphicSession, shell: String): String {
+        val launch = if (session == GraphicSession.NONE) {
+            "exit 0\n"
+        } else {
+            "exec ${session.startCommand}\n"
+        }
+
+        return "#!$shell\n" +
             "export DISPLAY=:0\n" +
             "export HOME=/root\n" +
             "export USER=root\n" +
@@ -12,7 +18,8 @@ internal object GraphicSessionInitFiles {
             "export XDG_SESSION_TYPE=x11\n" +
             "export XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
             "mkdir -p \"\$XDG_RUNTIME_DIR\"\n" +
-            "exec ${session.startCommand}\n"
+            launch
+    }
 
     fun openRcSetupService(): String =
         "#!/sbin/openrc-run\n\n" +

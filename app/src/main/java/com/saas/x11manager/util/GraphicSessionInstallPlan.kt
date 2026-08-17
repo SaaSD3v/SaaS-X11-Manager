@@ -22,10 +22,6 @@ data class GraphicSessionInstallPlan(
 /**
  * Package plans intentionally avoid display managers because Termux:X11 is the
  * X server and SaaS-X11-Manager starts the selected session directly.
- *
- * Openbox is initially enabled only for Alpine. Its minimal package set follows
- * Alpine's own Openbox guidance while avoiding a second Xorg server inside the
- * container: openbox, xterm and font-terminus.
  */
 object GraphicSessionInstallPlans {
 
@@ -69,6 +65,7 @@ object GraphicSessionInstallPlans {
             )
 
             GraphicSession.OPENBOX -> null
+            GraphicSession.NONE -> null
         }
 
         ContainerPlatform.ALPINE -> when (session) {
@@ -111,6 +108,8 @@ object GraphicSessionInstallPlans {
                 verificationCommand = "openbox-session",
                 installRecommendedPackages = true
             )
+
+            GraphicSession.NONE -> null
         }
     }
 }

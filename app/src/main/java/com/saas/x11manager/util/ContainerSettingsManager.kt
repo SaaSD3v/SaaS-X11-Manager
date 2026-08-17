@@ -53,7 +53,10 @@ object ContainerSettingsManager {
     ): Boolean = setValue(
         containerName = containerName,
         key = PLATFORM_KEY,
-        value = platform.name.lowercase(),
+        value = when (platform) {
+            ContainerPlatform.UBUNTU -> "ubuntu"
+            ContainerPlatform.ALPINE -> "alpine"
+        },
         cacheDir = cacheDir
     )
 
@@ -62,6 +65,7 @@ object ContainerSettingsManager {
             "xfce" -> GraphicSession.XFCE
             "lxqt" -> GraphicSession.LXQT
             "openbox" -> GraphicSession.OPENBOX
+            "none" -> GraphicSession.NONE
             else -> null
         }
     }
@@ -76,6 +80,33 @@ object ContainerSettingsManager {
         value = graphicSession.name.lowercase(),
         cacheDir = cacheDir
     )
+
+    fun isGraphicSessionInstalled(
+        containerName: String,
+        graphicSession: GraphicSession
+    ): Boolean {
+        if (graphicSession == GraphicSession.NONE) return false
+        val value = readValue(containerName, installedSessionKey(graphicSession))?.lowercase()
+        return value == "1" || value == "true" || value == "yes"
+    }
+
+    fun setGraphicSessionInstalled(
+        containerName: String,
+        graphicSession: GraphicSession,
+        installed: Boolean,
+        cacheDir: File
+    ): Boolean {
+        if (graphicSession == GraphicSession.NONE) return false
+        return setValue(
+            containerName = containerName,
+            key = installedSessionKey(graphicSession),
+            value = if (installed) "1" else "0",
+            cacheDir = cacheDir
+        )
+    }
+
+    private fun installedSessionKey(graphicSession: GraphicSession): String =
+        "installed_${graphicSession.name.lowercase()}"
 
     private fun readValue(containerName: String, key: String): String? {
         return readLines(containerName)

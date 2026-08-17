@@ -10,7 +10,7 @@ enum class ContainerPlatform(
     val label: String,
     val defaultInitSystem: InitSystem
 ) {
-    UBUNTU("Ubuntu", InitSystem.SYSTEMD),
+    UBUNTU("Ubuntu / Debian (.deb)", InitSystem.SYSTEMD),
     ALPINE("Alpine", InitSystem.OPENRC)
 }
 
@@ -24,5 +24,6 @@ enum class GraphicSession(
 ) {
     XFCE("XFCE", "startxfce4"),
     LXQT("LXQt", "startlxqt"),
-    OPENBOX("Openbox", "openbox-session")
+    OPENBOX("Openbox", "openbox-session"),
+    NONE("None", "")
 }

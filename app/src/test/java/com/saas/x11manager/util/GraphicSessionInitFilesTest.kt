@@ -23,6 +23,17 @@ class GraphicSessionInitFilesTest {
     }
 
     @Test
+    fun noGraphicSessionKeepsX11EnvironmentButLaunchesNoDesktop() {
+        val script = GraphicSessionInitFiles.sessionScript(GraphicSession.NONE, "/bin/sh")
+
+        assertTrue(script.contains("export DISPLAY=:0"))
+        assertTrue(script.endsWith("exit 0\n"))
+        assertFalse(script.contains("exec openbox-session"))
+        assertFalse(script.contains("exec startxfce4"))
+        assertFalse(script.contains("exec startlxqt"))
+    }
+
+    @Test
     fun openrcUsesGenericSessionServiceNameAndPidfile() {
         val setup = GraphicSessionInitFiles.openRcSetupService()
         val session = GraphicSessionInitFiles.openRcSessionService(GraphicSession.OPENBOX)
