@@ -90,5 +90,6 @@ enum class GraphicSession(
     UNITY7("Unity 7 (Ubuntu)", "saas-unity7-session"),
     UKUI_DESKTOP("UKUI Desktop", "saas-ukui-session"),
     EXWM("EXWM", "saas-exwm-session"),
+    GNUSTEP_GWORKSPACE("GNUstep + GWorkspace", "saas-gnustep-gworkspace-session"),
     NONE("None", "")
 }

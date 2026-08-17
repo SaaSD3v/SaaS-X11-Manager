@@ -307,6 +307,25 @@ object GraphicSessionSupport {
                 )
             )
         ),
+        GraphicSession.GNUSTEP_GWORKSPACE to GraphicSessionSupportSpec(
+            session = GraphicSession.GNUSTEP_GWORKSPACE,
+            postInstallCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Creating GNUstep GWorkspace session launcher",
+                    "printf '%s\\n' '#!/bin/sh' " +
+                        "\"exec dbus-run-session -- sh -c 'wmaker >/tmp/saas-gnustep-wmaker.log 2>&1 & exec GWorkspace'\" " +
+                        "> /usr/local/bin/saas-gnustep-gworkspace-session && " +
+                        "chmod 755 /usr/local/bin/saas-gnustep-gworkspace-session"
+                )
+            ),
+            verificationCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Checking GNUstep GWorkspace session",
+                    "command -v wmaker >/dev/null && command -v GWorkspace >/dev/null && " +
+                        "command -v dbus-run-session >/dev/null"
+                )
+            )
+        ),
         GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE),
         GraphicSession.LXQT to GraphicSessionSupportSpec(GraphicSession.LXQT)
     )
