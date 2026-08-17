@@ -161,7 +161,8 @@ object GraphicSessionInstallPlans {
         ),
         apt(GraphicSession.EXWM, listOf("elpa-exwm", "emacs-gtk", "dbus-x11", "xterm")),
         apt(GraphicSession.GNUSTEP_GWORKSPACE, listOf("gworkspace.app", "wmaker", "dbus-x11", "xterm")),
-        apt(GraphicSession.NWM, listOf("nwm"))
+        apt(GraphicSession.NWM, listOf("nwm")),
+        apt(GraphicSession.GNOME_KIOSK_X11, listOf("gnome-kiosk-script-session", "gnome-session-bin", "dbus-x11"))
     )
 
     fun forSelection(

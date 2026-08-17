@@ -92,5 +92,6 @@ enum class GraphicSession(
     EXWM("EXWM", "saas-exwm-session"),
     GNUSTEP_GWORKSPACE("GNUstep + GWorkspace", "saas-gnustep-gworkspace-session"),
     NWM("nwm", "nwm"),
+    GNOME_KIOSK_X11("GNOME Kiosk X11", "saas-gnome-kiosk-x11-session"),
     NONE("None", "")
 }

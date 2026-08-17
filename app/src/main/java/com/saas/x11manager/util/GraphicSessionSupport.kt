@@ -327,6 +327,32 @@ object GraphicSessionSupport {
             )
         ),
         GraphicSession.NWM to GraphicSessionSupportSpec(GraphicSession.NWM),
+        GraphicSession.GNOME_KIOSK_X11 to GraphicSessionSupportSpec(
+            session = GraphicSession.GNOME_KIOSK_X11,
+            postInstallCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Checking GNOME Kiosk X11 capability",
+                    "test -f /usr/share/xsessions/gnome-kiosk-script-xorg.desktop && " +
+                        "test -f /usr/share/gnome-session/sessions/gnome-kiosk-script.session || " +
+                        "{ echo 'GNOME Kiosk X11 is unavailable in this package build; this image provides Wayland-only kiosk support.' >&2; exit 1; }"
+                ),
+                GraphicSessionProvisionCommand(
+                    "Creating GNOME Kiosk X11 session launcher",
+                    "printf '%s\\n' '#!/bin/sh' " +
+                        "'exec dbus-run-session -- gnome-session --session=gnome-kiosk-script' " +
+                        "> /usr/local/bin/saas-gnome-kiosk-x11-session && " +
+                        "chmod 755 /usr/local/bin/saas-gnome-kiosk-x11-session"
+                )
+            ),
+            verificationCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Checking GNOME Kiosk X11 session",
+                    "command -v gnome-session >/dev/null && command -v gnome-kiosk-script >/dev/null && " +
+                        "test -f /usr/share/xsessions/gnome-kiosk-script-xorg.desktop && " +
+                        "test -f /usr/share/gnome-session/sessions/gnome-kiosk-script.session"
+                )
+            )
+        ),
         GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE),
         GraphicSession.LXQT to GraphicSessionSupportSpec(GraphicSession.LXQT)
     )
