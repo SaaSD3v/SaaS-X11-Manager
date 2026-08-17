@@ -16,8 +16,8 @@ class ThirdWindowManagerBatchTest {
         assertAptOnly(GraphicSession.MARCO, listOf("marco", "xterm"))
         assertAptOnly(GraphicSession.METACITY, listOf("metacity", "xterm"))
         assertAptOnly(GraphicSession.XFWM4, listOf("xfwm4", "xterm"))
-        assertAptOnly(GraphicSession.KWIN_X11, listOf("dbus-x11", "kwin-x11", "xterm"))
-        assertAptOnly(GraphicSession.ENLIGHTENMENT, listOf("dbus-x11", "enlightenment", "xterm"))
+        assertAptOnly(GraphicSession.KWIN_X11, listOf("kwin-x11", "dbus-x11", "xterm"))
+        assertAptOnly(GraphicSession.ENLIGHTENMENT, listOf("enlightenment", "dbus-x11", "xterm"))
     }
 
     @Test
