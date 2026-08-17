@@ -1,5 +1,6 @@
 package com.saas.x11manager.ui.screen
 
+import android.os.Build
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -64,6 +65,12 @@ class HomeViewModel : ViewModel() {
     private val _androidVersion = MutableStateFlow("")
     val androidVersion: StateFlow<String> = _androidVersion
 
+    private val _androidSdk = MutableStateFlow("")
+    val androidSdk: StateFlow<String> = _androidSdk
+
+    private val _deviceName = MutableStateFlow("")
+    val deviceName: StateFlow<String> = _deviceName
+
     private val _rootProvider = MutableStateFlow("")
     val rootProvider: StateFlow<String> = _rootProvider
 
@@ -102,14 +109,7 @@ class HomeViewModel : ViewModel() {
                         val pid = if (status == LoaderStatus.Running) X11SessionManager.getLoaderPid() else null
                         status to pid
                     }
-                    val systemDef = async(Dispatchers.IO) {
-                        coroutineScope {
-                            val kernel = async { getKernelVersion() }
-                            val archVal = async { getSystemProp("ro.product.cpu.abi") }
-                            val sdk = async { getSystemProp("ro.build.version.sdk") }
-                            Triple(kernel.await(), archVal.await(), sdk.await())
-                        }
-                    }
+                    val systemDef = async(Dispatchers.IO) { readDeviceSnapshot() }
 
                     FullRefreshSnapshot(
                         root = rootDef.await(),
@@ -130,10 +130,11 @@ class HomeViewModel : ViewModel() {
                 _x11ApkStatus.value = snapshot.x11Apk
                 _dsStatus.value = snapshot.droidspaces
 
-                val (kernel, archVal, sdk) = snapshot.system
-                _kernelVersion.value = kernel
-                _arch.value = archVal
-                _androidVersion.value = sdk
+                _kernelVersion.value = snapshot.system.kernel
+                _arch.value = snapshot.system.arch
+                _androidVersion.value = snapshot.system.androidVersion
+                _androidSdk.value = snapshot.system.androidSdk
+                _deviceName.value = snapshot.system.deviceName
 
                 if (
                     runtimeGenerationAtStart == runtimeStateGeneration &&
@@ -365,12 +366,30 @@ class HomeViewModel : ViewModel() {
         } catch (_: Exception) { "" }
     }
 
-    private suspend fun getSystemProp(key: String): String = withContext(Dispatchers.IO) {
-        try {
-            val result = Shell.cmd("getprop $key 2>/dev/null").exec()
-            result.out.firstOrNull()?.trim() ?: ""
-        } catch (_: Exception) { "" }
+    private suspend fun readDeviceSnapshot(): DeviceSnapshot {
+        val kernel = getKernelVersion()
+        val manufacturer = Build.MANUFACTURER.trim()
+        val model = Build.MODEL.trim()
+        val deviceName = listOf(manufacturer, model)
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase() }
+            .joinToString(" ")
+        return DeviceSnapshot(
+            deviceName = deviceName,
+            androidVersion = Build.VERSION.RELEASE.orEmpty(),
+            androidSdk = Build.VERSION.SDK_INT.toString(),
+            arch = Build.SUPPORTED_ABIS.firstOrNull().orEmpty(),
+            kernel = kernel
+        )
     }
+
+    private data class DeviceSnapshot(
+        val deviceName: String,
+        val androidVersion: String,
+        val androidSdk: String,
+        val arch: String,
+        val kernel: String
+    )
 
     private data class FullRefreshSnapshot(
         val root: Pair<RootStatus, String>,
@@ -379,7 +398,7 @@ class HomeViewModel : ViewModel() {
         val droidspaces: Boolean,
         val containers: List<ContainerInfo>,
         val loader: Pair<LoaderStatus, Int?>,
-        val system: Triple<String, String, String>
+        val system: DeviceSnapshot
     )
 
     private data class RuntimeRefreshSnapshot(

@@ -29,28 +29,26 @@ fun SystemInfoScreen(
     val kernelVersion by viewModel.kernelVersion.collectAsState()
     val arch by viewModel.arch.collectAsState()
     val androidVersion by viewModel.androidVersion.collectAsState()
+    val androidSdk by viewModel.androidSdk.collectAsState()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Root
         item {
             InfoCard(
                 icon = Icons.Default.Security,
                 title = "Root",
                 status = when (rootStatus) {
-                    RootStatus.Granted -> "Granted"
+                    RootStatus.Granted -> rootProvider.ifEmpty { "Granted" }
                     RootStatus.Denied -> "Denied"
                     RootStatus.Checking -> "Checking..."
                 },
-                isOk = rootStatus == RootStatus.Granted,
-                subtitle = if (rootProvider.isNotEmpty() && rootStatus == RootStatus.Granted) "Provider: $rootProvider" else null
+                isOk = rootStatus == RootStatus.Granted
             )
         }
 
-        // DroidSpaces
         item {
             InfoCard(
                 icon = Icons.Default.Computer,
@@ -61,7 +59,6 @@ fun SystemInfoScreen(
             )
         }
 
-        // Termux
         item {
             InfoCard(
                 icon = Icons.Default.Terminal,
@@ -75,7 +72,6 @@ fun SystemInfoScreen(
             )
         }
 
-        // Termux:X11
         item {
             InfoCard(
                 icon = Icons.Default.DisplaySettings,
@@ -89,7 +85,6 @@ fun SystemInfoScreen(
             )
         }
 
-        // X11 Loader
         item {
             InfoCard(
                 icon = Icons.Default.PlayCircle,
@@ -99,11 +94,10 @@ fun SystemInfoScreen(
                     LoaderStatus.Stopped -> "Stopped"
                 },
                 isOk = loaderStatus == LoaderStatus.Running,
-                subtitle = if (loaderPid != null) "PID: ${loaderPid}" else null
+                subtitle = if (loaderPid != null) "PID: $loaderPid" else null
             )
         }
 
-        // Device
         item {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
@@ -134,9 +128,10 @@ fun SystemInfoScreen(
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
-                    InfoRow("Kernel", kernelVersion.ifEmpty { "Unknown" })
+                    InfoRow("Android", androidVersion.ifEmpty { "Unknown" })
+                    InfoRow("Android SDK", androidSdk.ifEmpty { "Unknown" })
                     InfoRow("Arch", arch.ifEmpty { "Unknown" })
-                    InfoRow("Android SDK", androidVersion.ifEmpty { "Unknown" })
+                    InfoRow("Kernel", kernelVersion.ifEmpty { "Unknown" })
                 }
             }
         }

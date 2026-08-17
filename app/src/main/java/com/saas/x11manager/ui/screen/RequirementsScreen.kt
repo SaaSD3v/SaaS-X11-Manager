@@ -1,28 +1,33 @@
 package com.saas.x11manager.ui.screen
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.DisplaySettings
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.saas.x11manager.util.*
+import com.saas.x11manager.util.Constants
+import com.saas.x11manager.util.LoaderStatus
+import com.saas.x11manager.util.RootStatus
+import com.saas.x11manager.util.TermuxStatus
+import com.saas.x11manager.util.X11ApkStatus
 
 @Composable
 fun RequirementsScreen(
@@ -38,6 +43,14 @@ fun RequirementsScreen(
     val kernelVersion by viewModel.kernelVersion.collectAsState()
     val arch by viewModel.arch.collectAsState()
     val androidVersion by viewModel.androidVersion.collectAsState()
+    val androidSdk by viewModel.androidSdk.collectAsState()
+    val deviceName by viewModel.deviceName.collectAsState()
+
+    val requiredReady =
+        rootStatus == RootStatus.Granted &&
+            termuxStatus == TermuxStatus.Installed &&
+            x11ApkStatus == X11ApkStatus.Installed &&
+            dsStatus
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -45,303 +58,305 @@ fun RequirementsScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            RequirementSection(
-                title = "Root Access",
-                icon = Icons.Default.Security,
-                checks = listOf(
-                    RequirementCheck(
-                        label = "Root Permission",
-                        status = when (rootStatus) {
-                            RootStatus.Granted -> CheckStatus.OK
-                            RootStatus.Denied -> CheckStatus.Failed
-                            RootStatus.Checking -> CheckStatus.Checking
+            DeviceOverviewCard(
+                deviceName = deviceName.ifEmpty { "Android device" },
+                androidVersion = androidVersion.ifEmpty { "Unknown" },
+                androidSdk = androidSdk.ifEmpty { "?" },
+                arch = arch.ifEmpty { "Unknown" },
+                kernel = kernelVersion.ifEmpty { "Unknown" }
+            )
+        }
+
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                border = BorderStroke(
+                    1.dp,
+                    if (requiredReady) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                    }
+                )
+            ) {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    SectionHeader(
+                        icon = Icons.Default.Security,
+                        title = "Required environment",
+                        subtitle = if (requiredReady) "Ready" else "Check the items below"
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider()
+
+                    RequirementRow(
+                        icon = Icons.Default.Security,
+                        label = "Root Access",
+                        value = when (rootStatus) {
+                            RootStatus.Granted -> rootProvider.ifEmpty { "Granted" }
+                            RootStatus.Denied -> "Denied"
+                            RootStatus.Checking -> "Checking..."
                         },
                         detail = when (rootStatus) {
-                            RootStatus.Granted -> "Granted"
-                            RootStatus.Denied -> "Denied — grant in KernelSU/Magisk"
-                            RootStatus.Checking -> "Checking..."
-                        }
-                    ),
-                    RequirementCheck(
-                        label = "Root Provider",
-                        status = if (rootProvider.isNotEmpty() && rootStatus == RootStatus.Granted) CheckStatus.OK else CheckStatus.Failed,
-                        detail = if (rootProvider.isNotEmpty()) rootProvider else "Unknown"
-                    )
-                )
-            )
-        }
-
-        item {
-            RequirementSection(
-                title = "DroidSpaces",
-                icon = Icons.Default.Computer,
-                checks = listOf(
-                    RequirementCheck(
-                        label = "DroidSpaces Binary",
-                        status = if (dsStatus) CheckStatus.OK else CheckStatus.Failed,
-                        detail = Constants.DS_BINARY_PATH,
-                        extraInfo = if (dsStatus) "Backend available" else "Binary not found"
-                    )
-                )
-            )
-        }
-
-        item {
-            RequirementSection(
-                title = "Termux Environment",
-                icon = Icons.Default.Terminal,
-                checks = listOf(
-                    RequirementCheck(
-                        label = "Termux App",
-                        status = when (termuxStatus) {
-                            TermuxStatus.Installed -> CheckStatus.OK
-                            TermuxStatus.NotInstalled -> CheckStatus.Failed
-                            TermuxStatus.Checking -> CheckStatus.Checking
+                            RootStatus.Granted -> "Root permission granted"
+                            RootStatus.Denied -> "Grant root access to continue"
+                            RootStatus.Checking -> null
                         },
-                        detail = when (termuxStatus) {
-                            TermuxStatus.Installed -> Constants.TERMUX_PACKAGE
+                        state = when (rootStatus) {
+                            RootStatus.Granted -> RowState.OK
+                            RootStatus.Denied -> RowState.ERROR
+                            RootStatus.Checking -> RowState.INFO
+                        }
+                    )
+
+                    RequirementRow(
+                        icon = Icons.Default.Computer,
+                        label = "DroidSpaces",
+                        value = if (dsStatus) "Available" else "Not found",
+                        detail = Constants.DS_BINARY_PATH,
+                        state = if (dsStatus) RowState.OK else RowState.ERROR
+                    )
+
+                    RequirementRow(
+                        icon = Icons.Default.Terminal,
+                        label = "Termux",
+                        value = when (termuxStatus) {
+                            TermuxStatus.Installed -> "Installed"
                             TermuxStatus.NotInstalled -> "Not installed"
                             TermuxStatus.Checking -> "Checking..."
-                        }
-                    ),
-                    RequirementCheck(
-                        label = "Termux:X11",
-                        status = when (x11ApkStatus) {
-                            X11ApkStatus.Installed -> CheckStatus.OK
-                            X11ApkStatus.NotInstalled -> CheckStatus.Failed
-                            X11ApkStatus.Checking -> CheckStatus.Checking
                         },
-                        detail = when (x11ApkStatus) {
-                            X11ApkStatus.Installed -> Constants.TERMUX_X11_PACKAGE
+                        detail = Constants.TERMUX_PACKAGE,
+                        state = when (termuxStatus) {
+                            TermuxStatus.Installed -> RowState.OK
+                            TermuxStatus.NotInstalled -> RowState.ERROR
+                            TermuxStatus.Checking -> RowState.INFO
+                        }
+                    )
+
+                    RequirementRow(
+                        icon = Icons.Default.DisplaySettings,
+                        label = "Termux:X11",
+                        value = when (x11ApkStatus) {
+                            X11ApkStatus.Installed -> "Installed"
                             X11ApkStatus.NotInstalled -> "Not installed"
                             X11ApkStatus.Checking -> "Checking..."
-                        }
-                    )
-                )
-            )
-        }
-
-        item {
-            RequirementSection(
-                title = "X11 Server",
-                icon = Icons.Default.DisplaySettings,
-                checks = listOf(
-                    RequirementCheck(
-                        label = "Loader Process",
-                        status = when (loaderStatus) {
-                            LoaderStatus.Running -> CheckStatus.OK
-                            LoaderStatus.Stopped -> CheckStatus.Warning
                         },
-                        detail = when (loaderStatus) {
-                            LoaderStatus.Running -> "Running (PID: ${loaderPid ?: "?"})"
-                            LoaderStatus.Stopped -> "Stopped"
+                        detail = Constants.TERMUX_X11_PACKAGE,
+                        state = when (x11ApkStatus) {
+                            X11ApkStatus.Installed -> RowState.OK
+                            X11ApkStatus.NotInstalled -> RowState.ERROR
+                            X11ApkStatus.Checking -> RowState.INFO
                         }
-                    ),
-                    RequirementCheck(
-                        label = "Loader APK",
-                        status = CheckStatus.Info,
-                        detail = Constants.LOADER_APK
-                    ),
-                    RequirementCheck(
-                        label = "Socket Path",
-                        status = CheckStatus.Info,
-                        detail = Constants.X11_SOCK_FILE
                     )
-                )
-            )
+                }
+            }
         }
 
         item {
-            RequirementSection(
-                title = "Device Information",
-                icon = Icons.Default.PhoneAndroid,
-                checks = listOf(
-                    RequirementCheck(
-                        label = "Android Version",
-                        status = CheckStatus.Info,
-                        detail = androidVersion.ifEmpty { "Unknown" }
-                    ),
-                    RequirementCheck(
-                        label = "Architecture",
-                        status = CheckStatus.Info,
-                        detail = arch.ifEmpty { "Unknown" }
-                    ),
-                    RequirementCheck(
-                        label = "Kernel",
-                        status = CheckStatus.Info,
-                        detail = kernelVersion.ifEmpty { "Unknown" }
-                    )
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                border = BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
                 )
+            ) {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    SectionHeader(
+                        icon = Icons.Default.DisplaySettings,
+                        title = "X11 runtime",
+                        subtitle = "Current host-side Termux:X11 state"
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider()
+
+                    RequirementRow(
+                        icon = Icons.Default.DisplaySettings,
+                        label = "Loader",
+                        value = when (loaderStatus) {
+                            LoaderStatus.Running -> "Running"
+                            LoaderStatus.Stopped -> "Stopped"
+                        },
+                        detail = if (loaderPid != null) "PID $loaderPid" else "Starts when X11 is launched",
+                        state = when (loaderStatus) {
+                            LoaderStatus.Running -> RowState.OK
+                            LoaderStatus.Stopped -> RowState.WARNING
+                        }
+                    )
+
+                    RequirementRow(
+                        icon = Icons.Default.Info,
+                        label = "X11 Socket",
+                        value = Constants.X11_SOCK_FILE,
+                        detail = "Termux:X11 display :0 socket",
+                        state = RowState.INFO
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeviceOverviewCard(
+    deviceName: String,
+    androidVersion: String,
+    androidSdk: String,
+    arch: String,
+    kernel: String
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Icon(
+                    Icons.Default.PhoneAndroid,
+                    contentDescription = null,
+                    modifier = Modifier.size(30.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Column {
+                    Text(
+                        deviceName,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Android $androidVersion · SDK $androidSdk",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+            DeviceInfoRow("Architecture", arch)
+            DeviceInfoRow("Kernel", kernel)
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(
+    icon: ImageVector,
+    title: String,
+    subtitle: String
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(24.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Column {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
 }
 
-enum class CheckStatus { OK, Failed, Warning, Checking, Info }
-
-data class RequirementCheck(
-    val label: String,
-    val status: CheckStatus,
-    val detail: String? = null,
-    val extraInfo: String? = null
-)
+private enum class RowState { OK, ERROR, WARNING, INFO }
 
 @Composable
-private fun RequirementSection(
-    title: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    checks: List<RequirementCheck>
+private fun RequirementRow(
+    icon: ImageVector,
+    label: String,
+    value: String,
+    detail: String?,
+    state: RowState
 ) {
-    var expanded by remember { mutableStateOf(true) }
-
-    val failedCount = checks.count { it.status == CheckStatus.Failed }
-    val okCount = checks.count { it.status == CheckStatus.OK }
-    val sectionOk = failedCount == 0 && okCount > 0
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize(),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        border = BorderStroke(
-            1.dp,
-            if (sectionOk) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-        )
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { expanded = !expanded }
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Icon(
-                        icon,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp),
-                        tint = if (sectionOk) MaterialTheme.colorScheme.primary
-                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    )
-                    Column {
-                        Text(
-                            title,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        if (!sectionOk && failedCount > 0) {
-                            Text(
-                                "$failedCount issue(s) found",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
-                }
-
-                Icon(
-                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
+            if (!detail.isNullOrEmpty()) {
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
-            AnimatedVisibility(
-                visible = expanded,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
-            ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    HorizontalDivider(
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                        thickness = 0.5.dp
-                    )
-                    checks.forEach { check ->
-                        CheckRow(check)
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-            }
         }
-    }
-}
-
-@Composable
-private fun CheckRow(check: RequirementCheck) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        Column(horizontalAlignment = Alignment.End) {
             Icon(
-                when (check.status) {
-                    CheckStatus.OK -> Icons.Default.CheckCircle
-                    CheckStatus.Failed -> Icons.Default.Cancel
-                    CheckStatus.Warning -> Icons.Default.Warning
-                    CheckStatus.Checking -> Icons.Default.Sync
-                    CheckStatus.Info -> Icons.Default.Info
+                imageVector = when (state) {
+                    RowState.OK -> Icons.Default.CheckCircle
+                    RowState.ERROR -> Icons.Default.Cancel
+                    RowState.WARNING -> Icons.Default.Warning
+                    RowState.INFO -> Icons.Default.Info
                 },
                 contentDescription = null,
                 modifier = Modifier.size(18.dp),
-                tint = when (check.status) {
-                    CheckStatus.OK -> MaterialTheme.colorScheme.primary
-                    CheckStatus.Failed -> MaterialTheme.colorScheme.error
-                    CheckStatus.Warning -> MaterialTheme.colorScheme.tertiary
-                    CheckStatus.Checking -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    CheckStatus.Info -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                tint = when (state) {
+                    RowState.OK -> MaterialTheme.colorScheme.primary
+                    RowState.ERROR -> MaterialTheme.colorScheme.error
+                    RowState.WARNING -> MaterialTheme.colorScheme.tertiary
+                    RowState.INFO -> MaterialTheme.colorScheme.onSurfaceVariant
                 }
             )
-            Column {
-                Text(
-                    check.label,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium
-                )
-                if (check.detail != null) {
-                    Text(
-                        check.detail,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    )
-                }
-                if (check.extraInfo != null) {
-                    Text(
-                        check.extraInfo,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = when (check.status) {
-                            CheckStatus.OK -> MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
-                            CheckStatus.Failed -> MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                        }
-                    )
-                }
-            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
+    }
+}
 
-        when (check.status) {
-            CheckStatus.Checking -> CircularProgressIndicator(
-                modifier = Modifier.size(16.dp),
-                strokeWidth = 2.dp
-            )
-            else -> {}
-        }
+@Composable
+private fun DeviceInfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium
+        )
     }
 }
