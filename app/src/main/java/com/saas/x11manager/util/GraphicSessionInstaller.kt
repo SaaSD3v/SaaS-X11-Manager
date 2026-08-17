@@ -4,6 +4,7 @@ import android.util.Log
 import com.topjohnwu.superuser.CallbackList
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -13,9 +14,10 @@ internal data class GraphicSessionInstallStep(
 )
 
 /**
- * Installs and provisions a graphical session inside an already-running container.
- * The selected session is configured for the user-selected init backend, but it
- * is never launched by this installer; the init service launches it on boot.
+ * Installs and provisions a graphical session inside a container.
+ * A stopped container is started on demand and must accept commands before
+ * package installation begins. This installer never starts the X11 Loader or
+ * launches the graphical session itself.
  */
 object GraphicSessionInstaller {
 
@@ -210,15 +212,9 @@ object GraphicSessionInstaller {
             return@withContext false
         }
 
-        logger?.i("[+] Checking container runtime")
-        val (runtimeStatus, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
-        if (runtimeStatus != ContainerStatus.RUNNING) {
-            logger?.e("[-] FAIL")
-            logger?.e("[-] Container must be running before installing ${session.label}")
+        if (!ensureContainerReady(containerName, logger)) {
             return@withContext false
         }
-        logger?.i("[+] OK")
-        logger?.i("")
 
         for (step in installSteps) {
             if (!runStep(containerName, step, logger)) {
@@ -267,6 +263,87 @@ object GraphicSessionInstaller {
         logger?.i("")
         logger?.i("[+] ${session.label} setup completed")
         true
+    }
+
+    private suspend fun ensureContainerReady(
+        containerName: String,
+        logger: ContainerLogger?
+    ): Boolean {
+        logger?.i("[+] Checking container runtime")
+        val (initialStatus, initialPid) = ContainerManager.getContainerRuntimeStatePublic(containerName)
+
+        when (initialStatus) {
+            ContainerStatus.RUNNING -> {
+                logger?.i("[+] Container already running${if (initialPid != null) " (PID=$initialPid)" else ""}")
+            }
+
+            ContainerStatus.STOPPED -> {
+                logger?.i("[*] Container is stopped; starting it for installation...")
+                val started = ContainerManager.startContainer(containerName, logger)
+                if (!started) {
+                    val (statusAfterStart, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
+                    if (statusAfterStart == ContainerStatus.STOPPED) {
+                        logger?.e("[-] FAIL")
+                        logger?.e("[-] Could not start container for installation")
+                        return false
+                    }
+                    logger?.w("[!] Start command was inconclusive; checking command readiness")
+                }
+            }
+
+            ContainerStatus.UNKNOWN -> {
+                if (probeContainerCommandReady(containerName)) {
+                    logger?.i("[+] Container command channel already ready")
+                    logger?.i("")
+                    return true
+                }
+
+                logger?.w("[!] Container runtime status is unknown; requesting start before installation")
+                val started = ContainerManager.startContainer(containerName, logger)
+                if (!started) {
+                    logger?.w("[!] Start command was inconclusive; checking command readiness")
+                }
+            }
+        }
+
+        logger?.i("[*] Waiting for container command readiness (15s)...")
+        if (!waitForContainerCommandReady(containerName)) {
+            logger?.e("[-] FAIL")
+            logger?.e("[-] Container did not become ready for installation commands")
+            return false
+        }
+
+        val (_, pid) = ContainerManager.getContainerRuntimeStatePublic(containerName)
+        logger?.i("[+] Container command channel ready${if (pid != null) " (PID=$pid)" else ""}")
+        logger?.i("[+] OK")
+        logger?.i("")
+        return true
+    }
+
+    private suspend fun waitForContainerCommandReady(
+        containerName: String,
+        timeoutMillis: Long = 15_000L,
+        pollIntervalMillis: Long = 1_000L
+    ): Boolean {
+        val deadline = System.nanoTime() + timeoutMillis * 1_000_000L
+        while (true) {
+            if (probeContainerCommandReady(containerName)) return true
+            if (System.nanoTime() >= deadline) return false
+            delay(pollIntervalMillis)
+        }
+    }
+
+    private fun probeContainerCommandReady(containerName: String): Boolean {
+        val marker = "__SAAS_INSTALL_READY__"
+        val hostCommand =
+            "${Constants.DS_BINARY_PATH} --name=${shellQuote(containerName)} run " +
+                shellQuote("echo $marker") + " 2>/dev/null"
+        return try {
+            val result = Shell.cmd(hostCommand).exec()
+            result.isSuccess && result.out.any { it.contains(marker) }
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private suspend fun runStep(
