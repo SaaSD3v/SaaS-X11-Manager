@@ -26,6 +26,7 @@ import com.saas.x11manager.util.ContainerPlatform
 import com.saas.x11manager.util.ContainerStatus
 import com.saas.x11manager.util.GraphicSession
 import com.saas.x11manager.util.GraphicSessionInstallPlans
+import com.saas.x11manager.util.GraphicSessionSupport
 import com.saas.x11manager.util.InitSystem
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,18 +46,12 @@ fun EditContainerScreen(
     val status = viewModel.status
     val initSystem = viewModel.initSystem
     val graphicSession = viewModel.graphicSession
-    val openboxInstalled = viewModel.openboxInstalled
-    val icewmInstalled = viewModel.icewmInstalled
-    val jwmInstalled = viewModel.jwmInstalled
     val logs = viewModel.logs
     val isSaving = viewModel.isSaving
     val saveError = viewModel.saveError
     val isInstalling = viewModel.isInstallingSession
     val installResult = viewModel.installResult
     val installResultSession = viewModel.installResultSession
-    var openboxExpanded by rememberSaveable(containerName) { mutableStateOf(false) }
-    var icewmExpanded by rememberSaveable(containerName) { mutableStateOf(false) }
-    var jwmExpanded by rememberSaveable(containerName) { mutableStateOf(false) }
 
     fun sessionVisibleForSelectedInit(session: GraphicSession): Boolean {
         val packagePlatform = when (initSystem) {
@@ -208,307 +203,30 @@ fun EditContainerScreen(
                     )
                     Spacer(Modifier.height(12.dp))
 
-                    if (sessionVisibleForSelectedInit(GraphicSession.OPENBOX)) {
-                        val openboxSelected = graphicSession == GraphicSession.OPENBOX
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(enabled = !isInstalling) { openboxExpanded = !openboxExpanded },
-                            shape = RoundedCornerShape(14.dp),
-                            color = if (openboxSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                            else MaterialTheme.colorScheme.surfaceContainerHigh,
-                            border = BorderStroke(
-                                1.dp,
-                                if (openboxSelected) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                            )
-                        ) {
-                            Row(
-                                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                RadioButton(
-                                    selected = openboxSelected,
-                                    onClick = {
-                                        if (openboxInstalled && !isInstalling && !isSaving) viewModel.toggleOpenboxSelection()
-                                    },
-                                    enabled = openboxInstalled && !isInstalling && !isSaving,
-                                    colors = RadioButtonDefaults.colors(
-                                        selectedColor = MaterialTheme.colorScheme.primary,
-                                        unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                )
-                                Spacer(Modifier.width(10.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text("Openbox", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
-                                    Text(
-                                        when {
-                                            openboxInstalled && openboxSelected -> "Installed · Selected"
-                                            openboxInstalled -> "Installed · Not selected"
-                                            else -> "Not installed"
-                                        },
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontSize = 10.sp
-                                    )
-                                }
-                                Text(if (openboxExpanded) "▲" else "▼", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                            }
-                        }
-
-                        if (openboxExpanded) {
-                            Spacer(Modifier.height(10.dp))
-                            Text(
-                                if (openboxInstalled) {
-                                    "Openbox can be verified, reinstalled, selected or deselected without uninstalling its packages."
-                                } else {
-                                    "Install Openbox and its minimal terminal/font packages. Installation logs stream in real time."
-                                },
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 10.sp
-                            )
-                            Spacer(Modifier.height(10.dp))
-
-                            if (openboxInstalled) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedButton(
-                                        onClick = { viewModel.verifyOpenbox() },
-                                        modifier = Modifier.weight(1f).height(44.dp),
-                                        enabled = !isInstalling && !isSaving && name.isNotEmpty(),
-                                        shape = RoundedCornerShape(14.dp)
-                                    ) { Text("Verify") }
-                                    Button(
-                                        onClick = { viewModel.installOpenbox() },
-                                        modifier = Modifier.weight(1f).height(44.dp),
-                                        enabled = !isInstalling && !isSaving && name.isNotEmpty(),
-                                        shape = RoundedCornerShape(14.dp)
-                                    ) { Text("Reinstall") }
-                                }
-                            } else {
-                                Button(
-                                    onClick = { viewModel.installOpenbox() },
-                                    modifier = Modifier.fillMaxWidth().height(44.dp),
-                                    enabled = !isInstalling && !isSaving && name.isNotEmpty(),
-                                    shape = RoundedCornerShape(14.dp)
-                                ) { Text("Install") }
-                            }
-
-                            if (installResult != null && installResultSession == GraphicSession.OPENBOX) {
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    installResult,
-                                    color = when {
-                                        installResult.startsWith("OK") -> MaterialTheme.colorScheme.primary
-                                        installResult.startsWith("Warning") -> MaterialTheme.colorScheme.tertiary
-                                        else -> MaterialTheme.colorScheme.error
-                                    },
-                                    fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                        }
+                    val visibleSessions = GraphicSessionSupport.installableSessions.filter {
+                        sessionVisibleForSelectedInit(it)
                     }
 
-                    if (sessionVisibleForSelectedInit(GraphicSession.OPENBOX) && sessionVisibleForSelectedInit(GraphicSession.ICEWM)) {
-                        Spacer(Modifier.height(10.dp))
-                    }
-
-                    if (sessionVisibleForSelectedInit(GraphicSession.ICEWM)) {
-                        val icewmSelected = graphicSession == GraphicSession.ICEWM
-                        Surface(
-                            modifier = Modifier.fillMaxWidth().clickable(enabled = !isInstalling) { icewmExpanded = !icewmExpanded },
-                            shape = RoundedCornerShape(14.dp),
-                            color = if (icewmSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                            else MaterialTheme.colorScheme.surfaceContainerHigh,
-                            border = BorderStroke(
-                                1.dp,
-                                if (icewmSelected) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                    visibleSessions.forEachIndexed { index, session ->
+                        key(session) {
+                            if (index > 0) Spacer(Modifier.height(10.dp))
+                            var expanded by rememberSaveable(containerName, session.name) {
+                                mutableStateOf(false)
+                            }
+                            GraphicSessionCard(
+                                session = session,
+                                installed = viewModel.isSessionInstalled(session),
+                                selected = graphicSession == session,
+                                expanded = expanded,
+                                isInstalling = isInstalling,
+                                isSaving = isSaving,
+                                nameAvailable = name.isNotEmpty(),
+                                result = if (installResultSession == session) installResult else null,
+                                onToggleExpanded = { expanded = !expanded },
+                                onToggleSelection = { viewModel.toggleSessionSelection(session) },
+                                onInstall = { viewModel.installSession(session) },
+                                onVerify = { viewModel.verifySession(session) }
                             )
-                        ) {
-                            Row(
-                                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                RadioButton(
-                                    selected = icewmSelected,
-                                    onClick = {
-                                        if (icewmInstalled && !isInstalling && !isSaving) viewModel.toggleIcewmSelection()
-                                    },
-                                    enabled = icewmInstalled && !isInstalling && !isSaving,
-                                    colors = RadioButtonDefaults.colors(
-                                        selectedColor = MaterialTheme.colorScheme.primary,
-                                        unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                )
-                                Spacer(Modifier.width(10.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text("IceWM", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
-                                    Text(
-                                        when {
-                                            icewmInstalled && icewmSelected -> "Installed · Selected"
-                                            icewmInstalled -> "Installed · Not selected"
-                                            else -> "Not installed"
-                                        },
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontSize = 10.sp
-                                    )
-                                }
-                                Text(if (icewmExpanded) "▲" else "▼", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                            }
-                        }
-
-                        if (icewmExpanded) {
-                            Spacer(Modifier.height(10.dp))
-                            Text(
-                                if (icewmInstalled) {
-                                    "IceWM can be verified, reinstalled, selected or deselected without uninstalling its packages."
-                                } else {
-                                    "Install IceWM and a minimal X11 terminal. Installation logs stream in real time."
-                                },
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 10.sp
-                            )
-                            Spacer(Modifier.height(10.dp))
-
-                            if (icewmInstalled) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedButton(
-                                        onClick = { viewModel.verifyIcewm() },
-                                        modifier = Modifier.weight(1f).height(44.dp),
-                                        enabled = !isInstalling && !isSaving && name.isNotEmpty(),
-                                        shape = RoundedCornerShape(14.dp)
-                                    ) { Text("Verify") }
-                                    Button(
-                                        onClick = { viewModel.installIcewm() },
-                                        modifier = Modifier.weight(1f).height(44.dp),
-                                        enabled = !isInstalling && !isSaving && name.isNotEmpty(),
-                                        shape = RoundedCornerShape(14.dp)
-                                    ) { Text("Reinstall") }
-                                }
-                            } else {
-                                Button(
-                                    onClick = { viewModel.installIcewm() },
-                                    modifier = Modifier.fillMaxWidth().height(44.dp),
-                                    enabled = !isInstalling && !isSaving && name.isNotEmpty(),
-                                    shape = RoundedCornerShape(14.dp)
-                                ) { Text("Install") }
-                            }
-
-                            if (installResult != null && installResultSession == GraphicSession.ICEWM) {
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    installResult,
-                                    color = when {
-                                        installResult.startsWith("OK") -> MaterialTheme.colorScheme.primary
-                                        installResult.startsWith("Warning") -> MaterialTheme.colorScheme.tertiary
-                                        else -> MaterialTheme.colorScheme.error
-                                    },
-                                    fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                        }
-                    }
-
-                    if (sessionVisibleForSelectedInit(GraphicSession.ICEWM) && sessionVisibleForSelectedInit(GraphicSession.JWM)) {
-                        Spacer(Modifier.height(10.dp))
-                    }
-
-                    if (sessionVisibleForSelectedInit(GraphicSession.JWM)) {
-                        val jwmSelected = graphicSession == GraphicSession.JWM
-                        Surface(
-                            modifier = Modifier.fillMaxWidth().clickable(enabled = !isInstalling) { jwmExpanded = !jwmExpanded },
-                            shape = RoundedCornerShape(14.dp),
-                            color = if (jwmSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                            else MaterialTheme.colorScheme.surfaceContainerHigh,
-                            border = BorderStroke(
-                                1.dp,
-                                if (jwmSelected) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                            )
-                        ) {
-                            Row(
-                                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                RadioButton(
-                                    selected = jwmSelected,
-                                    onClick = {
-                                        if (jwmInstalled && !isInstalling && !isSaving) viewModel.toggleJwmSelection()
-                                    },
-                                    enabled = jwmInstalled && !isInstalling && !isSaving,
-                                    colors = RadioButtonDefaults.colors(
-                                        selectedColor = MaterialTheme.colorScheme.primary,
-                                        unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                )
-                                Spacer(Modifier.width(10.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text("JWM", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
-                                    Text(
-                                        when {
-                                            jwmInstalled && jwmSelected -> "Installed · Selected"
-                                            jwmInstalled -> "Installed · Not selected"
-                                            else -> "Not installed"
-                                        },
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontSize = 10.sp
-                                    )
-                                }
-                                Text(if (jwmExpanded) "▲" else "▼", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                            }
-                        }
-
-                        if (jwmExpanded) {
-                            Spacer(Modifier.height(10.dp))
-                            Text(
-                                if (jwmInstalled) {
-                                    "JWM can be verified, reinstalled, selected or deselected without uninstalling its packages."
-                                } else {
-                                    "Install JWM and a minimal X11 terminal. The packaged JWM configuration is validated without overwriting user files."
-                                },
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 10.sp
-                            )
-                            Spacer(Modifier.height(10.dp))
-
-                            if (jwmInstalled) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedButton(
-                                        onClick = { viewModel.verifyJwm() },
-                                        modifier = Modifier.weight(1f).height(44.dp),
-                                        enabled = !isInstalling && !isSaving && name.isNotEmpty(),
-                                        shape = RoundedCornerShape(14.dp)
-                                    ) { Text("Verify") }
-                                    Button(
-                                        onClick = { viewModel.installJwm() },
-                                        modifier = Modifier.weight(1f).height(44.dp),
-                                        enabled = !isInstalling && !isSaving && name.isNotEmpty(),
-                                        shape = RoundedCornerShape(14.dp)
-                                    ) { Text("Reinstall") }
-                                }
-                            } else {
-                                Button(
-                                    onClick = { viewModel.installJwm() },
-                                    modifier = Modifier.fillMaxWidth().height(44.dp),
-                                    enabled = !isInstalling && !isSaving && name.isNotEmpty(),
-                                    shape = RoundedCornerShape(14.dp)
-                                ) { Text("Install") }
-                            }
-
-                            if (installResult != null && installResultSession == GraphicSession.JWM) {
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    installResult,
-                                    color = when {
-                                        installResult.startsWith("OK") -> MaterialTheme.colorScheme.primary
-                                        installResult.startsWith("Warning") -> MaterialTheme.colorScheme.tertiary
-                                        else -> MaterialTheme.colorScheme.error
-                                    },
-                                    fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
                         }
                     }
                 }
@@ -609,6 +327,135 @@ fun EditContainerScreen(
             }
 
             Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun GraphicSessionCard(
+    session: GraphicSession,
+    installed: Boolean,
+    selected: Boolean,
+    expanded: Boolean,
+    isInstalling: Boolean,
+    isSaving: Boolean,
+    nameAvailable: Boolean,
+    result: String?,
+    onToggleExpanded: () -> Unit,
+    onToggleSelection: () -> Unit,
+    onInstall: () -> Unit,
+    onVerify: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = !isInstalling) { onToggleExpanded() },
+        shape = RoundedCornerShape(14.dp),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        border = BorderStroke(
+            1.dp,
+            if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+        )
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RadioButton(
+                selected = selected,
+                onClick = {
+                    if (installed && !isInstalling && !isSaving) onToggleSelection()
+                },
+                enabled = installed && !isInstalling && !isSaving,
+                colors = RadioButtonDefaults.colors(
+                    selectedColor = MaterialTheme.colorScheme.primary,
+                    unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(session.label, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+                Text(
+                    when {
+                        installed && selected -> "Installed · Selected"
+                        installed -> "Installed · Not selected"
+                        else -> "Not installed"
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 10.sp
+                )
+            }
+            Text(
+                if (expanded) "▲" else "▼",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp
+            )
+        }
+    }
+
+    if (expanded) {
+        Spacer(Modifier.height(10.dp))
+        Text(
+            if (installed) {
+                "${session.label} can be verified, reinstalled, selected or deselected without uninstalling its packages."
+            } else {
+                "Install ${session.label} and its required X11 session packages. Installation logs stream in real time."
+            },
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 10.sp
+        )
+        Spacer(Modifier.height(10.dp))
+
+        if (installed) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onVerify,
+                    modifier = Modifier.weight(1f).height(44.dp),
+                    enabled = !isInstalling && !isSaving && nameAvailable,
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("Verify")
+                }
+                Button(
+                    onClick = onInstall,
+                    modifier = Modifier.weight(1f).height(44.dp),
+                    enabled = !isInstalling && !isSaving && nameAvailable,
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("Reinstall")
+                }
+            }
+        } else {
+            Button(
+                onClick = onInstall,
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+                enabled = !isInstalling && !isSaving && nameAvailable,
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text("Install")
+            }
+        }
+
+        if (result != null) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                result,
+                color = when {
+                    result.startsWith("OK") -> MaterialTheme.colorScheme.primary
+                    result.startsWith("Warning") -> MaterialTheme.colorScheme.tertiary
+                    else -> MaterialTheme.colorScheme.error
+                },
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace
+            )
         }
     }
 }

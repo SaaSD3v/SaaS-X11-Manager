@@ -61,14 +61,9 @@ object ContainerSettingsManager {
     )
 
     fun getGraphicSession(containerName: String): GraphicSession? {
-        return when (readValue(containerName, GRAPHIC_SESSION_KEY)?.lowercase()) {
-            "xfce" -> GraphicSession.XFCE
-            "lxqt" -> GraphicSession.LXQT
-            "openbox" -> GraphicSession.OPENBOX
-            "icewm" -> GraphicSession.ICEWM
-            "jwm" -> GraphicSession.JWM
-            "none" -> GraphicSession.NONE
-            else -> null
+        val saved = readValue(containerName, GRAPHIC_SESSION_KEY) ?: return null
+        return GraphicSession.entries.firstOrNull {
+            it.name.equals(saved.trim(), ignoreCase = true)
         }
     }
 

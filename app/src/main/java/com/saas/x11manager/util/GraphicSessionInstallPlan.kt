@@ -25,151 +25,63 @@ data class GraphicSessionInstallPlan(
  */
 object GraphicSessionInstallPlans {
 
+    private fun apt(
+        session: GraphicSession,
+        packages: List<String>
+    ) = GraphicSessionInstallPlan(
+        platform = ContainerPlatform.UBUNTU,
+        session = session,
+        repositoryRequirement = RepositoryRequirement.APT_UNIVERSE,
+        packages = packages,
+        verificationCommand = session.startCommand,
+        installRecommendedPackages = false
+    )
+
+    private fun apk(
+        session: GraphicSession,
+        packages: List<String>
+    ) = GraphicSessionInstallPlan(
+        platform = ContainerPlatform.ALPINE,
+        session = session,
+        repositoryRequirement = RepositoryRequirement.APK_COMMUNITY,
+        packages = packages,
+        verificationCommand = session.startCommand,
+        installRecommendedPackages = true
+    )
+
+    private val plans = listOf(
+        apt(
+            GraphicSession.XFCE,
+            listOf(
+                "dbus-x11",
+                "libxfce4ui-utils",
+                "thunar",
+                "xfce4-appfinder",
+                "xfce4-panel",
+                "xfce4-session",
+                "xfce4-settings",
+                "xfconf",
+                "xfdesktop4",
+                "xfwm4",
+                "xfce4-terminal"
+            )
+        ),
+        apk(GraphicSession.XFCE, listOf("dbus", "dbus-x11", "xfce4", "xfce4-terminal")),
+        apt(GraphicSession.LXQT, listOf("dbus-x11", "lxqt-core", "openbox")),
+        apk(GraphicSession.LXQT, listOf("dbus", "dbus-x11", "lxqt-desktop")),
+        apt(GraphicSession.OPENBOX, listOf("openbox", "xterm", "fonts-terminus")),
+        apk(GraphicSession.OPENBOX, listOf("openbox", "xterm", "font-terminus")),
+        apt(GraphicSession.ICEWM, listOf("icewm", "xterm")),
+        apk(GraphicSession.ICEWM, listOf("icewm", "xterm")),
+        apt(GraphicSession.JWM, listOf("jwm", "xterm")),
+        apk(GraphicSession.JWM, listOf("jwm", "xterm")),
+        apt(GraphicSession.FLUXBOX, listOf("fluxbox", "xterm")),
+        apk(GraphicSession.FLUXBOX, listOf("fluxbox", "xterm"))
+    )
+
     fun forSelection(
         platform: ContainerPlatform,
         session: GraphicSession
-    ): GraphicSessionInstallPlan? = when (platform) {
-        ContainerPlatform.UBUNTU -> when (session) {
-            GraphicSession.XFCE -> GraphicSessionInstallPlan(
-                platform = platform,
-                session = session,
-                repositoryRequirement = RepositoryRequirement.APT_UNIVERSE,
-                packages = listOf(
-                    "dbus-x11",
-                    "libxfce4ui-utils",
-                    "thunar",
-                    "xfce4-appfinder",
-                    "xfce4-panel",
-                    "xfce4-session",
-                    "xfce4-settings",
-                    "xfconf",
-                    "xfdesktop4",
-                    "xfwm4",
-                    "xfce4-terminal"
-                ),
-                verificationCommand = "startxfce4",
-                installRecommendedPackages = false
-            )
-
-            GraphicSession.LXQT -> GraphicSessionInstallPlan(
-                platform = platform,
-                session = session,
-                repositoryRequirement = RepositoryRequirement.APT_UNIVERSE,
-                packages = listOf(
-                    "dbus-x11",
-                    "lxqt-core",
-                    "openbox"
-                ),
-                verificationCommand = "startlxqt",
-                installRecommendedPackages = false
-            )
-
-            GraphicSession.OPENBOX -> GraphicSessionInstallPlan(
-                platform = platform,
-                session = session,
-                repositoryRequirement = RepositoryRequirement.APT_UNIVERSE,
-                packages = listOf(
-                    "openbox",
-                    "xterm",
-                    "fonts-terminus"
-                ),
-                verificationCommand = "openbox-session",
-                installRecommendedPackages = false
-            )
-
-            GraphicSession.ICEWM -> GraphicSessionInstallPlan(
-                platform = platform,
-                session = session,
-                repositoryRequirement = RepositoryRequirement.APT_UNIVERSE,
-                packages = listOf(
-                    "icewm",
-                    "xterm"
-                ),
-                verificationCommand = "icewm-session",
-                installRecommendedPackages = false
-            )
-
-            GraphicSession.JWM -> GraphicSessionInstallPlan(
-                platform = platform,
-                session = session,
-                repositoryRequirement = RepositoryRequirement.APT_UNIVERSE,
-                packages = listOf(
-                    "jwm",
-                    "xterm"
-                ),
-                verificationCommand = "jwm",
-                installRecommendedPackages = false
-            )
-
-            GraphicSession.NONE -> null
-        }
-
-        ContainerPlatform.ALPINE -> when (session) {
-            GraphicSession.XFCE -> GraphicSessionInstallPlan(
-                platform = platform,
-                session = session,
-                repositoryRequirement = RepositoryRequirement.APK_COMMUNITY,
-                packages = listOf(
-                    "dbus",
-                    "dbus-x11",
-                    "xfce4",
-                    "xfce4-terminal"
-                ),
-                verificationCommand = "startxfce4",
-                installRecommendedPackages = true
-            )
-
-            GraphicSession.LXQT -> GraphicSessionInstallPlan(
-                platform = platform,
-                session = session,
-                repositoryRequirement = RepositoryRequirement.APK_COMMUNITY,
-                packages = listOf(
-                    "dbus",
-                    "dbus-x11",
-                    "lxqt-desktop"
-                ),
-                verificationCommand = "startlxqt",
-                installRecommendedPackages = true
-            )
-
-            GraphicSession.OPENBOX -> GraphicSessionInstallPlan(
-                platform = platform,
-                session = session,
-                repositoryRequirement = RepositoryRequirement.APK_COMMUNITY,
-                packages = listOf(
-                    "openbox",
-                    "xterm",
-                    "font-terminus"
-                ),
-                verificationCommand = "openbox-session",
-                installRecommendedPackages = true
-            )
-
-            GraphicSession.ICEWM -> GraphicSessionInstallPlan(
-                platform = platform,
-                session = session,
-                repositoryRequirement = RepositoryRequirement.APK_COMMUNITY,
-                packages = listOf(
-                    "icewm",
-                    "xterm"
-                ),
-                verificationCommand = "icewm-session",
-                installRecommendedPackages = true
-            )
-
-            GraphicSession.JWM -> GraphicSessionInstallPlan(
-                platform = platform,
-                session = session,
-                repositoryRequirement = RepositoryRequirement.APK_COMMUNITY,
-                packages = listOf(
-                    "jwm",
-                    "xterm"
-                ),
-                verificationCommand = "jwm",
-                installRecommendedPackages = true
-            )
-
-            GraphicSession.NONE -> null
-        }
-    }
+    ): GraphicSessionInstallPlan? =
+        plans.firstOrNull { it.platform == platform && it.session == session }
 }
