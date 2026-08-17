@@ -2,7 +2,6 @@ package com.saas.x11manager.util
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -49,11 +48,29 @@ class GraphicSessionInstallPlansTest {
     }
 
     @Test
-    fun ubuntuOpenboxInstallerIsNotEnabledYet() {
-        assertNull(GraphicSessionInstallPlans.forSelection(
+    fun debOpenboxUsesMinimalTermuxX11PackageSet() {
+        val plan = requireNotNull(GraphicSessionInstallPlans.forSelection(
             ContainerPlatform.UBUNTU,
             GraphicSession.OPENBOX
         ))
+
+        assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
+        assertEquals("openbox-session", plan.verificationCommand)
+        assertEquals(listOf("openbox", "xterm", "fonts-terminus"), plan.packages)
+        assertFalse(plan.installRecommendedPackages)
+        assertSafeAptPlan(plan)
+
+        val unnecessaryForDirectTermuxX11 = setOf(
+            "xorg",
+            "xorg-server",
+            "xinit",
+            "xauth",
+            "pulseaudio",
+            "lightdm",
+            "sddm",
+            "gdm3"
+        )
+        assertTrue(plan.packages.none { it in unnecessaryForDirectTermuxX11 })
     }
 
     @Test
@@ -108,6 +125,13 @@ class GraphicSessionInstallPlansTest {
             "pulseaudio"
         )
         assertTrue(plan.packages.none { it in unnecessaryForDirectTermuxX11 })
+    }
+
+    @Test
+    fun noDesktopSelectionHasNoInstallPlan() {
+        ContainerPlatform.entries.forEach { platform ->
+            assertTrue(GraphicSessionInstallPlans.forSelection(platform, GraphicSession.NONE) == null)
+        }
     }
 
     @Test

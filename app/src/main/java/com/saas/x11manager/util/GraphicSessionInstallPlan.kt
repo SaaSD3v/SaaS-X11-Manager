@@ -64,7 +64,19 @@ object GraphicSessionInstallPlans {
                 installRecommendedPackages = false
             )
 
-            GraphicSession.OPENBOX -> null
+            GraphicSession.OPENBOX -> GraphicSessionInstallPlan(
+                platform = platform,
+                session = session,
+                repositoryRequirement = RepositoryRequirement.APT_UNIVERSE,
+                packages = listOf(
+                    "openbox",
+                    "xterm",
+                    "fonts-terminus"
+                ),
+                verificationCommand = "openbox-session",
+                installRecommendedPackages = false
+            )
+
             GraphicSession.NONE -> null
         }
 
