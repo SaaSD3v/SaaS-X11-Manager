@@ -29,5 +29,6 @@ enum class GraphicSession(
     JWM("JWM", "jwm"),
     FLUXBOX("Fluxbox", "startfluxbox"),
     CWM("cwm", "cwm"),
+    HERBSTLUFTWM("herbstluftwm", "herbstluftwm"),
     NONE("None", "")
 }

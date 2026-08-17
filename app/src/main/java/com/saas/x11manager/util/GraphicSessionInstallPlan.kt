@@ -78,7 +78,9 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.FLUXBOX, listOf("fluxbox", "xterm")),
         apk(GraphicSession.FLUXBOX, listOf("fluxbox", "xterm")),
         apt(GraphicSession.CWM, listOf("cwm", "xterm")),
-        apk(GraphicSession.CWM, listOf("cwm", "xterm"))
+        apk(GraphicSession.CWM, listOf("cwm", "xterm")),
+        apt(GraphicSession.HERBSTLUFTWM, listOf("herbstluftwm", "xterm")),
+        apk(GraphicSession.HERBSTLUFTWM, listOf("herbstluftwm", "xterm"))
     )
 
     fun forSelection(
