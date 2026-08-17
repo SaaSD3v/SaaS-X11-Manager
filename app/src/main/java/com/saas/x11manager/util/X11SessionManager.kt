@@ -23,6 +23,16 @@ object X11SessionManager {
         .filter { it > 0 }
         .distinct()
 
+    private fun parsePsPids(lines: List<String>): List<Int> = lines
+        .mapNotNull { line ->
+            line.trim()
+                .split(Regex("\\s+"))
+                .getOrNull(1)
+                ?.toIntOrNull()
+        }
+        .filter { it > 0 }
+        .distinct()
+
     private fun getProcessPids(processName: String): List<Int> {
         return try {
             val pidof = Shell.cmd("pidof $processName 2>/dev/null").exec()
@@ -30,9 +40,9 @@ object X11SessionManager {
             if (pidofPids.isNotEmpty()) return pidofPids
 
             val ps = Shell.cmd(
-                "ps -ef 2>/dev/null | grep '$processName' | grep -v grep | awk '{print \\$2}'"
+                "ps -ef 2>/dev/null | grep '$processName' | grep -v grep"
             ).exec()
-            parsePids(ps.out)
+            parsePsPids(ps.out)
         } catch (_: Exception) {
             emptyList()
         }
