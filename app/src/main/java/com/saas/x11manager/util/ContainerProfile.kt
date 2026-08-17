@@ -81,5 +81,6 @@ enum class GraphicSession(
     SUGAR("Sugar", "saas-sugar-session"),
     BUDGIE("Budgie", "saas-budgie-session"),
     FVWM3("FVWM3", "fvwm3"),
+    TWO_BWM("2bwm", "2bwm"),
     NONE("None", "")
 }

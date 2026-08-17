@@ -147,7 +147,8 @@ object GraphicSessionInstallPlans {
         ),
         apt(GraphicSession.SUGAR, listOf("sugar-session", "dbus-x11", "xterm")),
         apt(GraphicSession.BUDGIE, listOf("budgie-session", "budgie-core", "dbus-x11", "xterm")),
-        apt(GraphicSession.FVWM3, listOf("fvwm3", "xterm"))
+        apt(GraphicSession.FVWM3, listOf("fvwm3", "xterm")),
+        apk(GraphicSession.TWO_BWM, listOf("2bwm", "xterm"))
     )
 
     fun forSelection(
