@@ -107,10 +107,7 @@ object GraphicSessionSupport {
                 )
             ),
             verificationCommands = listOf(
-                GraphicSessionProvisionCommand(
-                    "Checking dwm launcher",
-                    "command -v dwm >/dev/null"
-                )
+                GraphicSessionProvisionCommand("Checking dwm launcher", "command -v dwm >/dev/null")
             )
         ),
         GraphicSession.FLWM to GraphicSessionSupportSpec(GraphicSession.FLWM),
@@ -126,36 +123,79 @@ object GraphicSessionSupport {
         GraphicSession.MARCO to GraphicSessionSupportSpec(GraphicSession.MARCO),
         GraphicSession.METACITY to GraphicSessionSupportSpec(GraphicSession.METACITY),
         GraphicSession.XFWM4 to GraphicSessionSupportSpec(GraphicSession.XFWM4),
-        GraphicSession.KWIN_X11 to GraphicSessionSupportSpec(
+        GraphicSession.KWIN_X11 to dbusWrappedSpec(
             session = GraphicSession.KWIN_X11,
-            postInstallCommands = listOf(
-                GraphicSessionProvisionCommand(
-                    "Creating KWin X11 session launcher",
-                    "printf '%s\n' '#!/bin/sh' 'exec dbus-run-session -- kwin_x11' > /usr/local/bin/saas-kwin-x11-session && chmod 755 /usr/local/bin/saas-kwin-x11-session"
-                )
-            ),
-            verificationCommands = listOf(
-                GraphicSessionProvisionCommand(
-                    "Checking KWin X11 executable",
-                    "command -v kwin_x11 >/dev/null && command -v dbus-run-session >/dev/null"
-                )
-            )
+            executable = "kwin_x11",
+            wrapper = "saas-kwin-x11-session"
         ),
-        GraphicSession.ENLIGHTENMENT to GraphicSessionSupportSpec(
+        GraphicSession.ENLIGHTENMENT to dbusWrappedSpec(
             session = GraphicSession.ENLIGHTENMENT,
+            executable = "enlightenment_start",
+            wrapper = "saas-enlightenment-session"
+        ),
+        GraphicSession.BSPWM to GraphicSessionSupportSpec(
+            session = GraphicSession.BSPWM,
             postInstallCommands = listOf(
                 GraphicSessionProvisionCommand(
-                    "Creating Enlightenment session launcher",
-                    "printf '%s\n' '#!/bin/sh' 'exec dbus-run-session -- enlightenment_start' > /usr/local/bin/saas-enlightenment-session && chmod 755 /usr/local/bin/saas-enlightenment-session"
+                    "Preparing bspwm configuration",
+                    "mkdir -p /root/.config/bspwm /root/.config/sxhkd && " +
+                        "([ -f /root/.config/bspwm/bspwmrc ] || cp /usr/share/doc/bspwm/examples/bspwmrc /root/.config/bspwm/bspwmrc) && " +
+                        "([ -f /root/.config/sxhkd/sxhkdrc ] || cp /usr/share/doc/bspwm/examples/sxhkdrc /root/.config/sxhkd/sxhkdrc) && " +
+                        "chmod 755 /root/.config/bspwm/bspwmrc"
+                ),
+                GraphicSessionProvisionCommand(
+                    "Creating bspwm session launcher",
+                    "printf '%s\\n' '#!/bin/sh' 'sxhkd >/tmp/saas-sxhkd.log 2>&1 &' 'exec bspwm' > /usr/local/bin/saas-bspwm-session && chmod 755 /usr/local/bin/saas-bspwm-session"
                 )
             ),
             verificationCommands = listOf(
                 GraphicSessionProvisionCommand(
-                    "Checking Enlightenment executable",
-                    "command -v enlightenment_start >/dev/null && command -v dbus-run-session >/dev/null"
+                    "Checking bspwm companion setup",
+                    "command -v bspwm >/dev/null && command -v sxhkd >/dev/null && " +
+                        "test -f /root/.config/bspwm/bspwmrc && test -f /root/.config/sxhkd/sxhkdrc"
                 )
             )
         ),
+        GraphicSession.CLFSWM to GraphicSessionSupportSpec(GraphicSession.CLFSWM),
+        GraphicSession.FVWM_CRYSTAL to GraphicSessionSupportSpec(GraphicSession.FVWM_CRYSTAL),
+        GraphicSession.QTILE to GraphicSessionSupportSpec(
+            session = GraphicSession.QTILE,
+            postInstallCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Creating Qtile session launcher",
+                    "printf '%s\\n' '#!/bin/sh' 'exec qtile start' > /usr/local/bin/saas-qtile-session && chmod 755 /usr/local/bin/saas-qtile-session"
+                )
+            ),
+            verificationCommands = listOf(
+                GraphicSessionProvisionCommand("Checking Qtile executable", "command -v qtile >/dev/null")
+            )
+        ),
+        GraphicSession.MUFFIN to dbusWrappedSpec(
+            session = GraphicSession.MUFFIN,
+            executable = "muffin",
+            wrapper = "saas-muffin-session"
+        ),
+        GraphicSession.MUTTER to dbusWrappedSpec(
+            session = GraphicSession.MUTTER,
+            executable = "mutter",
+            wrapper = "saas-mutter-session"
+        ),
+        GraphicSession.UKWM to dbusWrappedSpec(
+            session = GraphicSession.UKWM,
+            executable = "ukwm",
+            wrapper = "saas-ukwm-session"
+        ),
+        GraphicSession.CINNAMON_SHELL to dbusWrappedSpec(
+            session = GraphicSession.CINNAMON_SHELL,
+            executable = "cinnamon",
+            wrapper = "saas-cinnamon-shell-session"
+        ),
+        GraphicSession.COMPIZ to dbusWrappedSpec(
+            session = GraphicSession.COMPIZ,
+            executable = "compiz",
+            wrapper = "saas-compiz-session"
+        ),
+        GraphicSession.SUBTLE to GraphicSessionSupportSpec(GraphicSession.SUBTLE),
         GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE),
         GraphicSession.LXQT to GraphicSessionSupportSpec(GraphicSession.LXQT)
     )
@@ -164,4 +204,24 @@ object GraphicSessionSupport {
         get() = specs.keys.toList()
 
     internal fun specFor(session: GraphicSession): GraphicSessionSupportSpec? = specs[session]
+
+    private fun dbusWrappedSpec(
+        session: GraphicSession,
+        executable: String,
+        wrapper: String
+    ): GraphicSessionSupportSpec = GraphicSessionSupportSpec(
+        session = session,
+        postInstallCommands = listOf(
+            GraphicSessionProvisionCommand(
+                "Creating ${session.label} session launcher",
+                "printf '%s\\n' '#!/bin/sh' 'exec dbus-run-session -- $executable' > /usr/local/bin/$wrapper && chmod 755 /usr/local/bin/$wrapper"
+            )
+        ),
+        verificationCommands = listOf(
+            GraphicSessionProvisionCommand(
+                "Checking ${session.label} executable",
+                "command -v $executable >/dev/null && command -v dbus-run-session >/dev/null"
+            )
+        )
+    )
 }

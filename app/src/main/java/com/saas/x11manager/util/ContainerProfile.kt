@@ -64,5 +64,15 @@ enum class GraphicSession(
     XFWM4("Xfwm4", "xfwm4"),
     KWIN_X11("KWin X11", "saas-kwin-x11-session"),
     ENLIGHTENMENT("Enlightenment", "saas-enlightenment-session"),
+    BSPWM("bspwm", "saas-bspwm-session"),
+    CLFSWM("CLFSWM", "clfswm"),
+    FVWM_CRYSTAL("FVWM-Crystal", "fvwm-crystal"),
+    QTILE("Qtile", "saas-qtile-session"),
+    MUFFIN("Muffin", "saas-muffin-session"),
+    MUTTER("Mutter", "saas-mutter-session"),
+    UKWM("UKWM", "saas-ukwm-session"),
+    CINNAMON_SHELL("Cinnamon Shell", "saas-cinnamon-shell-session"),
+    COMPIZ("Compiz (Ubuntu)", "saas-compiz-session"),
+    SUBTLE("subtle (Ubuntu)", "subtle"),
     NONE("None", "")
 }

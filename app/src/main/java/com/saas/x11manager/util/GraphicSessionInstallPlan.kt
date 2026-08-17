@@ -125,8 +125,18 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.MARCO, listOf("marco", "xterm")),
         apt(GraphicSession.METACITY, listOf("metacity", "xterm")),
         apt(GraphicSession.XFWM4, listOf("xfwm4", "xterm")),
-        apt(GraphicSession.KWIN_X11, listOf("dbus-x11", "kwin-x11", "xterm")),
-        apt(GraphicSession.ENLIGHTENMENT, listOf("dbus-x11", "enlightenment", "xterm"))
+        apt(GraphicSession.KWIN_X11, listOf("kwin-x11", "dbus-x11", "xterm")),
+        apt(GraphicSession.ENLIGHTENMENT, listOf("enlightenment", "dbus-x11", "xterm")),
+        apt(GraphicSession.BSPWM, listOf("bspwm", "sxhkd", "xterm")),
+        apt(GraphicSession.CLFSWM, listOf("clfswm", "xterm")),
+        apt(GraphicSession.FVWM_CRYSTAL, listOf("fvwm-crystal", "xterm")),
+        apt(GraphicSession.QTILE, listOf("qtile", "xterm")),
+        apt(GraphicSession.MUFFIN, listOf("muffin", "dbus-x11", "xterm")),
+        apt(GraphicSession.MUTTER, listOf("mutter", "dbus-x11", "xterm")),
+        apt(GraphicSession.UKWM, listOf("ukwm", "dbus-x11", "xterm")),
+        apt(GraphicSession.CINNAMON_SHELL, listOf("cinnamon", "dbus-x11", "xterm")),
+        apt(GraphicSession.COMPIZ, listOf("compiz-core", "compiz-plugins-default", "dbus-x11", "xterm")),
+        apt(GraphicSession.SUBTLE, listOf("subtle", "xterm"))
     )
 
     fun forSelection(
