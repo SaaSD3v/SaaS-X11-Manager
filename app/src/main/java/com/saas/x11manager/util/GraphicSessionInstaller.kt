@@ -19,41 +19,64 @@ private data class ContainerOperationLease(
 
 /**
  * Installs, provisions and verifies a graphical session inside a container.
- * A stopped container is started temporarily on demand and must accept commands
- * before an operation begins. If this object started a container that was known
- * to be stopped, it restores that stopped state when the operation finishes so
- * the next X11 start can preserve Loader -> container -> graphical init ordering.
- * Package installation and verification remain separate: verification never
- * changes packages, init files or persisted selections.
+ * Package mechanics are selected by runtime capability (apk or apt/dpkg), not
+ * by pinned distro versions. The user-selected init backend remains independent
+ * and is only validated/provisioned after package setup succeeds.
  */
 object GraphicSessionInstaller {
 
     internal fun stepsFor(plan: GraphicSessionInstallPlan): List<GraphicSessionInstallStep> {
-        if (plan.platform != ContainerPlatform.ALPINE || plan.session != GraphicSession.OPENBOX) {
-            return emptyList()
+        if (plan.session != GraphicSession.OPENBOX) return emptyList()
+
+        val packageSteps = when (plan.platform) {
+            ContainerPlatform.ALPINE -> listOf(
+                GraphicSessionInstallStep(
+                    title = "Validating Alpine package manager",
+                    command = "command -v apk >/dev/null"
+                ),
+                GraphicSessionInstallStep(
+                    title = "Refreshing package index",
+                    command = "apk update"
+                ),
+                GraphicSessionInstallStep(
+                    title = "Installing Openbox",
+                    command = "apk add openbox"
+                ),
+                GraphicSessionInstallStep(
+                    title = "Installing terminal",
+                    command = "apk add xterm"
+                ),
+                GraphicSessionInstallStep(
+                    title = "Installing fonts",
+                    command = "apk add font-terminus"
+                )
+            )
+
+            ContainerPlatform.UBUNTU -> listOf(
+                GraphicSessionInstallStep(
+                    title = "Validating Debian package manager",
+                    command = "command -v apt-get >/dev/null && command -v dpkg >/dev/null"
+                ),
+                GraphicSessionInstallStep(
+                    title = "Refreshing package index",
+                    command = "DEBIAN_FRONTEND=noninteractive apt-get update"
+                ),
+                GraphicSessionInstallStep(
+                    title = "Installing Openbox",
+                    command = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openbox"
+                ),
+                GraphicSessionInstallStep(
+                    title = "Installing terminal",
+                    command = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xterm"
+                ),
+                GraphicSessionInstallStep(
+                    title = "Installing fonts",
+                    command = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends fonts-terminus"
+                )
+            )
         }
 
-        return listOf(
-            GraphicSessionInstallStep(
-                title = "Validating Alpine environment",
-                command = "test -f /etc/alpine-release && command -v apk"
-            ),
-            GraphicSessionInstallStep(
-                title = "Refreshing package index",
-                command = "apk update"
-            ),
-            GraphicSessionInstallStep(
-                title = "Installing Openbox",
-                command = "apk add openbox"
-            ),
-            GraphicSessionInstallStep(
-                title = "Installing terminal",
-                command = "apk add xterm"
-            ),
-            GraphicSessionInstallStep(
-                title = "Installing fonts",
-                command = "apk add font-terminus"
-            ),
+        return packageSteps + listOf(
             GraphicSessionInstallStep(
                 title = "Creating Openbox configuration directory",
                 command = "mkdir -p /root/.config/openbox"
@@ -80,7 +103,15 @@ object GraphicSessionInstaller {
         )
     }
 
+    /** Backward-compatible Alpine path used by existing tests/callers. */
     internal fun startupStepsFor(
+        initSystem: InitSystem,
+        session: GraphicSession
+    ): List<GraphicSessionInstallStep> =
+        startupStepsFor(ContainerPlatform.ALPINE, initSystem, session)
+
+    internal fun startupStepsFor(
+        platform: ContainerPlatform,
         initSystem: InitSystem,
         session: GraphicSession
     ): List<GraphicSessionInstallStep> = when (initSystem) {
@@ -136,62 +167,73 @@ object GraphicSessionInstaller {
             )
         )
 
-        InitSystem.SYSTEMD -> listOf(
-            GraphicSessionInstallStep(
-                title = "Validating systemd",
-                command = "command -v systemctl"
-            ),
-            GraphicSessionInstallStep(
-                title = "Installing bash for systemd session",
-                command = "apk add bash"
-            ),
-            GraphicSessionInstallStep(
-                title = "Writing X11 session launcher",
-                command = writeFileCommand(
-                    "/usr/local/bin/x11-session.sh",
-                    GraphicSessionInitFiles.sessionScript(session, "/bin/bash"),
-                    "755"
+        InitSystem.SYSTEMD -> {
+            val bashStep = when (platform) {
+                ContainerPlatform.ALPINE -> GraphicSessionInstallStep(
+                    title = "Installing bash for systemd session",
+                    command = "apk add bash"
                 )
-            ),
-            GraphicSessionInstallStep(
-                title = "Writing systemd X11 socket unit",
-                command = writeFileCommand(
-                    "/etc/systemd/system/setup-x11-socket.service",
-                    GraphicSessionInitFiles.systemdSocketService(),
-                    "644"
+
+                ContainerPlatform.UBUNTU -> GraphicSessionInstallStep(
+                    title = "Validating bash for systemd session",
+                    command = "command -v bash >/dev/null"
                 )
-            ),
-            GraphicSessionInstallStep(
-                title = "Writing systemd graphic session unit",
-                command = writeFileCommand(
-                    "/etc/systemd/system/x11-session.service",
-                    GraphicSessionInitFiles.systemdSessionService(session),
-                    "644"
+            }
+
+            listOf(
+                GraphicSessionInstallStep(
+                    title = "Validating systemd",
+                    command = "command -v systemctl >/dev/null"
+                ),
+                bashStep,
+                GraphicSessionInstallStep(
+                    title = "Writing X11 session launcher",
+                    command = writeFileCommand(
+                        "/usr/local/bin/x11-session.sh",
+                        GraphicSessionInitFiles.sessionScript(session, "/bin/bash"),
+                        "755"
+                    )
+                ),
+                GraphicSessionInstallStep(
+                    title = "Writing systemd X11 socket unit",
+                    command = writeFileCommand(
+                        "/etc/systemd/system/setup-x11-socket.service",
+                        GraphicSessionInitFiles.systemdSocketService(),
+                        "644"
+                    )
+                ),
+                GraphicSessionInstallStep(
+                    title = "Writing systemd graphic session unit",
+                    command = writeFileCommand(
+                        "/etc/systemd/system/x11-session.service",
+                        GraphicSessionInitFiles.systemdSessionService(session),
+                        "644"
+                    )
+                ),
+                GraphicSessionInstallStep(
+                    title = "Enabling systemd X11 services",
+                    command = "rm -f " +
+                        "/etc/init.d/x11-setup /etc/init.d/x11-xfce /etc/init.d/x11-session " +
+                        "/etc/runlevels/default/x11-setup /etc/runlevels/default/x11-xfce " +
+                        "/etc/runlevels/default/x11-session /etc/systemd/system/x11-xfce.service " +
+                        "/etc/systemd/system/graphical.target.wants/x11-xfce.service 2>/dev/null; " +
+                        "mkdir -p /etc/systemd/system/multi-user.target.wants " +
+                        "/etc/systemd/system/graphical.target.wants && " +
+                        "ln -sf /etc/systemd/system/setup-x11-socket.service " +
+                        "/etc/systemd/system/multi-user.target.wants/setup-x11-socket.service && " +
+                        "ln -sf /etc/systemd/system/x11-session.service " +
+                        "/etc/systemd/system/graphical.target.wants/x11-session.service"
+                ),
+                GraphicSessionInstallStep(
+                    title = "Validating systemd X11 startup",
+                    command = "test -x /usr/local/bin/x11-session.sh && " +
+                        "test -f /etc/systemd/system/setup-x11-socket.service && " +
+                        "test -f /etc/systemd/system/x11-session.service && " +
+                        "test -L /etc/systemd/system/multi-user.target.wants/setup-x11-socket.service && " +
+                        "test -L /etc/systemd/system/graphical.target.wants/x11-session.service"
                 )
-            ),
-            GraphicSessionInstallStep(
-                title = "Enabling systemd X11 services",
-                command = "rm -f " +
-                    "/etc/init.d/x11-setup /etc/init.d/x11-xfce /etc/init.d/x11-session " +
-                    "/etc/runlevels/default/x11-setup /etc/runlevels/default/x11-xfce " +
-                    "/etc/runlevels/default/x11-session /etc/systemd/system/x11-xfce.service " +
-                    "/etc/systemd/system/graphical.target.wants/x11-xfce.service 2>/dev/null; " +
-                    "mkdir -p /etc/systemd/system/multi-user.target.wants " +
-                    "/etc/systemd/system/graphical.target.wants && " +
-                    "ln -sf /etc/systemd/system/setup-x11-socket.service " +
-                    "/etc/systemd/system/multi-user.target.wants/setup-x11-socket.service && " +
-                    "ln -sf /etc/systemd/system/x11-session.service " +
-                    "/etc/systemd/system/graphical.target.wants/x11-session.service"
-            ),
-            GraphicSessionInstallStep(
-                title = "Validating systemd X11 startup",
-                command = "test -x /usr/local/bin/x11-session.sh && " +
-                    "test -f /etc/systemd/system/setup-x11-socket.service && " +
-                    "test -f /etc/systemd/system/x11-session.service && " +
-                    "test -L /etc/systemd/system/multi-user.target.wants/setup-x11-socket.service && " +
-                    "test -L /etc/systemd/system/graphical.target.wants/x11-session.service"
             )
-        )
+        }
     }
 
     internal fun verificationStepsFor(
@@ -199,21 +241,37 @@ object GraphicSessionInstaller {
         session: GraphicSession,
         initSystem: InitSystem
     ): List<GraphicSessionInstallStep> {
-        if (platform != ContainerPlatform.ALPINE || session != GraphicSession.OPENBOX) {
-            return emptyList()
+        if (session != GraphicSession.OPENBOX) return emptyList()
+
+        val packageChecks = when (platform) {
+            ContainerPlatform.ALPINE -> listOf(
+                GraphicSessionInstallStep(
+                    title = "Checking Alpine package manager",
+                    command = "command -v apk >/dev/null"
+                ),
+                GraphicSessionInstallStep(
+                    title = "Checking Openbox packages",
+                    command = "apk info -e openbox >/dev/null && " +
+                        "apk info -e xterm >/dev/null && " +
+                        "apk info -e font-terminus >/dev/null"
+                )
+            )
+
+            ContainerPlatform.UBUNTU -> listOf(
+                GraphicSessionInstallStep(
+                    title = "Checking Debian package manager",
+                    command = "command -v apt-get >/dev/null && command -v dpkg >/dev/null"
+                ),
+                GraphicSessionInstallStep(
+                    title = "Checking Openbox packages",
+                    command = "dpkg -s openbox >/dev/null 2>&1 && " +
+                        "dpkg -s xterm >/dev/null 2>&1 && " +
+                        "dpkg -s fonts-terminus >/dev/null 2>&1"
+                )
+            )
         }
 
         val common = listOf(
-            GraphicSessionInstallStep(
-                title = "Checking Alpine environment",
-                command = "test -f /etc/alpine-release && command -v apk"
-            ),
-            GraphicSessionInstallStep(
-                title = "Checking Openbox packages",
-                command = "apk info -e openbox >/dev/null && " +
-                    "apk info -e xterm >/dev/null && " +
-                    "apk info -e font-terminus >/dev/null"
-            ),
             GraphicSessionInstallStep(
                 title = "Checking Openbox session command",
                 command = "command -v openbox-session"
@@ -245,7 +303,7 @@ object GraphicSessionInstaller {
             InitSystem.SYSTEMD -> listOf(
                 GraphicSessionInstallStep(
                     title = "Checking systemd X11 startup",
-                    command = "command -v systemctl >/dev/null && " +
+                    command = "command -v systemctl >/dev/null && command -v bash >/dev/null && " +
                         "test -f /etc/systemd/system/setup-x11-socket.service && " +
                         "test -f /etc/systemd/system/x11-session.service && " +
                         "test -L /etc/systemd/system/multi-user.target.wants/setup-x11-socket.service && " +
@@ -254,12 +312,12 @@ object GraphicSessionInstaller {
             )
         }
 
-        return common + initChecks
+        return packageChecks + common + initChecks
     }
 
     suspend fun install(
         containerName: String,
-        platform: ContainerPlatform,
+        platform: ContainerPlatform?,
         session: GraphicSession,
         initSystem: InitSystem,
         cacheDir: File,
@@ -268,24 +326,27 @@ object GraphicSessionInstaller {
         logger?.i("--- Installing Graphic Session: ${session.label} ---")
         logger?.i("")
 
-        val plan = GraphicSessionInstallPlans.forSelection(platform, session)
-        if (plan == null) {
-            logger?.e("[-] FAIL")
-            logger?.e("[-] ${session.label} installer is not enabled for ${platform.label}")
-            return@withContext false
-        }
-
-        val installSteps = stepsFor(plan)
-        if (installSteps.isEmpty()) {
-            logger?.e("[-] FAIL")
-            logger?.e("[-] Installer workflow is not implemented for this selection")
-            return@withContext false
-        }
-
         val lease = ensureContainerReady(containerName, logger, "installation")
             ?: return@withContext false
 
         try {
+            val resolvedPlatform = resolvePlatform(containerName, platform, logger)
+                ?: return@withContext false
+
+            val plan = GraphicSessionInstallPlans.forSelection(resolvedPlatform, session)
+            if (plan == null) {
+                logger?.e("[-] FAIL")
+                logger?.e("[-] ${session.label} installer is not enabled for ${resolvedPlatform.label}")
+                return@withContext false
+            }
+
+            val installSteps = stepsFor(plan)
+            if (installSteps.isEmpty()) {
+                logger?.e("[-] FAIL")
+                logger?.e("[-] Installer workflow is not implemented for this selection")
+                return@withContext false
+            }
+
             for (step in installSteps) {
                 if (!runStep(containerName, step, logger)) {
                     logger?.e("[-] ${session.label} installation aborted")
@@ -295,21 +356,26 @@ object GraphicSessionInstaller {
 
             logger?.i("[+] Configuring ${initSystem.name.lowercase()} startup")
             logger?.i("")
-            for (step in startupStepsFor(initSystem, session)) {
+            for (step in startupStepsFor(resolvedPlatform, initSystem, session)) {
                 if (!runStep(containerName, step, logger)) {
                     logger?.e("[-] ${session.label} startup configuration aborted")
                     return@withContext false
                 }
             }
 
+            logger?.i("[+] Saving Package Platform")
+            logger?.i("platform=${if (resolvedPlatform == ContainerPlatform.ALPINE) "alpine" else "ubuntu"}")
+            if (!ContainerSettingsManager.setPlatform(containerName, resolvedPlatform, cacheDir)) {
+                logger?.e("[-] FAIL")
+                logger?.e("[-] Could not persist Package Platform")
+                return@withContext false
+            }
+            logger?.i("[+] OK")
+            logger?.i("")
+
             logger?.i("[+] Saving Init System")
             logger?.i("init_system=${initSystem.name.lowercase()}")
-            val initSaved = ContainerSettingsManager.setInitSystem(
-                containerName = containerName,
-                initSystem = initSystem,
-                cacheDir = cacheDir
-            )
-            if (!initSaved) {
+            if (!ContainerSettingsManager.setInitSystem(containerName, initSystem, cacheDir)) {
                 logger?.e("[-] FAIL")
                 logger?.e("[-] Could not persist Init System")
                 return@withContext false
@@ -319,12 +385,7 @@ object GraphicSessionInstaller {
 
             logger?.i("[+] Saving Graphic Session")
             logger?.i("graphic_session=${session.name.lowercase()}")
-            val sessionSaved = ContainerSettingsManager.setGraphicSession(
-                containerName = containerName,
-                graphicSession = session,
-                cacheDir = cacheDir
-            )
-            if (!sessionSaved) {
+            if (!ContainerSettingsManager.setGraphicSession(containerName, session, cacheDir)) {
                 logger?.e("[-] FAIL")
                 logger?.e("[-] Could not persist Graphic Session")
                 return@withContext false
@@ -340,7 +401,7 @@ object GraphicSessionInstaller {
 
     suspend fun verify(
         containerName: String,
-        platform: ContainerPlatform,
+        platform: ContainerPlatform?,
         session: GraphicSession,
         initSystem: InitSystem,
         logger: ContainerLogger? = null
@@ -348,17 +409,19 @@ object GraphicSessionInstaller {
         logger?.i("--- Verifying Graphic Session: ${session.label} ---")
         logger?.i("")
 
-        val checks = verificationStepsFor(platform, session, initSystem)
-        if (checks.isEmpty()) {
-            logger?.e("[-] FAIL")
-            logger?.e("[-] Verification is not enabled for ${session.label} on ${platform.label}")
-            return@withContext false
-        }
-
         val lease = ensureContainerReady(containerName, logger, "verification")
             ?: return@withContext false
 
         try {
+            val resolvedPlatform = resolvePlatform(containerName, platform, logger)
+                ?: return@withContext false
+            val checks = verificationStepsFor(resolvedPlatform, session, initSystem)
+            if (checks.isEmpty()) {
+                logger?.e("[-] FAIL")
+                logger?.e("[-] Verification is not enabled for ${session.label} on ${resolvedPlatform.label}")
+                return@withContext false
+            }
+
             for (step in checks) {
                 if (!runStep(containerName, step, logger)) {
                     logger?.e("[-] ${session.label} verification failed")
@@ -370,6 +433,51 @@ object GraphicSessionInstaller {
             true
         } finally {
             releaseContainer(containerName, lease, logger)
+        }
+    }
+
+    private fun resolvePlatform(
+        containerName: String,
+        requestedPlatform: ContainerPlatform?,
+        logger: ContainerLogger?
+    ): ContainerPlatform? {
+        if (requestedPlatform != null) return requestedPlatform
+
+        logger?.i("[+] Detecting package platform")
+        val detected = when {
+            probeContainerShell(containerName, "command -v apk >/dev/null") -> ContainerPlatform.ALPINE
+            probeContainerShell(
+                containerName,
+                "command -v apt-get >/dev/null && command -v dpkg >/dev/null"
+            ) -> ContainerPlatform.UBUNTU
+            else -> null
+        }
+
+        if (detected == null) {
+            logger?.e("[-] FAIL")
+            logger?.e("[-] No supported package manager found (apk or apt/dpkg)")
+            logger?.i("")
+            return null
+        }
+
+        logger?.i(
+            when (detected) {
+                ContainerPlatform.ALPINE -> "[+] Detected apk package platform"
+                ContainerPlatform.UBUNTU -> "[+] Detected Debian/Ubuntu .deb package platform"
+            }
+        )
+        logger?.i("[+] OK")
+        logger?.i("")
+        return detected
+    }
+
+    private fun probeContainerShell(containerName: String, command: String): Boolean {
+        val hostCommand =
+            "${Constants.DS_BINARY_PATH} --name=${shellQuote(containerName)} run sh -c ${shellQuote(command)} 2>/dev/null"
+        return try {
+            Shell.cmd(hostCommand).exec().isSuccess
+        } catch (_: Exception) {
+            false
         }
     }
 
