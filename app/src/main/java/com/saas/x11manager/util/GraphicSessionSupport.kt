@@ -60,7 +60,8 @@ object GraphicSessionSupport {
                 GraphicSessionProvisionCommand("Checking cwm configuration", "cwm -n")
             )
         ),
-        GraphicSession.HERBSTLUFTWM to GraphicSessionSupportSpec(GraphicSession.HERBSTLUFTWM)
+        GraphicSession.HERBSTLUFTWM to GraphicSessionSupportSpec(GraphicSession.HERBSTLUFTWM),
+        GraphicSession.SPECTRWM to GraphicSessionSupportSpec(GraphicSession.SPECTRWM)
     )
 
     val installableSessions: List<GraphicSession>

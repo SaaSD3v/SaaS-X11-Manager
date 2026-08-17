@@ -30,5 +30,6 @@ enum class GraphicSession(
     FLUXBOX("Fluxbox", "startfluxbox"),
     CWM("cwm", "cwm"),
     HERBSTLUFTWM("herbstluftwm", "herbstluftwm"),
+    SPECTRWM("spectrwm", "spectrwm"),
     NONE("None", "")
 }
