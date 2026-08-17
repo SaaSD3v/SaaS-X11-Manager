@@ -29,7 +29,7 @@ internal object ContainerDistributionParser {
             }
         }
 
-        classify(values["ID"], values["ID_LIKE"])
+        return classify(values["ID"], values["ID_LIKE"])
     }
 
     private fun classify(id: String?, idLike: String?): ContainerDistribution {
