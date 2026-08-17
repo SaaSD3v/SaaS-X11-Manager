@@ -7,6 +7,7 @@ package com.saas.x11manager.util
  */
 enum class RepositoryRequirement {
     APT_UNIVERSE,
+    APT_MULTIVERSE,
     APK_COMMUNITY
 }
 
@@ -27,11 +28,12 @@ object GraphicSessionInstallPlans {
 
     private fun apt(
         session: GraphicSession,
-        packages: List<String>
+        packages: List<String>,
+        repositoryRequirement: RepositoryRequirement = RepositoryRequirement.APT_UNIVERSE
     ) = GraphicSessionInstallPlan(
         platform = ContainerPlatform.UBUNTU,
         session = session,
-        repositoryRequirement = RepositoryRequirement.APT_UNIVERSE,
+        repositoryRequirement = repositoryRequirement,
         packages = packages,
         verificationCommand = session.startCommand,
         installRecommendedPackages = false
@@ -100,7 +102,21 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.EVILWM, listOf("evilwm", "xterm")),
         apt(GraphicSession.MATCHBOX, listOf("matchbox-window-manager", "xterm")),
         apt(GraphicSession.SAWFISH, listOf("sawfish", "xterm")),
-        apt(GraphicSession.XMONAD, listOf("xmonad", "xterm"))
+        apt(GraphicSession.XMONAD, listOf("xmonad", "xterm")),
+        apt(GraphicSession.NINE_WM, listOf("9wm", "xterm")),
+        apt(GraphicSession.AEWM_PLUS_PLUS, listOf("aewm++", "xterm")),
+        apt(GraphicSession.AFTERSTEP, listOf("afterstep", "xterm")),
+        apt(
+            GraphicSession.AMIWM,
+            listOf("amiwm", "xterm"),
+            RepositoryRequirement.APT_MULTIVERSE
+        ),
+        apt(GraphicSession.DWM, listOf("dwm", "xterm")),
+        apt(GraphicSession.FLWM, listOf("flwm", "xterm")),
+        apt(GraphicSession.LWM, listOf("lwm", "xterm")),
+        apt(GraphicSession.MIWM, listOf("miwm", "xterm")),
+        apt(GraphicSession.VTWM, listOf("vtwm", "xterm")),
+        apt(GraphicSession.W9WM, listOf("w9wm", "xterm"))
     )
 
     fun forSelection(

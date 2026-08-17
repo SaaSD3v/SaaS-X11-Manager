@@ -44,5 +44,15 @@ enum class GraphicSession(
     MATCHBOX("Matchbox", "matchbox-window-manager"),
     SAWFISH("Sawfish", "sawfish"),
     XMONAD("XMonad", "xmonad"),
+    NINE_WM("9wm", "9wm"),
+    AEWM_PLUS_PLUS("aewm++", "aewm++"),
+    AFTERSTEP("AfterStep", "afterstep"),
+    AMIWM("AmiWM", "amiwm"),
+    DWM("dwm", "dwm"),
+    FLWM("flwm", "flwm"),
+    LWM("lwm", "lwm"),
+    MIWM("miwm", "miwm"),
+    VTWM("vtwm", "vtwm"),
+    W9WM("w9wm", "w9wm"),
     NONE("None", "")
 }

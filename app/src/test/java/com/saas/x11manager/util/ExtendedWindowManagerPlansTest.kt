@@ -24,18 +24,44 @@ class ExtendedWindowManagerPlansTest {
         assertAptOnly(GraphicSession.XMONAD, listOf("xmonad", "xterm"))
     }
 
-    private fun assertAptOnly(session: GraphicSession, packages: List<String>) {
-        assertPlan(ContainerPlatform.UBUNTU, session, packages)
+    @Test
+    fun secondBatchUsesVerifiedAptPlans() {
+        assertAptOnly(GraphicSession.NINE_WM, listOf("9wm", "xterm"))
+        assertAptOnly(GraphicSession.AEWM_PLUS_PLUS, listOf("aewm++", "xterm"))
+        assertAptOnly(GraphicSession.AFTERSTEP, listOf("afterstep", "xterm"))
+        assertAptOnly(
+            GraphicSession.AMIWM,
+            listOf("amiwm", "xterm"),
+            RepositoryRequirement.APT_MULTIVERSE
+        )
+        assertAptOnly(GraphicSession.DWM, listOf("dwm", "xterm"))
+        assertAptOnly(GraphicSession.FLWM, listOf("flwm", "xterm"))
+        assertAptOnly(GraphicSession.LWM, listOf("lwm", "xterm"))
+        assertAptOnly(GraphicSession.MIWM, listOf("miwm", "xterm"))
+        assertAptOnly(GraphicSession.VTWM, listOf("vtwm", "xterm"))
+        assertAptOnly(GraphicSession.W9WM, listOf("w9wm", "xterm"))
+    }
+
+    private fun assertAptOnly(
+        session: GraphicSession,
+        packages: List<String>,
+        repositoryRequirement: RepositoryRequirement = RepositoryRequirement.APT_UNIVERSE
+    ) {
+        assertPlan(ContainerPlatform.UBUNTU, session, packages, repositoryRequirement)
         assertTrue(GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, session) == null)
     }
 
     private fun assertPlan(
         platform: ContainerPlatform,
         session: GraphicSession,
-        packages: List<String>
+        packages: List<String>,
+        repositoryRequirement: RepositoryRequirement? = null
     ) {
         val plan = requireNotNull(GraphicSessionInstallPlans.forSelection(platform, session))
         assertEquals(packages, plan.packages)
         assertEquals(session.startCommand, plan.verificationCommand)
+        if (repositoryRequirement != null) {
+            assertEquals(repositoryRequirement, plan.repositoryRequirement)
+        }
     }
 }

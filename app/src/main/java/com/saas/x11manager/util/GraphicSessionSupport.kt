@@ -94,6 +94,30 @@ object GraphicSessionSupport {
         GraphicSession.MATCHBOX to GraphicSessionSupportSpec(GraphicSession.MATCHBOX),
         GraphicSession.SAWFISH to GraphicSessionSupportSpec(GraphicSession.SAWFISH),
         GraphicSession.XMONAD to GraphicSessionSupportSpec(GraphicSession.XMONAD),
+        GraphicSession.NINE_WM to GraphicSessionSupportSpec(GraphicSession.NINE_WM),
+        GraphicSession.AEWM_PLUS_PLUS to GraphicSessionSupportSpec(GraphicSession.AEWM_PLUS_PLUS),
+        GraphicSession.AFTERSTEP to GraphicSessionSupportSpec(GraphicSession.AFTERSTEP),
+        GraphicSession.AMIWM to GraphicSessionSupportSpec(GraphicSession.AMIWM),
+        GraphicSession.DWM to GraphicSessionSupportSpec(
+            session = GraphicSession.DWM,
+            postInstallCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Preparing dwm launcher",
+                    "if command -v dwm >/dev/null 2>&1; then true; elif [ -x /usr/bin/dwm.default ]; then ln -sf /usr/bin/dwm.default /usr/local/bin/dwm; else exit 1; fi"
+                )
+            ),
+            verificationCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    "Checking dwm launcher",
+                    "command -v dwm >/dev/null"
+                )
+            )
+        ),
+        GraphicSession.FLWM to GraphicSessionSupportSpec(GraphicSession.FLWM),
+        GraphicSession.LWM to GraphicSessionSupportSpec(GraphicSession.LWM),
+        GraphicSession.MIWM to GraphicSessionSupportSpec(GraphicSession.MIWM),
+        GraphicSession.VTWM to GraphicSessionSupportSpec(GraphicSession.VTWM),
+        GraphicSession.W9WM to GraphicSessionSupportSpec(GraphicSession.W9WM),
         GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE),
         GraphicSession.LXQT to GraphicSessionSupportSpec(GraphicSession.LXQT)
     )
