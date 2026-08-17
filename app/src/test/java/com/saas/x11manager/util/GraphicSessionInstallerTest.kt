@@ -23,6 +23,14 @@ class GraphicSessionInstallerTest {
         return GraphicSessionInstaller.stepsFor(plan)
     }
 
+    private fun jwmSteps(platform: ContainerPlatform): List<GraphicSessionInstallStep> {
+        val plan = requireNotNull(GraphicSessionInstallPlans.forSelection(
+            platform,
+            GraphicSession.JWM
+        ))
+        return GraphicSessionInstaller.stepsFor(plan)
+    }
+
     @Test
     fun alpineOpenboxWorkflowUsesApkAndMinimalPackages() {
         val commands = openboxSteps(ContainerPlatform.ALPINE).map { it.command }
@@ -88,6 +96,39 @@ class GraphicSessionInstallerTest {
     }
 
     @Test
+    fun alpineJwmWorkflowUsesApkAndValidatesConfiguration() {
+        val commands = jwmSteps(ContainerPlatform.ALPINE).map { it.command }
+
+        assertEquals("command -v apk >/dev/null", commands.first())
+        assertTrue("apk update" in commands)
+        assertTrue("apk add jwm" in commands)
+        assertTrue("apk add xterm" in commands)
+        assertTrue("command -v jwm" in commands)
+        assertTrue("jwm -p" in commands)
+        assertFalse(commands.any { it.contains("apt-get") })
+    }
+
+    @Test
+    fun debJwmWorkflowUsesAptDpkgWithoutRecommends() {
+        val commands = jwmSteps(ContainerPlatform.UBUNTU).map { it.command }
+
+        assertEquals(
+            "command -v apt-get >/dev/null && command -v dpkg >/dev/null",
+            commands.first()
+        )
+        assertTrue(commands.contains("DEBIAN_FRONTEND=noninteractive apt-get update"))
+        assertTrue(commands.contains(
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends jwm"
+        ))
+        assertTrue(commands.contains(
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xterm"
+        ))
+        assertTrue("command -v jwm" in commands)
+        assertTrue("jwm -p" in commands)
+        assertFalse(commands.any { it.contains("apk ") })
+    }
+
+    @Test
     fun openboxConfigCopyNeverOverwritesExistingUserFiles() {
         ContainerPlatform.entries.forEach { platform ->
             val commands = openboxSteps(platform).map { it.command }
@@ -127,6 +168,19 @@ class GraphicSessionInstallerTest {
     }
 
     @Test
+    fun jwmInstallerValidatesButNeverLaunchesSession() {
+        ContainerPlatform.entries.forEach { platform ->
+            val commands = jwmSteps(platform).map { it.command }
+
+            assertTrue(commands.contains("command -v jwm"))
+            assertTrue(commands.contains("jwm -p"))
+            assertFalse(commands.any { it.trim() == "jwm" })
+            assertFalse(commands.any { it.contains("exec jwm") })
+            assertFalse(commands.any { it.contains("mkdir ") || it.contains("cp ") })
+        }
+    }
+
+    @Test
     fun openrcStartupWritesGenericOpenboxSessionFiles() {
         ContainerPlatform.entries.forEach { platform ->
             val steps = GraphicSessionInstaller.startupStepsFor(
@@ -159,6 +213,24 @@ class GraphicSessionInstallerTest {
                 assertTrue(joined.contains("exec icewm-session"))
                 assertTrue(joined.contains("/usr/local/bin/x11-session.sh"))
                 assertFalse(steps.any { it.command.trim() == "icewm-session" })
+            }
+        }
+    }
+
+    @Test
+    fun existingStartupTemplatesAcceptJwmWithoutSpecialInitPath() {
+        ContainerPlatform.entries.forEach { platform ->
+            InitSystem.entries.forEach { initSystem ->
+                val steps = GraphicSessionInstaller.startupStepsFor(
+                    platform,
+                    initSystem,
+                    GraphicSession.JWM
+                )
+                val joined = steps.joinToString("\n") { it.command }
+
+                assertTrue(joined.contains("exec jwm"))
+                assertTrue(joined.contains("/usr/local/bin/x11-session.sh"))
+                assertFalse(steps.any { it.command.trim() == "jwm" })
             }
         }
     }
@@ -262,6 +334,30 @@ class GraphicSessionInstallerTest {
     }
 
     @Test
+    fun jwmVerificationIsReadOnlyOnBothPackageFamilies() {
+        ContainerPlatform.entries.forEach { platform ->
+            InitSystem.entries.forEach { initSystem ->
+                val commands = GraphicSessionInstaller.verificationStepsFor(
+                    platform,
+                    GraphicSession.JWM,
+                    initSystem
+                ).map { it.command }
+                val joined = commands.joinToString("\n")
+
+                assertFalse(joined.contains("apk update"))
+                assertFalse(joined.contains("apk add "))
+                assertFalse(joined.contains("apt-get update"))
+                assertFalse(joined.contains("apt-get install"))
+                assertFalse(joined.contains("rm -f"))
+                assertFalse(joined.contains("ln -s"))
+                assertFalse(joined.contains("chmod "))
+                assertFalse(joined.contains("cp "))
+                assertFalse(joined.contains("mkdir "))
+            }
+        }
+    }
+
+    @Test
     fun verificationUsesPlatformSpecificPackageQueries() {
         val alpine = GraphicSessionInstaller.verificationStepsFor(
             ContainerPlatform.ALPINE,
@@ -308,5 +404,30 @@ class GraphicSessionInstallerTest {
         assertFalse(deb.contains("apk info"))
         assertTrue(deb.contains("command -v icewm-session"))
         assertTrue(deb.contains("grep -Fqx 'exec icewm-session' /usr/local/bin/x11-session.sh"))
+    }
+
+    @Test
+    fun jwmVerificationUsesPlatformSpecificPackageQueries() {
+        val alpine = GraphicSessionInstaller.verificationStepsFor(
+            ContainerPlatform.ALPINE,
+            GraphicSession.JWM,
+            InitSystem.OPENRC
+        ).joinToString("\n") { it.command }
+        val deb = GraphicSessionInstaller.verificationStepsFor(
+            ContainerPlatform.UBUNTU,
+            GraphicSession.JWM,
+            InitSystem.SYSTEMD
+        ).joinToString("\n") { it.command }
+
+        assertTrue(alpine.contains("apk info -e jwm"))
+        assertTrue(alpine.contains("apk info -e xterm"))
+        assertFalse(alpine.contains("dpkg -s"))
+
+        assertTrue(deb.contains("dpkg -s jwm"))
+        assertTrue(deb.contains("dpkg -s xterm"))
+        assertFalse(deb.contains("apk info"))
+        assertTrue(deb.contains("command -v jwm"))
+        assertTrue(deb.contains("jwm -p"))
+        assertTrue(deb.contains("grep -Fqx 'exec jwm' /usr/local/bin/x11-session.sh"))
     }
 }

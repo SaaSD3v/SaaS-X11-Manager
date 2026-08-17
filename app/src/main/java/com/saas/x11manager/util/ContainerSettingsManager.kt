@@ -66,6 +66,7 @@ object ContainerSettingsManager {
             "lxqt" -> GraphicSession.LXQT
             "openbox" -> GraphicSession.OPENBOX
             "icewm" -> GraphicSession.ICEWM
+            "jwm" -> GraphicSession.JWM
             "none" -> GraphicSession.NONE
             else -> null
         }

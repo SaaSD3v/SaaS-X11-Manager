@@ -26,6 +26,59 @@ private data class ContainerOperationLease(
 object GraphicSessionInstaller {
 
     internal fun stepsFor(plan: GraphicSessionInstallPlan): List<GraphicSessionInstallStep> {
+        if (plan.session == GraphicSession.JWM) {
+            val packageSteps = when (plan.platform) {
+                ContainerPlatform.ALPINE -> listOf(
+                    GraphicSessionInstallStep(
+                        title = "Validating Alpine package manager",
+                        command = "command -v apk >/dev/null"
+                    ),
+                    GraphicSessionInstallStep(
+                        title = "Refreshing package index",
+                        command = "apk update"
+                    ),
+                    GraphicSessionInstallStep(
+                        title = "Installing JWM",
+                        command = "apk add jwm"
+                    ),
+                    GraphicSessionInstallStep(
+                        title = "Installing terminal",
+                        command = "apk add xterm"
+                    )
+                )
+
+                ContainerPlatform.UBUNTU -> listOf(
+                    GraphicSessionInstallStep(
+                        title = "Validating Debian package manager",
+                        command = "command -v apt-get >/dev/null && command -v dpkg >/dev/null"
+                    ),
+                    GraphicSessionInstallStep(
+                        title = "Refreshing package index",
+                        command = "DEBIAN_FRONTEND=noninteractive apt-get update"
+                    ),
+                    GraphicSessionInstallStep(
+                        title = "Installing JWM",
+                        command = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends jwm"
+                    ),
+                    GraphicSessionInstallStep(
+                        title = "Installing terminal",
+                        command = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xterm"
+                    )
+                )
+            }
+
+            return packageSteps + listOf(
+                GraphicSessionInstallStep(
+                    title = "Validating JWM command",
+                    command = "command -v ${plan.verificationCommand}"
+                ),
+                GraphicSessionInstallStep(
+                    title = "Validating JWM configuration",
+                    command = "jwm -p"
+                )
+            )
+        }
+
         if (plan.session == GraphicSession.ICEWM) {
             val packageSteps = when (plan.platform) {
                 ContainerPlatform.ALPINE -> listOf(
@@ -288,6 +341,76 @@ object GraphicSessionInstaller {
         session: GraphicSession,
         initSystem: InitSystem
     ): List<GraphicSessionInstallStep> {
+        if (session == GraphicSession.JWM) {
+            val packageChecks = when (platform) {
+                ContainerPlatform.ALPINE -> listOf(
+                    GraphicSessionInstallStep(
+                        title = "Checking Alpine package manager",
+                        command = "command -v apk >/dev/null"
+                    ),
+                    GraphicSessionInstallStep(
+                        title = "Checking JWM packages",
+                        command = "apk info -e jwm >/dev/null && " +
+                            "apk info -e xterm >/dev/null"
+                    )
+                )
+
+                ContainerPlatform.UBUNTU -> listOf(
+                    GraphicSessionInstallStep(
+                        title = "Checking Debian package manager",
+                        command = "command -v apt-get >/dev/null && command -v dpkg >/dev/null"
+                    ),
+                    GraphicSessionInstallStep(
+                        title = "Checking JWM packages",
+                        command = "dpkg -s jwm >/dev/null 2>&1 && " +
+                            "dpkg -s xterm >/dev/null 2>&1"
+                    )
+                )
+            }
+
+            val common = listOf(
+                GraphicSessionInstallStep(
+                    title = "Checking JWM command",
+                    command = "command -v jwm"
+                ),
+                GraphicSessionInstallStep(
+                    title = "Checking JWM configuration",
+                    command = "jwm -p"
+                ),
+                GraphicSessionInstallStep(
+                    title = "Checking X11 session launcher",
+                    command = "test -x /usr/local/bin/x11-session.sh && " +
+                        "grep -Fqx 'exec jwm' /usr/local/bin/x11-session.sh"
+                )
+            )
+
+            val initChecks = when (initSystem) {
+                InitSystem.OPENRC -> listOf(
+                    GraphicSessionInstallStep(
+                        title = "Checking OpenRC X11 startup",
+                        command = "test -x /sbin/openrc-run && " +
+                            "test -x /etc/init.d/x11-setup && " +
+                            "test -x /etc/init.d/x11-session && " +
+                            "test -L /etc/runlevels/default/x11-setup && " +
+                            "test -L /etc/runlevels/default/x11-session"
+                    )
+                )
+
+                InitSystem.SYSTEMD -> listOf(
+                    GraphicSessionInstallStep(
+                        title = "Checking systemd X11 startup",
+                        command = "command -v systemctl >/dev/null && command -v bash >/dev/null && " +
+                            "test -f /etc/systemd/system/setup-x11-socket.service && " +
+                            "test -f /etc/systemd/system/x11-session.service && " +
+                            "test -L /etc/systemd/system/multi-user.target.wants/setup-x11-socket.service && " +
+                            "test -L /etc/systemd/system/graphical.target.wants/x11-session.service"
+                    )
+                )
+            }
+
+            return packageChecks + common + initChecks
+        }
+
         if (session == GraphicSession.ICEWM) {
             val packageChecks = when (platform) {
                 ContainerPlatform.ALPINE -> listOf(

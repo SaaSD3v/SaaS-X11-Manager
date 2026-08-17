@@ -88,6 +88,20 @@ class GraphicSessionInstallPlansTest {
     }
 
     @Test
+    fun debJwmUsesMinimalTermuxX11PackageSet() {
+        val plan = requireNotNull(GraphicSessionInstallPlans.forSelection(
+            ContainerPlatform.UBUNTU,
+            GraphicSession.JWM
+        ))
+
+        assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
+        assertEquals("jwm", plan.verificationCommand)
+        assertEquals(listOf("jwm", "xterm"), plan.packages)
+        assertFalse(plan.installRecommendedPackages)
+        assertSafeAptPlan(plan)
+    }
+
+    @Test
     fun alpineXfceUsesCommunityDesktopAndDbus() {
         val plan = requireNotNull(GraphicSessionInstallPlans.forSelection(
             ContainerPlatform.ALPINE,
@@ -151,6 +165,20 @@ class GraphicSessionInstallPlansTest {
         assertEquals(RepositoryRequirement.APK_COMMUNITY, plan.repositoryRequirement)
         assertEquals("icewm-session", plan.verificationCommand)
         assertEquals(listOf("icewm", "xterm"), plan.packages)
+        assertTrue(plan.installRecommendedPackages)
+        assertNoDisplayManager(plan)
+    }
+
+    @Test
+    fun alpineJwmUsesMinimalTermuxX11PackageSet() {
+        val plan = requireNotNull(GraphicSessionInstallPlans.forSelection(
+            ContainerPlatform.ALPINE,
+            GraphicSession.JWM
+        ))
+
+        assertEquals(RepositoryRequirement.APK_COMMUNITY, plan.repositoryRequirement)
+        assertEquals("jwm", plan.verificationCommand)
+        assertEquals(listOf("jwm", "xterm"), plan.packages)
         assertTrue(plan.installRecommendedPackages)
         assertNoDisplayManager(plan)
     }

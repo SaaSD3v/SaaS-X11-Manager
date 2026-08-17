@@ -26,5 +26,6 @@ enum class GraphicSession(
     LXQT("LXQt", "startlxqt"),
     OPENBOX("Openbox", "openbox-session"),
     ICEWM("IceWM", "icewm-session"),
+    JWM("JWM", "jwm"),
     NONE("None", "")
 }

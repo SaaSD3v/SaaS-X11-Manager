@@ -89,6 +89,18 @@ object GraphicSessionInstallPlans {
                 installRecommendedPackages = false
             )
 
+            GraphicSession.JWM -> GraphicSessionInstallPlan(
+                platform = platform,
+                session = session,
+                repositoryRequirement = RepositoryRequirement.APT_UNIVERSE,
+                packages = listOf(
+                    "jwm",
+                    "xterm"
+                ),
+                verificationCommand = "jwm",
+                installRecommendedPackages = false
+            )
+
             GraphicSession.NONE -> null
         }
 
@@ -142,6 +154,18 @@ object GraphicSessionInstallPlans {
                     "xterm"
                 ),
                 verificationCommand = "icewm-session",
+                installRecommendedPackages = true
+            )
+
+            GraphicSession.JWM -> GraphicSessionInstallPlan(
+                platform = platform,
+                session = session,
+                repositoryRequirement = RepositoryRequirement.APK_COMMUNITY,
+                packages = listOf(
+                    "jwm",
+                    "xterm"
+                ),
+                verificationCommand = "jwm",
                 installRecommendedPackages = true
             )
 

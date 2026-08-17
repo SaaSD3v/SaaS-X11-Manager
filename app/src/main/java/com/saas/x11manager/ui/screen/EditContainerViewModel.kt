@@ -32,6 +32,8 @@ class EditContainerViewModel : ViewModel() {
         private set
     var icewmInstalled by mutableStateOf(false)
         private set
+    var jwmInstalled by mutableStateOf(false)
+        private set
 
     var logs by mutableStateOf<List<Pair<Int, String>>>(emptyList())
     val installLogs = mutableStateListOf<Pair<Int, String>>()
@@ -78,13 +80,18 @@ class EditContainerViewModel : ViewModel() {
                     containerName,
                     GraphicSession.ICEWM
                 )
-                Triple(saved, openbox, icewm)
+                val jwm = ContainerSettingsManager.isGraphicSessionInstalled(
+                    containerName,
+                    GraphicSession.JWM
+                )
+                saved to Triple(openbox, icewm, jwm)
             }
 
             graphicSession = sessionState.first ?: GraphicSession.XFCE
             savedGraphicSession = graphicSession
-            openboxInstalled = sessionState.second || graphicSession == GraphicSession.OPENBOX
-            icewmInstalled = sessionState.third || graphicSession == GraphicSession.ICEWM
+            openboxInstalled = sessionState.second.first || graphicSession == GraphicSession.OPENBOX
+            icewmInstalled = sessionState.second.second || graphicSession == GraphicSession.ICEWM
+            jwmInstalled = sessionState.second.third || graphicSession == GraphicSession.JWM
             logs = emptyList()
             installLogs.clear()
             installResult = null
@@ -123,6 +130,21 @@ class EditContainerViewModel : ViewModel() {
             "IceWM selected — tap Save to apply"
         } else {
             "IceWM deselected — tap Save to apply"
+        }
+    }
+
+    fun toggleJwmSelection() {
+        if (!jwmInstalled || isInstallingSession || isSaving) return
+        graphicSession = if (graphicSession == GraphicSession.JWM) {
+            GraphicSession.NONE
+        } else {
+            GraphicSession.JWM
+        }
+        installResultSession = GraphicSession.JWM
+        installResult = if (graphicSession == GraphicSession.JWM) {
+            "JWM selected — tap Save to apply"
+        } else {
+            "JWM deselected — tap Save to apply"
         }
     }
 
@@ -284,6 +306,85 @@ class EditContainerViewModel : ViewModel() {
         }
     }
 
+    fun installJwm() {
+        if (isInstallingSession || isSaving) return
+
+        val cd = cacheDir ?: run {
+            showOperationSetupError(
+                "Installing JWM",
+                "cacheDir not set",
+                GraphicSession.JWM
+            )
+            return
+        }
+
+        beginSessionOperation("Installing JWM", GraphicSession.JWM)
+        val selectedInitSystem = initSystem
+        val logger = operationLogger()
+
+        viewModelScope.launch {
+            try {
+                val installed = GraphicSessionInstaller.install(
+                    containerName = containerName,
+                    platform = null,
+                    session = GraphicSession.JWM,
+                    initSystem = selectedInitSystem,
+                    cacheDir = cd,
+                    logger = logger
+                )
+
+                if (installed) {
+                    initSystem = selectedInitSystem
+                    graphicSession = GraphicSession.JWM
+                    savedGraphicSession = GraphicSession.JWM
+                    jwmInstalled = true
+
+                    val markerSaved = withContext(Dispatchers.IO) {
+                        ContainerSettingsManager.setGraphicSessionInstalled(
+                            containerName = containerName,
+                            graphicSession = GraphicSession.JWM,
+                            installed = true,
+                            cacheDir = cd
+                        )
+                    }
+                    if (!markerSaved) {
+                        logger.w("[!] JWM is installed, but its installed marker could not be saved")
+                    }
+
+                    logger.i("")
+                    val (statusBeforeFinalStop, _) =
+                        ContainerManager.getContainerRuntimeStatePublic(containerName)
+                    val stopAccepted = if (statusBeforeFinalStop == ContainerStatus.STOPPED) {
+                        logger.i("[+] Container already stopped after installation")
+                        true
+                    } else {
+                        logger.i("[*] Stopping container after installation...")
+                        ContainerManager.stopContainer(containerName, logger)
+                    }
+                    val (statusAfterStop, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
+                    if (stopAccepted || statusAfterStop == ContainerStatus.STOPPED) {
+                        logger.i("[+] Container stopped")
+                        logger.i("")
+                        logger.i("[+] JWM installation completed successfully")
+                        logger.i("[+] Click Start X11 to launch the session")
+                        installResult = "OK: JWM installed. Click Start X11."
+                    } else {
+                        logger.w("[!] JWM was installed, but the container could not be confirmed stopped")
+                        logger.w("[!] Stop the container before clicking Start X11")
+                        installResult = "Warning: JWM installed; stop container before Start X11"
+                    }
+                } else {
+                    installResult = "Error: JWM installation failed"
+                }
+            } catch (e: Exception) {
+                logOperationException(e, "JWM installation failed")
+            } finally {
+                refreshRuntimeStatus()
+                isInstallingSession = false
+            }
+        }
+    }
+
     fun verifyOpenbox() {
         if (isInstallingSession || isSaving) return
 
@@ -361,6 +462,48 @@ class EditContainerViewModel : ViewModel() {
                 }
             } catch (e: Exception) {
                 logOperationException(e, "IceWM verification failed")
+            } finally {
+                refreshRuntimeStatus()
+                isInstallingSession = false
+            }
+        }
+    }
+
+    fun verifyJwm() {
+        if (isInstallingSession || isSaving) return
+
+        beginSessionOperation("Verifying JWM", GraphicSession.JWM)
+        val selectedInitSystem = initSystem
+        val logger = operationLogger()
+
+        viewModelScope.launch {
+            try {
+                val verified = GraphicSessionInstaller.verify(
+                    containerName = containerName,
+                    platform = null,
+                    session = GraphicSession.JWM,
+                    initSystem = selectedInitSystem,
+                    logger = logger
+                )
+
+                if (verified) {
+                    jwmInstalled = true
+                    cacheDir?.let { cd ->
+                        withContext(Dispatchers.IO) {
+                            ContainerSettingsManager.setGraphicSessionInstalled(
+                                containerName,
+                                GraphicSession.JWM,
+                                true,
+                                cd
+                            )
+                        }
+                    }
+                    installResult = "OK: JWM verified"
+                } else {
+                    installResult = "Error: JWM verification failed"
+                }
+            } catch (e: Exception) {
+                logOperationException(e, "JWM verification failed")
             } finally {
                 refreshRuntimeStatus()
                 isInstallingSession = false
