@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -42,11 +43,13 @@ fun EditContainerScreen(
     val status = viewModel.status
     val initSystem = viewModel.initSystem
     val graphicSession = viewModel.graphicSession
+    val openboxInstalled = viewModel.openboxInstalled
     val logs = viewModel.logs
     val isSaving = viewModel.isSaving
     val saveError = viewModel.saveError
     val isInstalling = viewModel.isInstallingSession
     val installResult = viewModel.installResult
+    var openboxExpanded by rememberSaveable(containerName) { mutableStateOf(false) }
 
     if (viewModel.showInstallTerminal) {
         TerminalDialog(
@@ -99,7 +102,7 @@ fun EditContainerScreen(
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "Select which init system to inject",
+                        "Select which init system starts the X11 session inside this container",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp
                     )
@@ -155,8 +158,8 @@ fun EditContainerScreen(
                                     Text(label, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
                                     Text(
                                         when (sys) {
-                                            InitSystem.SYSTEMD -> "User-selected systemd backend"
-                                            InitSystem.OPENRC -> "User-selected OpenRC backend"
+                                            InitSystem.SYSTEMD -> "Starts x11-session through systemd units"
+                                            InitSystem.OPENRC -> "Starts x11-session through OpenRC services"
                                         },
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 10.sp
@@ -184,7 +187,7 @@ fun EditContainerScreen(
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "Openbox is the first Alpine test session. Install and verify operations are logged in real time.",
+                        "Tap a session to expand or collapse its controls.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp
                     )
@@ -192,7 +195,11 @@ fun EditContainerScreen(
 
                     val openboxSelected = graphicSession == GraphicSession.OPENBOX
                     Surface(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = !isInstalling) {
+                                openboxExpanded = !openboxExpanded
+                            },
                         shape = RoundedCornerShape(14.dp),
                         color = if (openboxSelected) {
                             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
@@ -211,7 +218,12 @@ fun EditContainerScreen(
                         ) {
                             RadioButton(
                                 selected = openboxSelected,
-                                onClick = null,
+                                onClick = {
+                                    if (openboxInstalled && !isInstalling && !isSaving) {
+                                        viewModel.toggleOpenboxSelection()
+                                    }
+                                },
+                                enabled = openboxInstalled && !isInstalling && !isSaving,
                                 colors = RadioButtonDefaults.colors(
                                     selectedColor = MaterialTheme.colorScheme.primary,
                                     unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -221,61 +233,82 @@ fun EditContainerScreen(
                             Column(Modifier.weight(1f)) {
                                 Text("Openbox", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
                                 Text(
-                                    if (openboxSelected) "Installed and selected"
-                                    else "Alpine test · openbox + xterm + font-terminus",
+                                    when {
+                                        openboxInstalled && openboxSelected -> "Installed · Selected"
+                                        openboxInstalled -> "Installed · Not selected"
+                                        else -> "Not installed"
+                                    },
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 10.sp
                                 )
                             }
+                            Text(
+                                if (openboxExpanded) "▲" else "▼",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp
+                            )
                         }
                     }
 
-                    Spacer(Modifier.height(12.dp))
-                    if (openboxSelected) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = { viewModel.verifyOpenbox() },
-                                modifier = Modifier.weight(1f).height(44.dp),
-                                enabled = !isInstalling && !isSaving && name.isNotEmpty(),
-                                shape = RoundedCornerShape(14.dp)
+                    if (openboxExpanded) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            if (openboxInstalled) {
+                                "Openbox can be verified, reinstalled, selected or deselected without uninstalling its packages."
+                            } else {
+                                "Install Openbox and its minimal terminal/font packages. Installation logs stream in real time."
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 10.sp
+                        )
+                        Spacer(Modifier.height(10.dp))
+
+                        if (openboxInstalled) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text("Verify")
+                                OutlinedButton(
+                                    onClick = { viewModel.verifyOpenbox() },
+                                    modifier = Modifier.weight(1f).height(44.dp),
+                                    enabled = !isInstalling && !isSaving && name.isNotEmpty(),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Text("Verify")
+                                }
+                                Button(
+                                    onClick = { viewModel.installOpenbox() },
+                                    modifier = Modifier.weight(1f).height(44.dp),
+                                    enabled = !isInstalling && !isSaving && name.isNotEmpty(),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Text("Reinstall")
+                                }
                             }
+                        } else {
                             Button(
                                 onClick = { viewModel.installOpenbox() },
-                                modifier = Modifier.weight(1f).height(44.dp),
+                                modifier = Modifier.fillMaxWidth().height(44.dp),
                                 enabled = !isInstalling && !isSaving && name.isNotEmpty(),
                                 shape = RoundedCornerShape(14.dp)
                             ) {
-                                Text("Reinstall")
+                                Text("Install")
                             }
                         }
-                    } else {
-                        Button(
-                            onClick = { viewModel.installOpenbox() },
-                            modifier = Modifier.fillMaxWidth().height(44.dp),
-                            enabled = !isInstalling && !isSaving && name.isNotEmpty(),
-                            shape = RoundedCornerShape(14.dp)
-                        ) {
-                            Text("Install Openbox")
-                        }
-                    }
 
-                    if (installResult != null) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            installResult,
-                            color = if (installResult.startsWith("OK")) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.error
-                            },
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
+                        if (installResult != null) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                installResult,
+                                color = when {
+                                    installResult.startsWith("OK") -> MaterialTheme.colorScheme.primary
+                                    installResult.startsWith("Warning") -> MaterialTheme.colorScheme.tertiary
+                                    else -> MaterialTheme.colorScheme.error
+                                },
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
                     }
                 }
             }
