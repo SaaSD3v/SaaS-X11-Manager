@@ -76,6 +76,12 @@ object GraphicSessionSupport {
                     "if [ -f /root/.config/i3/config ]; then i3 -C -c /root/.config/i3/config; elif [ -f /root/.i3/config ]; then i3 -C -c /root/.i3/config; else i3 -C -c /etc/i3/config; fi"
                 )
             )
+        ),
+        GraphicSession.AWESOME to GraphicSessionSupportSpec(
+            session = GraphicSession.AWESOME,
+            verificationCommands = listOf(
+                GraphicSessionProvisionCommand("Checking AwesomeWM configuration syntax", "awesome --check")
+            )
         )
     )
 

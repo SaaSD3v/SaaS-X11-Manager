@@ -32,5 +32,6 @@ enum class GraphicSession(
     HERBSTLUFTWM("herbstluftwm", "herbstluftwm"),
     SPECTRWM("spectrwm", "spectrwm"),
     I3("i3", "i3"),
+    AWESOME("AwesomeWM", "awesome"),
     NONE("None", "")
 }
