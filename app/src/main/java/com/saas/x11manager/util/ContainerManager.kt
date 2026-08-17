@@ -199,9 +199,17 @@ object ContainerManager {
         c.copy(status = state.status, pid = state.pid, initSystem = initSys)
     }
 
-    suspend fun checkContainerStatusPublic(name: String): Pair<Boolean, Int?> = withContext(Dispatchers.IO) {
+    suspend fun getContainerRuntimeStatePublic(
+        name: String
+    ): Pair<ContainerStatus, Int?> = withContext(Dispatchers.IO) {
         val state = getContainerRuntimeStates(listOf(name))[name]
-        Pair(state?.status == ContainerStatus.RUNNING, state?.pid)
+            ?: ContainerRuntimeState(ContainerStatus.UNKNOWN)
+        Pair(state.status, state.pid)
+    }
+
+    suspend fun checkContainerStatusPublic(name: String): Pair<Boolean, Int?> {
+        val (status, pid) = getContainerRuntimeStatePublic(name)
+        return Pair(status == ContainerStatus.RUNNING, pid)
     }
 
     suspend fun updateInitSystem(
