@@ -126,6 +126,7 @@ object GraphicSessionInstallPlans {
         apk(GraphicSession.MARCO, listOf("marco", "xterm")),
         apt(GraphicSession.METACITY, listOf("metacity", "xterm")),
         apt(GraphicSession.XFWM4, listOf("xfwm4", "xterm")),
+        apk(GraphicSession.XFWM4, listOf("xfwm4", "xterm")),
         apt(GraphicSession.KWIN_X11, listOf("kwin-x11", "dbus-x11", "xterm")),
         apt(GraphicSession.ENLIGHTENMENT, listOf("enlightenment", "dbus-x11", "xterm")),
         apt(GraphicSession.BSPWM, listOf("bspwm", "sxhkd", "xterm")),
