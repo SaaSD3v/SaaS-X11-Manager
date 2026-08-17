@@ -29,6 +29,8 @@ class EditContainerViewModel : ViewModel() {
         private set
     var graphicSession by mutableStateOf(GraphicSession.XFCE)
         private set
+    var openboxInstalled by mutableStateOf(false)
+        private set
 
     var logs by mutableStateOf<List<Pair<Int, String>>>(emptyList())
     val installLogs = mutableStateListOf<Pair<Int, String>>()
@@ -48,6 +50,7 @@ class EditContainerViewModel : ViewModel() {
     private var loaded = false
     private var containerName = ""
     private var cacheDir: File? = null
+    private var savedGraphicSession = GraphicSession.XFCE
 
     fun load(containerName: String, cacheDir: File) {
         if (loaded && this.containerName == containerName) return
@@ -61,9 +64,19 @@ class EditContainerViewModel : ViewModel() {
             hostname = info.hostname
             status = info.status
             initSystem = info.initSystem
-            graphicSession = withContext(Dispatchers.IO) {
-                ContainerSettingsManager.getGraphicSession(containerName)
-            } ?: GraphicSession.XFCE
+
+            val sessionState = withContext(Dispatchers.IO) {
+                val saved = ContainerSettingsManager.getGraphicSession(containerName)
+                val installed = ContainerSettingsManager.isGraphicSessionInstalled(
+                    containerName,
+                    GraphicSession.OPENBOX
+                )
+                Pair(saved, installed)
+            }
+
+            graphicSession = sessionState.first ?: GraphicSession.XFCE
+            savedGraphicSession = graphicSession
+            openboxInstalled = sessionState.second || graphicSession == GraphicSession.OPENBOX
             logs = emptyList()
             installLogs.clear()
         }
@@ -71,6 +84,20 @@ class EditContainerViewModel : ViewModel() {
 
     fun selectInitSystem(system: InitSystem) {
         initSystem = system
+    }
+
+    fun toggleOpenboxSelection() {
+        if (!openboxInstalled || isInstallingSession || isSaving) return
+        graphicSession = if (graphicSession == GraphicSession.OPENBOX) {
+            GraphicSession.NONE
+        } else {
+            GraphicSession.OPENBOX
+        }
+        installResult = if (graphicSession == GraphicSession.OPENBOX) {
+            "Openbox selected — tap Save to apply"
+        } else {
+            "Openbox deselected — tap Save to apply"
+        }
     }
 
     fun installOpenbox() {
@@ -99,6 +126,20 @@ class EditContainerViewModel : ViewModel() {
                 if (installed) {
                     initSystem = selectedInitSystem
                     graphicSession = GraphicSession.OPENBOX
+                    savedGraphicSession = GraphicSession.OPENBOX
+                    openboxInstalled = true
+
+                    val markerSaved = withContext(Dispatchers.IO) {
+                        ContainerSettingsManager.setGraphicSessionInstalled(
+                            containerName = containerName,
+                            graphicSession = GraphicSession.OPENBOX,
+                            installed = true,
+                            cacheDir = cd
+                        )
+                    }
+                    if (!markerSaved) {
+                        logger.w("[!] Openbox is installed, but its installed marker could not be saved")
+                    }
 
                     logger.i("")
                     logger.i("[*] Stopping container after installation...")
@@ -144,10 +185,21 @@ class EditContainerViewModel : ViewModel() {
                     logger = logger
                 )
 
-                installResult = if (verified) {
-                    "OK: Openbox verified"
+                if (verified) {
+                    openboxInstalled = true
+                    cacheDir?.let { cd ->
+                        withContext(Dispatchers.IO) {
+                            ContainerSettingsManager.setGraphicSessionInstalled(
+                                containerName,
+                                GraphicSession.OPENBOX,
+                                true,
+                                cd
+                            )
+                        }
+                    }
+                    installResult = "OK: Openbox verified"
                 } else {
-                    "Error: Openbox verification failed"
+                    installResult = "Error: Openbox verification failed"
                 }
             } catch (e: Exception) {
                 logOperationException(e, "Openbox verification failed")
@@ -214,6 +266,20 @@ class EditContainerViewModel : ViewModel() {
                 }
 
                 logs = logs + (Log.INFO to "[*] Saving configuration...")
+                val previousSession = savedGraphicSession
+                val sessionSaved = withContext(Dispatchers.IO) {
+                    ContainerSettingsManager.setGraphicSession(
+                        containerName = containerName,
+                        graphicSession = graphicSession,
+                        cacheDir = cd
+                    )
+                }
+
+                if (!sessionSaved) {
+                    logs = logs + (Log.ERROR to "[-] Failed to save Graphic Session")
+                    saveError = "Error: Failed to save Graphic Session"
+                    return@launch
+                }
 
                 val initOk = ContainerManager.updateInitSystem(
                     name = containerName,
@@ -222,7 +288,8 @@ class EditContainerViewModel : ViewModel() {
                 )
 
                 if (initOk) {
-                    logs = logs + (Log.INFO to "[+] Config saved successfully")
+                    savedGraphicSession = graphicSession
+                    logs = logs + (Log.INFO to "[+] Init System and Graphic Session saved")
                     saveError = "OK: Config saved"
                     val info = ContainerManager.getContainerInfo(containerName)
                     if (info != null) {
@@ -230,8 +297,16 @@ class EditContainerViewModel : ViewModel() {
                         initSystem = info.initSystem
                     }
                 } else {
-                    logs = logs + (Log.ERROR to "[-] Failed to write config")
-                    saveError = "Error: Failed to write config"
+                    withContext(Dispatchers.IO) {
+                        ContainerSettingsManager.setGraphicSession(
+                            containerName = containerName,
+                            graphicSession = previousSession,
+                            cacheDir = cd
+                        )
+                    }
+                    graphicSession = previousSession
+                    logs = logs + (Log.ERROR to "[-] Failed to apply Init System / Graphic Session")
+                    saveError = "Error: Failed to apply configuration"
                 }
             } catch (e: Exception) {
                 logs = logs + (Log.ERROR to "[-] ${e.message}")
