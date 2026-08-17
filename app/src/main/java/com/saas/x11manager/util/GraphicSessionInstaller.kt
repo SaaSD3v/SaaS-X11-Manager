@@ -14,10 +14,10 @@ internal data class GraphicSessionInstallStep(
 )
 
 /**
- * Installs and provisions a graphical session inside a container.
- * A stopped container is started on demand and must accept commands before
- * package installation begins. This installer never starts the X11 Loader or
- * launches the graphical session itself.
+ * Installs, provisions and verifies a graphical session inside a container.
+ * A stopped container is started on demand and must accept commands before an
+ * operation begins. Package installation and verification remain separate:
+ * verification never changes packages, init files or persisted selections.
  */
 object GraphicSessionInstaller {
 
@@ -187,6 +187,69 @@ object GraphicSessionInstaller {
         )
     }
 
+    internal fun verificationStepsFor(
+        platform: ContainerPlatform,
+        session: GraphicSession,
+        initSystem: InitSystem
+    ): List<GraphicSessionInstallStep> {
+        if (platform != ContainerPlatform.ALPINE || session != GraphicSession.OPENBOX) {
+            return emptyList()
+        }
+
+        val common = listOf(
+            GraphicSessionInstallStep(
+                title = "Checking Alpine environment",
+                command = "test -f /etc/alpine-release && command -v apk"
+            ),
+            GraphicSessionInstallStep(
+                title = "Checking Openbox packages",
+                command = "apk info -e openbox >/dev/null && " +
+                    "apk info -e xterm >/dev/null && " +
+                    "apk info -e font-terminus >/dev/null"
+            ),
+            GraphicSessionInstallStep(
+                title = "Checking Openbox session command",
+                command = "command -v openbox-session"
+            ),
+            GraphicSessionInstallStep(
+                title = "Checking Openbox configuration",
+                command = "test -f /root/.config/openbox/rc.xml && " +
+                    "test -f /root/.config/openbox/menu.xml"
+            ),
+            GraphicSessionInstallStep(
+                title = "Checking X11 session launcher",
+                command = "test -x /usr/local/bin/x11-session.sh && " +
+                    "grep -Fqx 'exec openbox-session' /usr/local/bin/x11-session.sh"
+            )
+        )
+
+        val initChecks = when (initSystem) {
+            InitSystem.OPENRC -> listOf(
+                GraphicSessionInstallStep(
+                    title = "Checking OpenRC X11 startup",
+                    command = "test -x /sbin/openrc-run && " +
+                        "test -x /etc/init.d/x11-setup && " +
+                        "test -x /etc/init.d/x11-session && " +
+                        "test -L /etc/runlevels/default/x11-setup && " +
+                        "test -L /etc/runlevels/default/x11-session"
+                )
+            )
+
+            InitSystem.SYSTEMD -> listOf(
+                GraphicSessionInstallStep(
+                    title = "Checking systemd X11 startup",
+                    command = "command -v systemctl >/dev/null && " +
+                        "test -f /etc/systemd/system/setup-x11-socket.service && " +
+                        "test -f /etc/systemd/system/x11-session.service && " +
+                        "test -L /etc/systemd/system/multi-user.target.wants/setup-x11-socket.service && " +
+                        "test -L /etc/systemd/system/graphical.target.wants/x11-session.service"
+                )
+            )
+        }
+
+        return common + initChecks
+    }
+
     suspend fun install(
         containerName: String,
         platform: ContainerPlatform,
@@ -212,7 +275,7 @@ object GraphicSessionInstaller {
             return@withContext false
         }
 
-        if (!ensureContainerReady(containerName, logger)) {
+        if (!ensureContainerReady(containerName, logger, "installation")) {
             return@withContext false
         }
 
@@ -265,9 +328,42 @@ object GraphicSessionInstaller {
         true
     }
 
+    suspend fun verify(
+        containerName: String,
+        platform: ContainerPlatform,
+        session: GraphicSession,
+        initSystem: InitSystem,
+        logger: ContainerLogger? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        logger?.i("--- Verifying Graphic Session: ${session.label} ---")
+        logger?.i("")
+
+        val checks = verificationStepsFor(platform, session, initSystem)
+        if (checks.isEmpty()) {
+            logger?.e("[-] FAIL")
+            logger?.e("[-] Verification is not enabled for ${session.label} on ${platform.label}")
+            return@withContext false
+        }
+
+        if (!ensureContainerReady(containerName, logger, "verification")) {
+            return@withContext false
+        }
+
+        for (step in checks) {
+            if (!runStep(containerName, step, logger)) {
+                logger?.e("[-] ${session.label} verification failed")
+                return@withContext false
+            }
+        }
+
+        logger?.i("[+] ${session.label} verification completed")
+        true
+    }
+
     private suspend fun ensureContainerReady(
         containerName: String,
-        logger: ContainerLogger?
+        logger: ContainerLogger?,
+        purpose: String
     ): Boolean {
         logger?.i("[+] Checking container runtime")
         val (initialStatus, initialPid) = ContainerManager.getContainerRuntimeStatePublic(containerName)
@@ -278,13 +374,13 @@ object GraphicSessionInstaller {
             }
 
             ContainerStatus.STOPPED -> {
-                logger?.i("[*] Container is stopped; starting it for installation...")
+                logger?.i("[*] Container is stopped; starting it for $purpose...")
                 val started = ContainerManager.startContainer(containerName, logger)
                 if (!started) {
                     val (statusAfterStart, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
                     if (statusAfterStart == ContainerStatus.STOPPED) {
                         logger?.e("[-] FAIL")
-                        logger?.e("[-] Could not start container for installation")
+                        logger?.e("[-] Could not start container for $purpose")
                         return false
                     }
                     logger?.w("[!] Start command was inconclusive; checking command readiness")
@@ -298,7 +394,7 @@ object GraphicSessionInstaller {
                     return true
                 }
 
-                logger?.w("[!] Container runtime status is unknown; requesting start before installation")
+                logger?.w("[!] Container runtime status is unknown; requesting start before $purpose")
                 val started = ContainerManager.startContainer(containerName, logger)
                 if (!started) {
                     logger?.w("[!] Start command was inconclusive; checking command readiness")
@@ -309,7 +405,7 @@ object GraphicSessionInstaller {
         logger?.i("[*] Waiting for container command readiness (15s)...")
         if (!waitForContainerCommandReady(containerName)) {
             logger?.e("[-] FAIL")
-            logger?.e("[-] Container did not become ready for installation commands")
+            logger?.e("[-] Container did not become ready for $purpose commands")
             return false
         }
 

@@ -142,4 +142,63 @@ class GraphicSessionInstallerTest {
         assertTrue(openrc.contains("rm -f") && openrc.contains("x11-xfce"))
         assertTrue(systemd.contains("rm -f") && systemd.contains("x11-xfce"))
     }
+
+    @Test
+    fun openboxVerificationIsReadOnly() {
+        InitSystem.entries.forEach { initSystem ->
+            val commands = GraphicSessionInstaller.verificationStepsFor(
+                ContainerPlatform.ALPINE,
+                GraphicSession.OPENBOX,
+                initSystem
+            ).map { it.command }
+            val joined = commands.joinToString("\n")
+
+            assertFalse(joined.contains("apk update"))
+            assertFalse(joined.contains("apk add "))
+            assertFalse(joined.contains("rm -f"))
+            assertFalse(joined.contains("ln -s"))
+            assertFalse(joined.contains("chmod "))
+            assertFalse(joined.contains("cp "))
+            assertFalse(joined.contains("mkdir "))
+        }
+    }
+
+    @Test
+    fun openboxVerificationChecksPackagesConfigAndLauncher() {
+        val commands = GraphicSessionInstaller.verificationStepsFor(
+            ContainerPlatform.ALPINE,
+            GraphicSession.OPENBOX,
+            InitSystem.OPENRC
+        ).map { it.command }
+        val joined = commands.joinToString("\n")
+
+        assertTrue(joined.contains("apk info -e openbox"))
+        assertTrue(joined.contains("apk info -e xterm"))
+        assertTrue(joined.contains("apk info -e font-terminus"))
+        assertTrue(joined.contains("command -v openbox-session"))
+        assertTrue(joined.contains("/root/.config/openbox/rc.xml"))
+        assertTrue(joined.contains("/root/.config/openbox/menu.xml"))
+        assertTrue(joined.contains("grep -Fqx 'exec openbox-session' /usr/local/bin/x11-session.sh"))
+    }
+
+    @Test
+    fun openboxVerificationChecksSelectedInitWithoutStartingSession() {
+        val openrc = GraphicSessionInstaller.verificationStepsFor(
+            ContainerPlatform.ALPINE,
+            GraphicSession.OPENBOX,
+            InitSystem.OPENRC
+        ).joinToString("\n") { it.command }
+        val systemd = GraphicSessionInstaller.verificationStepsFor(
+            ContainerPlatform.ALPINE,
+            GraphicSession.OPENBOX,
+            InitSystem.SYSTEMD
+        ).joinToString("\n") { it.command }
+
+        assertTrue(openrc.contains("/etc/init.d/x11-session"))
+        assertTrue(openrc.contains("/etc/runlevels/default/x11-session"))
+        assertTrue(systemd.contains("/etc/systemd/system/x11-session.service"))
+        assertTrue(systemd.contains("graphical.target.wants/x11-session.service"))
+        assertFalse(openrc.lines().any { it.trim() == "openbox-session" })
+        assertFalse(systemd.lines().any { it.trim() == "openbox-session" })
+    }
 }
