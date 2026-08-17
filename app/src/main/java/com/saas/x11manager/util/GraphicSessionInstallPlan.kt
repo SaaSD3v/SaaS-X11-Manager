@@ -136,7 +136,18 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.UKWM, listOf("ukwm", "dbus-x11", "xterm")),
         apt(GraphicSession.CINNAMON_SHELL, listOf("cinnamon", "dbus-x11", "xterm")),
         apt(GraphicSession.COMPIZ, listOf("compiz-core", "compiz-plugins-default", "dbus-x11", "xterm")),
-        apt(GraphicSession.SUBTLE, listOf("subtle", "xterm"))
+        apt(GraphicSession.SUBTLE, listOf("subtle", "xterm")),
+        apt(GraphicSession.MATE, listOf("mate-desktop-environment-core", "dbus-x11")),
+        apk(GraphicSession.MATE, listOf("mate-desktop-environment", "dbus")),
+        apt(GraphicSession.LXDE, listOf("lxde-core", "openbox-lxde-session", "dbus-x11", "xterm")),
+        apt(GraphicSession.PLASMA_X11, listOf("plasma-workspace", "kwin-x11", "dbus-x11", "xterm")),
+        apt(
+            GraphicSession.CINNAMON_DESKTOP,
+            listOf("cinnamon-session", "cinnamon", "muffin", "nemo", "cinnamon-settings-daemon", "dbus-x11", "xterm")
+        ),
+        apt(GraphicSession.SUGAR, listOf("sugar-session", "dbus-x11", "xterm")),
+        apt(GraphicSession.BUDGIE, listOf("budgie-session", "budgie-core", "dbus-x11", "xterm")),
+        apt(GraphicSession.FVWM3, listOf("fvwm3", "xterm"))
     )
 
     fun forSelection(

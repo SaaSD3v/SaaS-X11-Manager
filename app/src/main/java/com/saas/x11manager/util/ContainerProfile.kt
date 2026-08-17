@@ -74,5 +74,12 @@ enum class GraphicSession(
     CINNAMON_SHELL("Cinnamon Shell", "saas-cinnamon-shell-session"),
     COMPIZ("Compiz (Ubuntu)", "saas-compiz-session"),
     SUBTLE("subtle (Ubuntu)", "subtle"),
+    MATE("MATE", "saas-mate-session"),
+    LXDE("LXDE", "saas-lxde-session"),
+    PLASMA_X11("Plasma X11", "saas-plasma-x11-session"),
+    CINNAMON_DESKTOP("Cinnamon Desktop", "saas-cinnamon-session"),
+    SUGAR("Sugar", "saas-sugar-session"),
+    BUDGIE("Budgie", "saas-budgie-session"),
+    FVWM3("FVWM3", "fvwm3"),
     NONE("None", "")
 }

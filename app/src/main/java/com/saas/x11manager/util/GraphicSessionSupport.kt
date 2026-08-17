@@ -196,6 +196,37 @@ object GraphicSessionSupport {
             wrapper = "saas-compiz-session"
         ),
         GraphicSession.SUBTLE to GraphicSessionSupportSpec(GraphicSession.SUBTLE),
+        GraphicSession.MATE to dbusWrappedSpec(
+            session = GraphicSession.MATE,
+            executable = "mate-session",
+            wrapper = "saas-mate-session"
+        ),
+        GraphicSession.LXDE to dbusWrappedSpec(
+            session = GraphicSession.LXDE,
+            executable = "startlxde",
+            wrapper = "saas-lxde-session"
+        ),
+        GraphicSession.PLASMA_X11 to dbusWrappedSpec(
+            session = GraphicSession.PLASMA_X11,
+            executable = "startplasma-x11",
+            wrapper = "saas-plasma-x11-session"
+        ),
+        GraphicSession.CINNAMON_DESKTOP to dbusWrappedSpec(
+            session = GraphicSession.CINNAMON_DESKTOP,
+            executable = "cinnamon-session",
+            wrapper = "saas-cinnamon-session"
+        ),
+        GraphicSession.SUGAR to dbusWrappedSpec(
+            session = GraphicSession.SUGAR,
+            executable = "sugar",
+            wrapper = "saas-sugar-session"
+        ),
+        GraphicSession.BUDGIE to dbusWrappedSpec(
+            session = GraphicSession.BUDGIE,
+            executable = "budgie-session",
+            wrapper = "saas-budgie-session"
+        ),
+        GraphicSession.FVWM3 to GraphicSessionSupportSpec(GraphicSession.FVWM3),
         GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE),
         GraphicSession.LXQT to GraphicSessionSupportSpec(GraphicSession.LXQT)
     )
