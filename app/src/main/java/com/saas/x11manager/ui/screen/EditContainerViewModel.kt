@@ -40,6 +40,8 @@ class EditContainerViewModel : ViewModel() {
         private set
     var showInstallTerminal by mutableStateOf(false)
         private set
+    var sessionOperationTitle by mutableStateOf("Openbox")
+        private set
     var installResult by mutableStateOf<String?>(null)
         private set
 
@@ -75,23 +77,13 @@ class EditContainerViewModel : ViewModel() {
         if (isInstallingSession || isSaving) return
 
         val cd = cacheDir ?: run {
-            installLogs.clear()
-            installLogs.add(Log.ERROR to "[-] FAIL")
-            installLogs.add(Log.ERROR to "[-] cacheDir not set")
-            installResult = "Error: cacheDir not set"
-            showInstallTerminal = true
+            showOperationSetupError("Installing Openbox", "cacheDir not set")
             return
         }
 
-        installLogs.clear()
-        installResult = null
-        showInstallTerminal = true
-        isInstallingSession = true
-
+        beginSessionOperation("Installing Openbox")
         val selectedInitSystem = initSystem
-        val logger = ViewModelLogger { level, message ->
-            installLogs.add(level to message)
-        }
+        val logger = operationLogger()
 
         viewModelScope.launch {
             try {
@@ -112,13 +104,76 @@ class EditContainerViewModel : ViewModel() {
                     installResult = "Error: Openbox installation failed"
                 }
             } catch (e: Exception) {
-                installLogs.add(Log.ERROR to "[-] FAIL")
-                installLogs.add(Log.ERROR to "[-] ${e.message ?: "Unexpected installation error"}")
-                installResult = "Error: ${e.message ?: "Openbox installation failed"}"
+                logOperationException(e, "Openbox installation failed")
             } finally {
+                refreshRuntimeStatus()
                 isInstallingSession = false
             }
         }
+    }
+
+    fun verifyOpenbox() {
+        if (isInstallingSession || isSaving) return
+
+        beginSessionOperation("Verifying Openbox")
+        val selectedInitSystem = initSystem
+        val logger = operationLogger()
+
+        viewModelScope.launch {
+            try {
+                val verified = GraphicSessionInstaller.verify(
+                    containerName = containerName,
+                    platform = ContainerPlatform.ALPINE,
+                    session = GraphicSession.OPENBOX,
+                    initSystem = selectedInitSystem,
+                    logger = logger
+                )
+
+                installResult = if (verified) {
+                    "OK: Openbox verified"
+                } else {
+                    "Error: Openbox verification failed"
+                }
+            } catch (e: Exception) {
+                logOperationException(e, "Openbox verification failed")
+            } finally {
+                refreshRuntimeStatus()
+                isInstallingSession = false
+            }
+        }
+    }
+
+    private fun beginSessionOperation(title: String) {
+        installLogs.clear()
+        installResult = null
+        sessionOperationTitle = title
+        showInstallTerminal = true
+        isInstallingSession = true
+    }
+
+    private fun operationLogger(): ViewModelLogger = ViewModelLogger { level, message ->
+        installLogs.add(level to message)
+    }
+
+    private fun showOperationSetupError(title: String, message: String) {
+        installLogs.clear()
+        installLogs.add(Log.ERROR to "[-] FAIL")
+        installLogs.add(Log.ERROR to "[-] $message")
+        installResult = "Error: $message"
+        sessionOperationTitle = title
+        showInstallTerminal = true
+    }
+
+    private fun logOperationException(e: Exception, fallback: String) {
+        val message = e.message ?: fallback
+        installLogs.add(Log.ERROR to "[-] FAIL")
+        installLogs.add(Log.ERROR to "[-] $message")
+        installResult = "Error: $message"
+    }
+
+    private suspend fun refreshRuntimeStatus() {
+        val (runtimeStatus, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
+        status = runtimeStatus
     }
 
     fun dismissInstallTerminal() {

@@ -50,7 +50,7 @@ fun EditContainerScreen(
 
     if (viewModel.showInstallTerminal) {
         TerminalDialog(
-            title = "Installing Openbox",
+            title = viewModel.sessionOperationTitle,
             logs = viewModel.installLogs,
             onDismiss = { viewModel.dismissInstallTerminal() },
             onClear = { viewModel.clearInstallLogs() },
@@ -184,7 +184,7 @@ fun EditContainerScreen(
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "Openbox is the first Alpine test session. Installation is logged in real time.",
+                        "Openbox is the first Alpine test session. Install and verify operations are logged in real time.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp
                     )
@@ -231,22 +231,36 @@ fun EditContainerScreen(
                     }
 
                     Spacer(Modifier.height(12.dp))
-                    Button(
-                        onClick = { viewModel.installOpenbox() },
-                        modifier = Modifier.fillMaxWidth().height(44.dp),
-                        enabled = !isInstalling && !isSaving && name.isNotEmpty(),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        if (isInstalling) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text("Installing Openbox...")
-                        } else {
-                            Text(if (openboxSelected) "Reinstall / Verify Openbox" else "Install Openbox")
+                    if (openboxSelected) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { viewModel.verifyOpenbox() },
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                enabled = !isInstalling && !isSaving && name.isNotEmpty(),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Text("Verify")
+                            }
+                            Button(
+                                onClick = { viewModel.installOpenbox() },
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                enabled = !isInstalling && !isSaving && name.isNotEmpty(),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Text("Reinstall")
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = { viewModel.installOpenbox() },
+                            modifier = Modifier.fillMaxWidth().height(44.dp),
+                            enabled = !isInstalling && !isSaving && name.isNotEmpty(),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Text("Install Openbox")
                         }
                     }
 
