@@ -88,5 +88,6 @@ enum class GraphicSession(
     GNOME_FLASHBACK("GNOME Flashback", "saas-gnome-flashback-session"),
     GNOME_CLASSIC_XORG("GNOME Classic Xorg", "saas-gnome-classic-xorg-session"),
     UNITY7("Unity 7 (Ubuntu)", "saas-unity7-session"),
+    UKUI_DESKTOP("UKUI Desktop", "saas-ukui-session"),
     NONE("None", "")
 }

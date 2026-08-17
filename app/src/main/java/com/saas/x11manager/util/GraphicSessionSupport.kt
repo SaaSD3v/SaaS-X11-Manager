@@ -284,6 +284,11 @@ object GraphicSessionSupport {
                 )
             )
         ),
+        GraphicSession.UKUI_DESKTOP to dbusWrappedSpec(
+            session = GraphicSession.UKUI_DESKTOP,
+            executable = "ukui-session",
+            wrapper = "saas-ukui-session"
+        ),
         GraphicSession.XFCE to GraphicSessionSupportSpec(GraphicSession.XFCE),
         GraphicSession.LXQT to GraphicSessionSupportSpec(GraphicSession.LXQT)
     )
