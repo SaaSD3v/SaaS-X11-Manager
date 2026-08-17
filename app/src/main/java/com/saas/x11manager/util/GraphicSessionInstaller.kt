@@ -436,7 +436,7 @@ object GraphicSessionInstaller {
         }
     }
 
-    private fun resolvePlatform(
+    private suspend fun resolvePlatform(
         containerName: String,
         requestedPlatform: ContainerPlatform?,
         logger: ContainerLogger?
