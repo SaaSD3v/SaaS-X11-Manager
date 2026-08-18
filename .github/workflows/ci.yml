@@ -17,6 +17,10 @@ on:
         required: false
         default: 'test'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build Android App
