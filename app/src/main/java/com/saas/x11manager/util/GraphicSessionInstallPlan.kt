@@ -174,7 +174,19 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.UNITY7, listOf("unity-session", "dbus-x11", "xterm")),
         apt(
             GraphicSession.UKUI_DESKTOP,
-            listOf("ukui-session-manager", "ukwm", "ukui-panel", "ukui-settings-daemon", "dbus-x11", "xterm")
+            listOf(
+                "ukui-session-manager",
+                "ukwm",
+                "ukui-panel",
+                "ukui-settings-daemon",
+                "ukui-polkit",
+                "ukui-menu",
+                "ukui-notification-daemon",
+                "ukui-sidebar",
+                "peony",
+                "dbus-x11",
+                "xterm"
+            )
         ),
         apt(GraphicSession.EXWM, listOf("elpa-exwm", "emacs-gtk", "dbus-x11", "xterm")),
         apt(GraphicSession.GNUSTEP_GWORKSPACE, listOf("gworkspace.app", "wmaker", "dbus-x11", "xterm")),
