@@ -29,14 +29,15 @@ object GraphicSessionInstallPlans {
     private fun apt(
         session: GraphicSession,
         packages: List<String>,
-        repositoryRequirement: RepositoryRequirement = RepositoryRequirement.APT_UNIVERSE
+        repositoryRequirement: RepositoryRequirement = RepositoryRequirement.APT_UNIVERSE,
+        installRecommendedPackages: Boolean = false
     ) = GraphicSessionInstallPlan(
         platform = ContainerPlatform.UBUNTU,
         session = session,
         repositoryRequirement = repositoryRequirement,
         packages = packages,
         verificationCommand = session.startCommand,
-        installRecommendedPackages = true
+        installRecommendedPackages = installRecommendedPackages
     )
 
     private fun apk(
