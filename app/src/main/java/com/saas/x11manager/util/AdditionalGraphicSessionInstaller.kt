@@ -15,6 +15,7 @@ object AdditionalGraphicSessionInstaller {
         val packageSteps = when (plan.platform) {
             ContainerPlatform.ALPINE -> buildList {
                 add(GraphicSessionInstallStep("Validating Alpine package manager", "command -v apk >/dev/null"))
+                alpineRepositoryPreparationStep(plan)?.let(::add)
                 add(GraphicSessionInstallStep("Refreshing package index", "apk update"))
                 plan.packages.forEach { packageName ->
                     add(
@@ -69,6 +70,30 @@ object AdditionalGraphicSessionInstaller {
                 "Validating ${plan.session.label} session command",
                 "command -v ${plan.verificationCommand}"
             )
+    }
+
+    private fun alpineRepositoryPreparationStep(
+        plan: GraphicSessionInstallPlan
+    ): GraphicSessionInstallStep? {
+        if (plan.repositoryRequirement != RepositoryRequirement.APK_COMMUNITY) return null
+
+        val command =
+            "if grep -Eq '^[[:space:]]*[^#[:space:]].*/community([[:space:]]|$)' " +
+                "/etc/apk/repositories 2>/dev/null; then :; " +
+                "elif command -v setup-apkrepos >/dev/null 2>&1; then " +
+                "setup-apkrepos -c; " +
+                "elif grep -Eq '^[[:space:]]*#[[:space:]]*[^#[:space:]].*/community([[:space:]]|$)' " +
+                "/etc/apk/repositories 2>/dev/null; then " +
+                "sed -i -E 's|^[[:space:]]*#[[:space:]]*([^[:space:]]*/community)[[:space:]]*$|\\1|' " +
+                "/etc/apk/repositories; " +
+                "else main_repo=\$(awk '/^[[:space:]]*#/ {next} /\\/main([[:space:]]*)$/ {print; exit}' " +
+                "/etc/apk/repositories 2>/dev/null); " +
+                "if [ -z \"\$main_repo\" ]; then " +
+                "echo 'Could not derive Alpine community repository from the configured main repository.' >&2; " +
+                "exit 1; fi; " +
+                "printf '%s\\n' \"\${main_repo%/main}/community\" >> /etc/apk/repositories; fi"
+
+        return GraphicSessionInstallStep("Preparing Alpine community repository", command)
     }
 
     private fun aptRepositoryPreparationStep(
