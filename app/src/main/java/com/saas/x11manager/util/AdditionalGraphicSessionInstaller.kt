@@ -177,6 +177,69 @@ object AdditionalGraphicSessionInstaller {
                 )
             }
 
+            GraphicSession.UNITY7 -> {
+                val command =
+                    "tmpdir=\$(mktemp -d) || exit 1; " +
+                        "cleanup() { rm -rf \"\$tmpdir\"; }; " +
+                        "trap cleanup EXIT HUP INT TERM; " +
+                        "cd \"\$tmpdir\" || exit 1; " +
+                        "apt-get download unity-session >/dev/null 2>&1 || " +
+                        "{ echo 'Could not download Unity session package for X11 capability inspection.' >&2; exit 1; }; " +
+                        "unity_deb=\$(find . -maxdepth 1 -type f -name 'unity-session_*.deb' -print -quit); " +
+                        "[ -n \"\$unity_deb\" ] || " +
+                        "{ echo 'Could not locate downloaded Unity session package archive.' >&2; exit 1; }; " +
+                        "dpkg-deb -c \"\$unity_deb\" | grep -Fq 'usr/share/xsessions/unity.desktop' && " +
+                        "(dpkg-deb -c \"\$unity_deb\" | grep -Fq 'usr/bin/unity-session' || " +
+                        "dpkg-deb -c \"\$unity_deb\" | grep -Fq 'usr/share/gnome-session/sessions/unity.session') || " +
+                        "{ echo 'Unity 7 X11 session artifacts are unavailable in the candidate package.' >&2; exit 1; }"
+
+                GraphicSessionInstallStep(
+                    "Checking Unity 7 X11 package capability",
+                    command
+                )
+            }
+
+            GraphicSession.UKUI_DESKTOP -> {
+                val command =
+                    "tmpdir=\$(mktemp -d) || exit 1; " +
+                        "cleanup() { rm -rf \"\$tmpdir\"; }; " +
+                        "trap cleanup EXIT HUP INT TERM; " +
+                        "cd \"\$tmpdir\" || exit 1; " +
+                        "apt-get download ukui-session-manager >/dev/null 2>&1 || " +
+                        "{ echo 'Could not download UKUI session package for X11 capability inspection.' >&2; exit 1; }; " +
+                        "ukui_deb=\$(find . -maxdepth 1 -type f -name 'ukui-session-manager_*.deb' -print -quit); " +
+                        "[ -n \"\$ukui_deb\" ] || " +
+                        "{ echo 'Could not locate downloaded UKUI session package archive.' >&2; exit 1; }; " +
+                        "dpkg-deb -c \"\$ukui_deb\" | grep -Fq 'usr/bin/ukui-session' && " +
+                        "dpkg-deb -c \"\$ukui_deb\" | grep -Fq 'usr/share/xsessions/ukui.desktop' || " +
+                        "{ echo 'UKUI X11 session artifacts are unavailable in the candidate package.' >&2; exit 1; }"
+
+                GraphicSessionInstallStep(
+                    "Checking UKUI X11 package capability",
+                    command
+                )
+            }
+
+            GraphicSession.EXWM -> {
+                val command =
+                    "tmpdir=\$(mktemp -d) || exit 1; " +
+                        "cleanup() { rm -rf \"\$tmpdir\"; }; " +
+                        "trap cleanup EXIT HUP INT TERM; " +
+                        "cd \"\$tmpdir\" || exit 1; " +
+                        "apt-get download elpa-exwm >/dev/null 2>&1 || " +
+                        "{ echo 'Could not download EXWM package for X11 capability inspection.' >&2; exit 1; }; " +
+                        "exwm_deb=\$(find . -maxdepth 1 -type f -name 'elpa-exwm_*.deb' -print -quit); " +
+                        "[ -n \"\$exwm_deb\" ] || " +
+                        "{ echo 'Could not locate downloaded EXWM package archive.' >&2; exit 1; }; " +
+                        "dpkg-deb -c \"\$exwm_deb\" | grep -Fq 'usr/share/xsessions/exwm.desktop' || " +
+                        "{ echo 'EXWM X11 session artifact is unavailable in the candidate package.' >&2; exit 1; }"
+
+                GraphicSessionInstallStep(
+                    "Checking EXWM X11 package capability",
+                    command
+                )
+            }
+
             else -> null
         }
     }
@@ -191,7 +254,7 @@ object AdditionalGraphicSessionInstaller {
                 "/etc/apk/repositories 2>/dev/null; then :; " +
                 "elif command -v setup-apkrepos >/dev/null 2>&1; then " +
                 "setup-apkrepos -c; " +
-                "elif grep -Eq '^[[:space:]]*#[[:space:]]*[^#[:space:]].*/community([[:space:]]|$)' " +
+                "elif grep -Eq '^[[:space:]]*#[[:space:]].*/community([[:space:]]|$)' " +
                 "/etc/apk/repositories 2>/dev/null; then " +
                 "sed -i -E 's|^[[:space:]]*#[[:space:]]*([^[:space:]]*/community)[[:space:]]*$|\\1|' " +
                 "/etc/apk/repositories; " +
