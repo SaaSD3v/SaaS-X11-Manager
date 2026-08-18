@@ -22,7 +22,7 @@ class GnomeFlashbackGraphicSessionTest {
     }
 
     @Test
-    fun aptInstallKeepsAllRecommendedPackagesWithoutSuppression() {
+    fun aptInstallSuppressesRecommendedPackagesByDefault() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
@@ -35,8 +35,9 @@ class GnomeFlashbackGraphicSessionTest {
             }
         )
 
-        assertTrue(plan.installRecommendedPackages)
-        assertTrue(install.command.contains("--install-recommends"))
+        assertFalse(plan.installRecommendedPackages)
+        assertTrue(install.command.contains("--no-install-recommends"))
+        assertFalse(install.command.contains("--install-recommends"))
         assertTrue(install.command.contains("gnome-session-flashback dbus-x11 xterm"))
         assertFalse(install.command.contains("blocked_recommends"))
         assertFalse(install.command.contains("\$pkg-"))
