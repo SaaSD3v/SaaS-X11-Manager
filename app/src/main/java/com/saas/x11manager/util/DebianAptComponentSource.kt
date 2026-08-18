@@ -17,7 +17,7 @@ internal object DebianAptComponentSource {
         require(safeComponent.matches(component)) { "Unsafe Debian component name" }
         return TEMPLATE
             .replace("__COMPONENT__", component)
-            .replace("__DOLLAR__", "$")
+            .replace("__DOLLAR__", "\$")
             .trim()
     }
 
