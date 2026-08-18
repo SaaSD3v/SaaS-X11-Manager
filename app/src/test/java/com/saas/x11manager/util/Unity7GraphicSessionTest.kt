@@ -22,19 +22,26 @@ class Unity7GraphicSessionTest {
     }
 
     @Test
-    fun aptInstallSuppressesUnityRecommendsByDefault() {
+    fun aptInstallPreflightsX11ArtifactsAndSuppressesUnityRecommends() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
                 GraphicSession.UNITY7
             )
         )
+        val steps = AdditionalGraphicSessionInstaller.stepsFor(plan)
+        val preflight = requireNotNull(
+            steps.firstOrNull { it.title == "Checking Unity 7 X11 package capability" }
+        )
         val install = requireNotNull(
-            AdditionalGraphicSessionInstaller.stepsFor(plan).firstOrNull {
-                it.title == "Installing Unity 7 (Ubuntu) packages"
-            }
+            steps.firstOrNull { it.title == "Installing Unity 7 (Ubuntu) packages" }
         )
 
+        assertTrue(preflight.command.contains("apt-get download unity-session"))
+        assertTrue(preflight.command.contains("usr/share/xsessions/unity.desktop"))
+        assertTrue(preflight.command.contains("usr/bin/unity-session"))
+        assertTrue(preflight.command.contains("usr/share/gnome-session/sessions/unity.session"))
+        assertFalse(preflight.command.contains("VERSION_ID="))
         assertFalse(plan.installRecommendedPackages)
         assertTrue(install.command.contains("--no-install-recommends"))
         assertFalse(install.command.contains("--install-recommends"))
