@@ -38,6 +38,9 @@ class GraphicSessionRepositoryAvailabilityTest {
             assertTrue(repositoryStep.contains(packageName))
         }
         assertTrue(repositoryStep.contains("^ID=ubuntu$"))
+        assertTrue(repositoryStep.contains("add-apt-repository --help"))
+        assertTrue(repositoryStep.contains("--component"))
+        assertTrue(repositoryStep.contains("add-apt-repository -y -c multiverse"))
         assertTrue(repositoryStep.contains("add-apt-repository -y multiverse"))
         assertTrue(repositoryStep.contains("Multiverse/non-free"))
         assertFalse(repositoryStep.contains("VERSION_ID="))
