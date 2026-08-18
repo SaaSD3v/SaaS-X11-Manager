@@ -44,7 +44,14 @@ class DesktopSessionBatchTest {
     fun researchedDesktopSessionsStayAptOnlyUntilAlpineIsConfirmed() {
         assertAptOnly(
             GraphicSession.LXDE,
-            listOf("openbox-lxde-session", "lxpanel", "pcmanfm", "lxterminal", "dbus-x11")
+            listOf(
+                "openbox-lxde-session",
+                "lxpanel",
+                "pcmanfm",
+                "lxterminal",
+                "dbus-x11",
+                "suckless-tools"
+            )
         )
         assertAptOnly(
             GraphicSession.PLASMA_X11,

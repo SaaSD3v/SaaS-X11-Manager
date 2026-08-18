@@ -8,7 +8,7 @@ import org.junit.Test
 class LxdeMinimalAptPlanTest {
 
     @Test
-    fun lxdeUsesExplicitSessionComponentsInsteadOfDesktopMetapackage() {
+    fun lxdeUsesExplicitSessionComponentsAndSafeLockerProvider() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
@@ -17,11 +17,19 @@ class LxdeMinimalAptPlanTest {
         )
 
         assertEquals(
-            listOf("openbox-lxde-session", "lxpanel", "pcmanfm", "lxterminal", "dbus-x11"),
+            listOf(
+                "openbox-lxde-session",
+                "lxpanel",
+                "pcmanfm",
+                "lxterminal",
+                "dbus-x11",
+                "suckless-tools"
+            ),
             plan.packages
         )
         assertFalse("lxde-core" in plan.packages)
         assertFalse("lightdm" in plan.packages)
+        assertTrue("suckless-tools" in plan.packages)
         assertFalse(plan.installRecommendedPackages)
     }
 

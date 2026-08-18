@@ -156,7 +156,7 @@ object GraphicSessionInstallPlans {
         apk(GraphicSession.MATE, listOf("mate-desktop-environment", "dbus")),
         apt(
             GraphicSession.LXDE,
-            listOf("openbox-lxde-session", "lxpanel", "pcmanfm", "lxterminal", "dbus-x11")
+            listOf("openbox-lxde-session", "lxpanel", "pcmanfm", "lxterminal", "dbus-x11", "suckless-tools")
         ),
         apt(
             GraphicSession.PLASMA_X11,
