@@ -20,7 +20,22 @@ class FluxboxGraphicSessionTest {
         assertEquals(listOf("fluxbox", "xterm"), deb.packages)
         assertEquals("startfluxbox", alpine.verificationCommand)
         assertEquals("startfluxbox", deb.verificationCommand)
-        assertTrue(deb.installRecommendedPackages)
+        assertFalse(deb.installRecommendedPackages)
+    }
+
+    @Test
+    fun fluxboxAptInstallSuppressesRecommendedPackagesByDefault() {
+        val plan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.FLUXBOX)
+        )
+        val install = requireNotNull(
+            AdditionalGraphicSessionInstaller.stepsFor(plan).firstOrNull {
+                it.command.contains("apt-get install -y")
+            }
+        )
+
+        assertTrue(install.command.contains("--no-install-recommends"))
+        assertFalse(Regex("""(^|\s)--install-recommends(\s|$)""").containsMatchIn(install.command))
     }
 
     @Test
