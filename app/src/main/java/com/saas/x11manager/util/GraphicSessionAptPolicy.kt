@@ -12,6 +12,7 @@ internal object GraphicSessionAptPolicy {
         GraphicSession.XFCE -> listOf("systemd-sysv")
         GraphicSession.LXQT -> listOf("pavucontrol-qt", "pavucontrol")
         GraphicSession.GNOME_XORG -> listOf("systemd-sysv")
+        GraphicSession.GNOME_FLASHBACK -> listOf("systemd-sysv", "xserver-xorg")
         GraphicSession.CINNAMON_SHELL,
         GraphicSession.CINNAMON_DESKTOP -> listOf("cinnamon-core")
         GraphicSession.MATE -> listOf("pipewire-audio", "pulseaudio")

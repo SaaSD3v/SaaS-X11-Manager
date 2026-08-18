@@ -9,7 +9,7 @@ import org.junit.Test
 class GnomeFlashbackGraphicSessionTest {
 
     @Test
-    fun aptPlanUsesDebianFlashbackSessionPackage() {
+    fun aptPlanUsesFlashbackSessionPackage() {
         val plan = GraphicSessionInstallPlans.forSelection(
             ContainerPlatform.UBUNTU,
             GraphicSession.GNOME_FLASHBACK
@@ -18,6 +18,32 @@ class GnomeFlashbackGraphicSessionTest {
         assertNotNull(plan)
         assertEquals(listOf("gnome-session-flashback", "dbus-x11", "xterm"), plan?.packages)
         assertEquals("saas-gnome-flashback-session", GraphicSession.GNOME_FLASHBACK.startCommand)
+    }
+
+    @Test
+    fun aptInstallKeepsRecommendsButCannotIntroduceSystemdOrLocalXorg() {
+        val plan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(
+                ContainerPlatform.UBUNTU,
+                GraphicSession.GNOME_FLASHBACK
+            )
+        )
+        val install = requireNotNull(
+            AdditionalGraphicSessionInstaller.stepsFor(plan).firstOrNull {
+                it.title == "Installing GNOME Flashback packages"
+            }
+        )
+
+        assertTrue(plan.installRecommendedPackages)
+        assertEquals(
+            listOf("systemd-sysv", "xserver-xorg"),
+            GraphicSessionAptPolicy.blockedRecommendedPackages(GraphicSession.GNOME_FLASHBACK)
+        )
+        assertTrue(install.command.contains("--install-recommends"))
+        assertTrue(install.command.contains("gnome-session-flashback dbus-x11 xterm"))
+        assertTrue(install.command.contains("systemd-sysv"))
+        assertTrue(install.command.contains("xserver-xorg"))
+        assertTrue(install.command.contains("\$pkg-"))
     }
 
     @Test
