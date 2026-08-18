@@ -33,7 +33,7 @@ class UkuiDesktopGraphicSessionTest {
             ),
             plan?.packages
         )
-        assertTrue(plan?.installRecommendedPackages == true)
+        assertFalse(plan?.installRecommendedPackages == true)
         assertFalse(plan?.packages?.contains("ukui-greeter") == true)
         assertFalse(plan?.packages?.contains("ukui-power-manager") == true)
         assertFalse(plan?.packages?.contains("ukui-screensaver") == true)
