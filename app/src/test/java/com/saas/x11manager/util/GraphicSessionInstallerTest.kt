@@ -63,7 +63,7 @@ class GraphicSessionInstallerTest {
         assertTrue(commands.contains("DEBIAN_FRONTEND=noninteractive apt-get update"))
         assertTrue(commands.any { it.contains("all_packages_available") && it.contains("add-apt-repository -y universe") })
         plan.packages.forEach { packageName ->
-            assertTrue("apt-cache show $packageName >/dev/null 2>&1" in commands)
+            assertTrue(AptPackageAvailability.candidateCommand(packageName) in commands)
         }
         assertEquals(1, commands.count { it.contains("apt-get install -y") })
         assertTrue(
@@ -106,7 +106,7 @@ class GraphicSessionInstallerTest {
         assertTrue(commands.contains("DEBIAN_FRONTEND=noninteractive apt-get update"))
         assertTrue(commands.any { it.contains("all_packages_available") && it.contains("add-apt-repository -y universe") })
         plan.packages.forEach { packageName ->
-            assertTrue("apt-cache show $packageName >/dev/null 2>&1" in commands)
+            assertTrue(AptPackageAvailability.candidateCommand(packageName) in commands)
         }
         assertEquals(1, commands.count { it.contains("apt-get install -y") })
         assertTrue(
@@ -151,7 +151,7 @@ class GraphicSessionInstallerTest {
         assertTrue(commands.contains("DEBIAN_FRONTEND=noninteractive apt-get update"))
         assertTrue(commands.any { it.contains("all_packages_available") && it.contains("add-apt-repository -y universe") })
         plan.packages.forEach { packageName ->
-            assertTrue("apt-cache show $packageName >/dev/null 2>&1" in commands)
+            assertTrue(AptPackageAvailability.candidateCommand(packageName) in commands)
         }
         assertEquals(1, commands.count { it.contains("apt-get install -y") })
         assertTrue(

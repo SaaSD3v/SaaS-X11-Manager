@@ -139,7 +139,7 @@ object GraphicSessionInstaller {
                 add(
                     GraphicSessionInstallStep(
                         title = "Checking $packageName availability",
-                        command = "apt-cache show $packageName >/dev/null 2>&1"
+                        command = AptPackageAvailability.candidateCommand(packageName)
                     )
                 )
             }
@@ -190,9 +190,11 @@ object GraphicSessionInstaller {
             else -> "Universe or the distro repository containing the packages"
         }
         val packageList = plan.packages.joinToString(" ")
+        val availabilityFunction = AptPackageAvailability.shellFunctionDefinition()
         val command =
-            "all_packages_available() { for pkg in $packageList; do " +
-                "apt-cache show \"\$pkg\" >/dev/null 2>&1 || return 1; done; return 0; }; " +
+            availabilityFunction + " " +
+                "all_packages_available() { for pkg in $packageList; do " +
+                "apt_package_available \"\$pkg\" || return 1; done; return 0; }; " +
                 "if all_packages_available; then :; " +
                 "elif grep -Eq '^ID=ubuntu$' /etc/os-release 2>/dev/null && " +
                 "command -v add-apt-repository >/dev/null 2>&1; then " +
