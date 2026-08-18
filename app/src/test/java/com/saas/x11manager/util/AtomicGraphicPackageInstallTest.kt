@@ -37,7 +37,7 @@ class AtomicGraphicPackageInstallTest {
         val steps = AdditionalGraphicSessionInstaller.stepsFor(plan)
 
         plan.packages.forEach { packageName ->
-            assertTrue(steps.any { it.command == "apt-cache show $packageName >/dev/null 2>&1" })
+            assertTrue(steps.any { it.command == AptPackageAvailability.candidateCommand(packageName) })
         }
 
         val installSteps = steps.filter { it.command.contains("apt-get install -y") }
