@@ -1,6 +1,7 @@
 package com.saas.x11manager.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -15,7 +16,7 @@ class GraphicSessionInstallPlansTest {
 
         assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
         assertEquals("startxfce4", plan.verificationCommand)
-        assertTrue(plan.installRecommendedPackages)
+        assertFalse(plan.installRecommendedPackages)
         assertTrue(plan.packages.containsAll(listOf(
             "dbus-x11",
             "libxfce4ui-utils",
@@ -41,7 +42,7 @@ class GraphicSessionInstallPlansTest {
 
         assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
         assertEquals("startlxqt", plan.verificationCommand)
-        assertTrue(plan.installRecommendedPackages)
+        assertFalse(plan.installRecommendedPackages)
         assertEquals(listOf("dbus-x11", "lxqt-core", "openbox"), plan.packages)
         assertSafeAptPlan(plan)
     }
@@ -56,7 +57,7 @@ class GraphicSessionInstallPlansTest {
         assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
         assertEquals("openbox-session", plan.verificationCommand)
         assertEquals(listOf("openbox", "xterm", "fonts-terminus"), plan.packages)
-        assertTrue(plan.installRecommendedPackages)
+        assertFalse(plan.installRecommendedPackages)
         assertSafeAptPlan(plan)
 
         val unnecessaryForDirectTermuxX11 = setOf(
@@ -82,7 +83,7 @@ class GraphicSessionInstallPlansTest {
         assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
         assertEquals("icewm-session", plan.verificationCommand)
         assertEquals(listOf("icewm", "xterm"), plan.packages)
-        assertTrue(plan.installRecommendedPackages)
+        assertFalse(plan.installRecommendedPackages)
         assertSafeAptPlan(plan)
     }
 
@@ -96,7 +97,7 @@ class GraphicSessionInstallPlansTest {
         assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
         assertEquals("jwm", plan.verificationCommand)
         assertEquals(listOf("jwm", "xterm"), plan.packages)
-        assertTrue(plan.installRecommendedPackages)
+        assertFalse(plan.installRecommendedPackages)
         assertSafeAptPlan(plan)
     }
 
