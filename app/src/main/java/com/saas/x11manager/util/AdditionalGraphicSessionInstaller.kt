@@ -240,6 +240,26 @@ object AdditionalGraphicSessionInstaller {
                 )
             }
 
+            GraphicSession.GNUSTEP_GWORKSPACE -> {
+                val command =
+                    "tmpdir=\$(mktemp -d) || exit 1; " +
+                        "cleanup() { rm -rf \"\$tmpdir\"; }; " +
+                        "trap cleanup EXIT HUP INT TERM; " +
+                        "cd \"\$tmpdir\" || exit 1; " +
+                        "apt-get download gworkspace.app >/dev/null 2>&1 || " +
+                        "{ echo 'Could not download GWorkspace package for capability inspection.' >&2; exit 1; }; " +
+                        "gworkspace_deb=\$(find . -maxdepth 1 -type f -name 'gworkspace.app_*.deb' -print -quit); " +
+                        "[ -n \"\$gworkspace_deb\" ] || " +
+                        "{ echo 'Could not locate downloaded GWorkspace package archive.' >&2; exit 1; }; " +
+                        "dpkg-deb -c \"\$gworkspace_deb\" | grep -Fq 'usr/bin/GWorkspace' || " +
+                        "{ echo 'GWorkspace executable artifact is unavailable in the candidate package.' >&2; exit 1; }"
+
+                GraphicSessionInstallStep(
+                    "Checking GNUstep GWorkspace package capability",
+                    command
+                )
+            }
+
             else -> null
         }
     }
