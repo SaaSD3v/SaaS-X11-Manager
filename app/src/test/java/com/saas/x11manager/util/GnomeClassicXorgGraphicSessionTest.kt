@@ -40,7 +40,9 @@ class GnomeClassicXorgGraphicSessionTest {
             steps.firstOrNull { it.title == "Installing GNOME Classic Xorg packages" }
         )
 
-        assertTrue(preflight.command.contains("apt-cache show gnome-classic-xsession"))
+        assertTrue(preflight.command.contains("apt-cache policy 'gnome-classic-xsession'"))
+        assertTrue(preflight.command.contains("\$2 != \"(none)\""))
+        assertFalse(preflight.command.contains("apt-cache show gnome-classic-xsession"))
         assertTrue(preflight.command.contains("candidate=gnome-classic-xsession"))
         assertTrue(preflight.command.contains("candidate=gnome-shell-extensions"))
         assertTrue(preflight.command.contains("usr/share/xsessions/gnome-classic-xorg.desktop"))

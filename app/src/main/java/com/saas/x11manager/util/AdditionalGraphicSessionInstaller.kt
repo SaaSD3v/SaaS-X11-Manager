@@ -54,7 +54,7 @@ object AdditionalGraphicSessionInstaller {
                     add(
                         GraphicSessionInstallStep(
                             "Checking $packageName availability",
-                            "apt-cache show $packageName >/dev/null 2>&1"
+                            AptPackageAvailability.candidateCommand(packageName)
                         )
                     )
                 }
@@ -136,12 +136,14 @@ object AdditionalGraphicSessionInstaller {
             }
 
             GraphicSession.GNOME_XORG -> {
+                val xsessionCandidateCheck =
+                    AptPackageAvailability.candidateCommand("gnome-session-xsession")
                 val command =
                     "tmpdir=\$(mktemp -d) || exit 1; " +
                         "cleanup() { rm -rf \"\$tmpdir\"; }; " +
                         "trap cleanup EXIT HUP INT TERM; " +
                         "cd \"\$tmpdir\" || exit 1; " +
-                        "if apt-cache show gnome-session-xsession >/dev/null 2>&1; then " +
+                        "if $xsessionCandidateCheck; then " +
                         "candidate=gnome-session-xsession; else candidate=gnome-session; fi; " +
                         "apt-get download \"\$candidate\" >/dev/null 2>&1 || " +
                         "{ echo 'Could not download GNOME session package for Xorg capability inspection.' >&2; exit 1; }; " +
@@ -158,12 +160,14 @@ object AdditionalGraphicSessionInstaller {
             }
 
             GraphicSession.GNOME_CLASSIC_XORG -> {
+                val classicCandidateCheck =
+                    AptPackageAvailability.candidateCommand("gnome-classic-xsession")
                 val command =
                     "tmpdir=\$(mktemp -d) || exit 1; " +
                         "cleanup() { rm -rf \"\$tmpdir\"; }; " +
                         "trap cleanup EXIT HUP INT TERM; " +
                         "cd \"\$tmpdir\" || exit 1; " +
-                        "if apt-cache show gnome-classic-xsession >/dev/null 2>&1; then " +
+                        "if $classicCandidateCheck; then " +
                         "candidate=gnome-classic-xsession; else candidate=gnome-shell-extensions; fi; " +
                         "apt-get download \"\$candidate\" >/dev/null 2>&1 || " +
                         "{ echo 'Could not download GNOME Classic package for Xorg capability inspection.' >&2; exit 1; }; " +
@@ -180,6 +184,8 @@ object AdditionalGraphicSessionInstaller {
             }
 
             GraphicSession.PLASMA_X11 -> {
+                val x11SessionCandidateCheck =
+                    AptPackageAvailability.candidateCommand("plasma-session-x11")
                 val command =
                     "tmpdir=\$(mktemp -d) || exit 1; " +
                         "cleanup() { rm -rf \"\$tmpdir\"; }; " +
@@ -191,7 +197,7 @@ object AdditionalGraphicSessionInstaller {
                         "[ -n \"\$workspace_deb\" ] || " +
                         "{ echo 'Could not locate downloaded Plasma workspace package archive.' >&2; exit 1; }; " +
                         "dpkg-deb -c \"\$workspace_deb\" | grep -Fq 'usr/bin/startplasma-x11' || " +
-                        "{ if apt-cache show plasma-session-x11 >/dev/null 2>&1; then " +
+                        "{ if $x11SessionCandidateCheck; then " +
                         "echo 'This image provides startplasma-x11 through plasma-session-x11, which requires a local Xorg stack; refusing to provision it over Termux:X11.' >&2; " +
                         "else echo 'Plasma X11 launcher is unavailable in the candidate workspace package.' >&2; fi; exit 1; }"
 
@@ -326,9 +332,11 @@ object AdditionalGraphicSessionInstaller {
             else -> "Universe or the distro repository containing the packages"
         }
         val packageList = plan.packages.joinToString(" ")
+        val availabilityFunction = AptPackageAvailability.shellFunctionDefinition()
         val command =
-            "all_packages_available() { for pkg in $packageList; do " +
-                "apt-cache show \"\$pkg\" >/dev/null 2>&1 || return 1; done; return 0; }; " +
+            availabilityFunction + " " +
+                "all_packages_available() { for pkg in $packageList; do " +
+                "apt_package_available \"\$pkg\" || return 1; done; return 0; }; " +
                 "if all_packages_available; then :; " +
                 "elif grep -Eq '^ID=ubuntu$' /etc/os-release 2>/dev/null && " +
                 "command -v add-apt-repository >/dev/null 2>&1; then " +

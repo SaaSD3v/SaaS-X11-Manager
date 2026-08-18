@@ -40,7 +40,9 @@ class GnomeXorgGraphicSessionTest {
             steps.firstOrNull { it.title == "Installing GNOME Xorg packages" }
         )
 
-        assertTrue(preflight.command.contains("apt-cache show gnome-session-xsession"))
+        assertTrue(preflight.command.contains("apt-cache policy 'gnome-session-xsession'"))
+        assertTrue(preflight.command.contains("\$2 != \"(none)\""))
+        assertFalse(preflight.command.contains("apt-cache show gnome-session-xsession"))
         assertTrue(preflight.command.contains("candidate=gnome-session-xsession"))
         assertTrue(preflight.command.contains("candidate=gnome-session"))
         assertTrue(preflight.command.contains("apt-get download"))
