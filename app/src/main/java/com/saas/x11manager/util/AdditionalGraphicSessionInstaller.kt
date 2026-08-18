@@ -57,6 +57,7 @@ object AdditionalGraphicSessionInstaller {
                         )
                     )
                 }
+                preInstallCapabilityStep(plan)?.let(::add)
                 val recommendsFlag = if (plan.installRecommendedPackages) {
                     " --install-recommends"
                 } else {
@@ -80,6 +81,38 @@ object AdditionalGraphicSessionInstaller {
                 "Validating ${plan.session.label} session command",
                 "command -v ${plan.verificationCommand}"
             )
+    }
+
+    private fun preInstallCapabilityStep(
+        plan: GraphicSessionInstallPlan
+    ): GraphicSessionInstallStep? {
+        if (
+            plan.platform != ContainerPlatform.UBUNTU ||
+            plan.session != GraphicSession.GNOME_KIOSK_X11
+        ) {
+            return null
+        }
+
+        val command =
+            "tmpdir=\$(mktemp -d) || exit 1; " +
+                "cleanup() { rm -rf \"\$tmpdir\"; }; " +
+                "trap cleanup EXIT HUP INT TERM; " +
+                "cd \"\$tmpdir\" || exit 1; " +
+                "apt-get download gnome-kiosk-script-session gnome-kiosk >/dev/null 2>&1 || " +
+                "{ echo 'Could not download GNOME Kiosk packages for X11 capability inspection.' >&2; exit 1; }; " +
+                "script_deb=\$(find . -maxdepth 1 -type f -name 'gnome-kiosk-script-session_*.deb' -print -quit); " +
+                "kiosk_deb=\$(find . -maxdepth 1 -type f -name 'gnome-kiosk_*.deb' -print -quit); " +
+                "[ -n \"\$script_deb\" ] && [ -n \"\$kiosk_deb\" ] || " +
+                "{ echo 'Could not locate downloaded GNOME Kiosk package archives.' >&2; exit 1; }; " +
+                "dpkg-deb -c \"\$script_deb\" | grep -Fq 'usr/share/xsessions/gnome-kiosk-script-xorg.desktop' && " +
+                "dpkg-deb -c \"\$script_deb\" | grep -Fq 'usr/share/gnome-session/sessions/gnome-kiosk-script.session' && " +
+                "dpkg-deb -c \"\$kiosk_deb\" | grep -Fq 'usr/lib/systemd/user/org.gnome.Kiosk@x11.service' || " +
+                "{ echo 'GNOME Kiosk X11 is unavailable in the candidate packages; this image provides Wayland-only kiosk support.' >&2; exit 1; }"
+
+        return GraphicSessionInstallStep(
+            "Checking GNOME Kiosk X11 package capability",
+            command
+        )
     }
 
     private fun alpineRepositoryPreparationStep(
