@@ -5,6 +5,7 @@ on:
     branches: [ "main", "master", "agent/structural-fixes" ]
     paths:
       - "ci/rootfs-compatibility.sh"
+      - "ci/debian-apt-component-probe.sh"
       - "ci/export-graphic-session-plans.py"
       - "app/src/main/java/com/saas/x11manager/util/GraphicSessionInstallPlan.kt"
       - "app/src/main/java/com/saas/x11manager/util/AdditionalGraphicSessionInstaller.kt"
@@ -15,6 +16,7 @@ on:
     branches: [ "main", "master" ]
     paths:
       - "ci/rootfs-compatibility.sh"
+      - "ci/debian-apt-component-probe.sh"
       - "ci/export-graphic-session-plans.py"
       - "app/src/main/java/com/saas/x11manager/util/GraphicSessionInstallPlan.kt"
       - "app/src/main/java/com/saas/x11manager/util/AdditionalGraphicSessionInstaller.kt"
@@ -60,7 +62,9 @@ jobs:
             "${RUNNER_TEMP}/graphic-session-plans.tsv"
 
       - name: Validate compatibility probe syntax
-        run: sh -n ci/rootfs-compatibility.sh
+        run: |
+          sh -n ci/rootfs-compatibility.sh
+          sh -n ci/debian-apt-component-probe.sh
 
       - name: Validate current rootfs package compatibility
         run: |
@@ -76,6 +80,15 @@ jobs:
             sh ci/rootfs-compatibility.sh
           test -s "${RUNNER_TEMP}/rootfs-audit/${{ matrix.slug }}.tsv"
           cat "${RUNNER_TEMP}/rootfs-audit/${{ matrix.slug }}.tsv"
+
+      - name: Validate Debian non-free component capability
+        if: ${{ matrix.slug == 'debian-stable' }}
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/workspace:ro" \
+            -w /workspace \
+            "${{ matrix.image }}" \
+            sh ci/debian-apt-component-probe.sh
 
       - name: Upload rootfs catalog audit
         if: ${{ always() }}
