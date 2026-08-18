@@ -1,6 +1,5 @@
 #!/bin/sh
 set -eu
-set -f
 
 fail() {
     echo "[-] $*" >&2
