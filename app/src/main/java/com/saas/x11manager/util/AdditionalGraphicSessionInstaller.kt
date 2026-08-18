@@ -99,7 +99,7 @@ object AdditionalGraphicSessionInstaller {
     private fun aptRepositoryPreparationStep(
         plan: GraphicSessionInstallPlan
     ): GraphicSessionInstallStep? {
-        val probePackage = plan.packages.firstOrNull() ?: return null
+        if (plan.packages.isEmpty()) return null
         val component = when (plan.repositoryRequirement) {
             RepositoryRequirement.APT_UNIVERSE -> "universe"
             RepositoryRequirement.APT_MULTIVERSE -> "multiverse"
@@ -107,16 +107,20 @@ object AdditionalGraphicSessionInstaller {
         }
         val fallbackDescription = when (plan.repositoryRequirement) {
             RepositoryRequirement.APT_MULTIVERSE -> "Multiverse/non-free"
-            else -> "Universe or the distro repository containing the package"
+            else -> "Universe or the distro repository containing the packages"
         }
+        val packageList = plan.packages.joinToString(" ")
         val command =
-            "if apt-cache show $probePackage >/dev/null 2>&1; then :; " +
+            "all_packages_available() { for pkg in $packageList; do " +
+                "apt-cache show \"\$pkg\" >/dev/null 2>&1 || return 1; done; return 0; }; " +
+                "if all_packages_available; then :; " +
                 "elif grep -Eq '^ID=ubuntu$' /etc/os-release 2>/dev/null && " +
                 "command -v add-apt-repository >/dev/null 2>&1; then " +
                 "add-apt-repository -y $component && " +
                 "DEBIAN_FRONTEND=noninteractive apt-get update && " +
-                "apt-cache show $probePackage >/dev/null 2>&1; " +
-                "else echo 'Required apt repository is unavailable for $probePackage. " +
+                "all_packages_available || { " +
+                "echo 'Required apt packages are still unavailable after enabling $component.' >&2; exit 1; }; " +
+                "else echo 'Required apt repository is unavailable. " +
                 "Enable $fallbackDescription for this image.' >&2; exit 1; fi"
         return GraphicSessionInstallStep("Checking required apt repository", command)
     }
