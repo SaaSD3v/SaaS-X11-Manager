@@ -25,6 +25,7 @@ object AdditionalGraphicSessionInstaller {
                         )
                     )
                 }
+                ApkTransactionSafety.stepFor(plan)?.let(::add)
                 if (plan.packages.isNotEmpty()) {
                     add(
                         GraphicSessionInstallStep(
