@@ -24,13 +24,13 @@ class AptRecommendedPackagesPolicyTest {
             } else {
                 AdditionalGraphicSessionInstaller.stepsFor(plan)
             }
-                .filter { it.title.startsWith("Installing ") }
+                .filter { it.command.contains("apt-get install -y") }
                 .map { it.command }
 
             assertTrue(installCommands.isNotEmpty())
             installCommands.forEach { command ->
                 assertTrue(command.contains("--no-install-recommends"))
-                assertFalse(command.contains("--install-recommends"))
+                assertFalse(Regex("""(^|\s)--install-recommends(\s|$)""").containsMatchIn(command))
             }
         }
     }
