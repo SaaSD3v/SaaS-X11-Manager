@@ -25,8 +25,13 @@ object AdditionalGraphicSessionInstaller {
                         )
                     )
                 }
-                plan.packages.forEach { packageName ->
-                    add(GraphicSessionInstallStep("Installing $packageName", "apk add $packageName"))
+                if (plan.packages.isNotEmpty()) {
+                    add(
+                        GraphicSessionInstallStep(
+                            "Installing ${plan.session.label} packages",
+                            "apk add ${plan.packages.joinToString(" ")}"
+                        )
+                    )
                 }
             }
 
@@ -57,11 +62,12 @@ object AdditionalGraphicSessionInstaller {
                 } else {
                     " --no-install-recommends"
                 }
-                plan.packages.forEach { packageName ->
+                if (plan.packages.isNotEmpty()) {
                     add(
                         GraphicSessionInstallStep(
-                            "Installing $packageName",
-                            "DEBIAN_FRONTEND=noninteractive apt-get install -y$recommendsFlag $packageName"
+                            "Installing ${plan.session.label} packages",
+                            "DEBIAN_FRONTEND=noninteractive apt-get install -y$recommendsFlag " +
+                                plan.packages.joinToString(" ")
                         )
                     )
                 }
