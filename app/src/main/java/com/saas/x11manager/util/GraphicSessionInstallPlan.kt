@@ -154,7 +154,10 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.SUBTLE, listOf("subtle", "xterm")),
         apt(GraphicSession.MATE, listOf("mate-desktop-environment", "dbus-x11")),
         apk(GraphicSession.MATE, listOf("mate-desktop-environment", "dbus")),
-        apt(GraphicSession.LXDE, listOf("lxde-core", "openbox-lxde-session", "dbus-x11", "xterm")),
+        apt(
+            GraphicSession.LXDE,
+            listOf("openbox-lxde-session", "lxpanel", "pcmanfm", "lxterminal", "dbus-x11")
+        ),
         apt(
             GraphicSession.PLASMA_X11,
             listOf("plasma-desktop", "plasma-workspace", "kwin-x11", "dbus-x11", "xterm")
