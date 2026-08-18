@@ -6,7 +6,7 @@ import org.junit.Test
 
 class GraphicSessionWizardTest {
     @Test
-    fun openRcUsesAlpineCatalog() {
+    fun openRcLegacyMappingUsesAlpineCatalog() {
         assertEquals(ContainerPlatform.ALPINE, GraphicSessionWizard.platformFor(InitSystem.OPENRC))
         val sessions = GraphicSessionWizard.sessionsFor(InitSystem.OPENRC)
         assertTrue(sessions.isNotEmpty())
@@ -18,7 +18,7 @@ class GraphicSessionWizardTest {
     }
 
     @Test
-    fun systemdUsesDebCatalog() {
+    fun systemdLegacyMappingUsesDebCatalog() {
         assertEquals(ContainerPlatform.UBUNTU, GraphicSessionWizard.platformFor(InitSystem.SYSTEMD))
         val sessions = GraphicSessionWizard.sessionsFor(InitSystem.SYSTEMD)
         assertTrue(sessions.isNotEmpty())
@@ -26,6 +26,24 @@ class GraphicSessionWizardTest {
             assertTrue(
                 GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, session) != null
             )
+        }
+    }
+
+    @Test
+    fun detectedAlpineCatalogIsIndependentFromInitChoice() {
+        val sessions = GraphicSessionWizard.sessionsFor(ContainerPlatform.ALPINE)
+        assertTrue(sessions.isNotEmpty())
+        sessions.forEach { session ->
+            assertTrue(GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, session) != null)
+        }
+    }
+
+    @Test
+    fun detectedDebCatalogIsIndependentFromInitChoice() {
+        val sessions = GraphicSessionWizard.sessionsFor(ContainerPlatform.UBUNTU)
+        assertTrue(sessions.isNotEmpty())
+        sessions.forEach { session ->
+            assertTrue(GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, session) != null)
         }
     }
 }
