@@ -601,33 +601,20 @@ object GraphicSessionInstaller {
                 }
             }
 
-            logger?.i("[+] Saving Package Platform")
-            logger?.i("platform=${if (resolvedPlatform == ContainerPlatform.ALPINE) "alpine" else "ubuntu"}")
-            if (!ContainerSettingsManager.setPlatform(containerName, resolvedPlatform, cacheDir)) {
+            logger?.i("[+] Saving Package Platform / Init System / Graphic Session")
+            val profileSaved = ContainerSettingsManager.setProfile(
+                containerName = containerName,
+                platform = resolvedPlatform,
+                initSystem = initSystem,
+                graphicSession = session,
+                cacheDir = cacheDir
+            )
+            if (!profileSaved) {
                 logger?.e("[-] FAIL")
-                logger?.e("[-] Could not persist Package Platform")
+                logger?.e("[-] Could not persist package platform, init system and graphic session")
                 return@withContext false
             }
-            logger?.i("[+] OK")
-            logger?.i("")
-
-            logger?.i("[+] Saving Init System")
-            logger?.i("init_system=${initSystem.name.lowercase()}")
-            if (!ContainerSettingsManager.setInitSystem(containerName, initSystem, cacheDir)) {
-                logger?.e("[-] FAIL")
-                logger?.e("[-] Could not persist Init System")
-                return@withContext false
-            }
-            logger?.i("[+] OK")
-            logger?.i("")
-
-            logger?.i("[+] Saving Graphic Session")
-            logger?.i("graphic_session=${session.name.lowercase()}")
-            if (!ContainerSettingsManager.setGraphicSession(containerName, session, cacheDir)) {
-                logger?.e("[-] FAIL")
-                logger?.e("[-] Could not persist Graphic Session")
-                return@withContext false
-            }
+            logger?.i("[+] Saved package platform, init system and graphic session atomically")
             logger?.i("[+] OK")
             logger?.i("")
             logger?.i("[+] ${session.label} setup completed")
