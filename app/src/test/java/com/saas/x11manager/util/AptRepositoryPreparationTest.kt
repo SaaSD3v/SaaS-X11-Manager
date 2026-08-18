@@ -6,7 +6,7 @@ import org.junit.Test
 class AptRepositoryPreparationTest {
 
     @Test
-    fun universePreparationChecksEveryPackageInThePlan() {
+    fun universePreparationChecksEveryPackageAndBothComponentSyntaxes() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
@@ -23,11 +23,14 @@ class AptRepositoryPreparationTest {
         plan.packages.forEach { packageName ->
             assertTrue(step.command.contains(packageName))
         }
+        assertTrue(step.command.contains("add-apt-repository --help"))
+        assertTrue(step.command.contains("--component"))
+        assertTrue(step.command.contains("add-apt-repository -y -c universe"))
         assertTrue(step.command.contains("add-apt-repository -y universe"))
     }
 
     @Test
-    fun multiversePreparationAlsoChecksTheWholePlan() {
+    fun multiversePreparationAlsoSupportsModernAndLegacySyntax() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
@@ -43,6 +46,8 @@ class AptRepositoryPreparationTest {
         plan.packages.forEach { packageName ->
             assertTrue(step.command.contains(packageName))
         }
+        assertTrue(step.command.contains("add-apt-repository --help"))
+        assertTrue(step.command.contains("add-apt-repository -y -c multiverse"))
         assertTrue(step.command.contains("add-apt-repository -y multiverse"))
     }
 }
