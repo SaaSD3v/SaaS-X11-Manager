@@ -32,97 +32,129 @@ class GraphicSessionInstallerTest {
     }
 
     @Test
-    fun alpineOpenboxWorkflowUsesApkAndMinimalPackages() {
+    fun alpineOpenboxWorkflowPreflightsCommunityAndInstallsPlanAtomically() {
+        val plan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, GraphicSession.OPENBOX)
+        )
         val commands = openboxSteps(ContainerPlatform.ALPINE).map { it.command }
 
         assertEquals("command -v apk >/dev/null", commands.first())
+        assertTrue(commands.any { it.contains("setup-apkrepos -c") })
         assertTrue("apk update" in commands)
-        assertTrue("apk add openbox" in commands)
-        assertTrue("apk add xterm" in commands)
-        assertTrue("apk add font-terminus" in commands)
+        plan.packages.forEach { packageName ->
+            assertTrue("apk search -e $packageName >/dev/null" in commands)
+        }
+        assertEquals(1, commands.count { it.startsWith("apk add ") })
+        assertTrue("apk add ${plan.packages.joinToString(" ")}" in commands)
         assertFalse(commands.any { it.contains("apt-get") })
     }
 
     @Test
-    fun debOpenboxWorkflowUsesAptDpkgWithoutRecommends() {
+    fun debOpenboxWorkflowPreflightsUniverseAndInstallsRecommendationsAtomically() {
+        val plan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.OPENBOX)
+        )
         val commands = openboxSteps(ContainerPlatform.UBUNTU).map { it.command }
 
         assertEquals(
-            "command -v apt-get >/dev/null && command -v dpkg >/dev/null",
+            "command -v apt-get >/dev/null && command -v dpkg >/dev/null && command -v apt-cache >/dev/null",
             commands.first()
         )
         assertTrue(commands.contains("DEBIAN_FRONTEND=noninteractive apt-get update"))
-        assertTrue(commands.contains(
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openbox"
-        ))
-        assertTrue(commands.contains(
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xterm"
-        ))
-        assertTrue(commands.contains(
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends fonts-terminus"
-        ))
+        assertTrue(commands.any { it.contains("all_packages_available") && it.contains("add-apt-repository -y universe") })
+        plan.packages.forEach { packageName ->
+            assertTrue("apt-cache show $packageName >/dev/null 2>&1" in commands)
+        }
+        assertEquals(1, commands.count { it.contains("apt-get install -y") })
+        assertTrue(
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --install-recommends ${plan.packages.joinToString(" ")}" in commands
+        )
         assertFalse(commands.any { it.contains("apk ") })
     }
 
     @Test
-    fun alpineIcewmWorkflowUsesApkAndMinimalPackages() {
+    fun alpineIcewmWorkflowPreflightsCommunityAndInstallsPlanAtomically() {
+        val plan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, GraphicSession.ICEWM)
+        )
         val commands = icewmSteps(ContainerPlatform.ALPINE).map { it.command }
 
         assertEquals("command -v apk >/dev/null", commands.first())
+        assertTrue(commands.any { it.contains("setup-apkrepos -c") })
         assertTrue("apk update" in commands)
-        assertTrue("apk add icewm" in commands)
-        assertTrue("apk add xterm" in commands)
+        plan.packages.forEach { packageName ->
+            assertTrue("apk search -e $packageName >/dev/null" in commands)
+        }
+        assertEquals(1, commands.count { it.startsWith("apk add ") })
+        assertTrue("apk add ${plan.packages.joinToString(" ")}" in commands)
         assertTrue("command -v icewm-session" in commands)
         assertFalse(commands.any { it.contains("apt-get") })
     }
 
     @Test
-    fun debIcewmWorkflowUsesAptDpkgWithoutRecommends() {
+    fun debIcewmWorkflowPreflightsUniverseAndInstallsRecommendationsAtomically() {
+        val plan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.ICEWM)
+        )
         val commands = icewmSteps(ContainerPlatform.UBUNTU).map { it.command }
 
         assertEquals(
-            "command -v apt-get >/dev/null && command -v dpkg >/dev/null",
+            "command -v apt-get >/dev/null && command -v dpkg >/dev/null && command -v apt-cache >/dev/null",
             commands.first()
         )
         assertTrue(commands.contains("DEBIAN_FRONTEND=noninteractive apt-get update"))
-        assertTrue(commands.contains(
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends icewm"
-        ))
-        assertTrue(commands.contains(
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xterm"
-        ))
+        assertTrue(commands.any { it.contains("all_packages_available") && it.contains("add-apt-repository -y universe") })
+        plan.packages.forEach { packageName ->
+            assertTrue("apt-cache show $packageName >/dev/null 2>&1" in commands)
+        }
+        assertEquals(1, commands.count { it.contains("apt-get install -y") })
+        assertTrue(
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --install-recommends ${plan.packages.joinToString(" ")}" in commands
+        )
         assertTrue("command -v icewm-session" in commands)
         assertFalse(commands.any { it.contains("apk ") })
     }
 
     @Test
-    fun alpineJwmWorkflowUsesApkAndValidatesConfiguration() {
+    fun alpineJwmWorkflowPreflightsCommunityAndValidatesConfiguration() {
+        val plan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, GraphicSession.JWM)
+        )
         val commands = jwmSteps(ContainerPlatform.ALPINE).map { it.command }
 
         assertEquals("command -v apk >/dev/null", commands.first())
+        assertTrue(commands.any { it.contains("setup-apkrepos -c") })
         assertTrue("apk update" in commands)
-        assertTrue("apk add jwm" in commands)
-        assertTrue("apk add xterm" in commands)
+        plan.packages.forEach { packageName ->
+            assertTrue("apk search -e $packageName >/dev/null" in commands)
+        }
+        assertEquals(1, commands.count { it.startsWith("apk add ") })
+        assertTrue("apk add ${plan.packages.joinToString(" ")}" in commands)
         assertTrue("command -v jwm" in commands)
         assertTrue("jwm -p" in commands)
         assertFalse(commands.any { it.contains("apt-get") })
     }
 
     @Test
-    fun debJwmWorkflowUsesAptDpkgWithoutRecommends() {
+    fun debJwmWorkflowPreflightsUniverseAndInstallsRecommendationsAtomically() {
+        val plan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.JWM)
+        )
         val commands = jwmSteps(ContainerPlatform.UBUNTU).map { it.command }
 
         assertEquals(
-            "command -v apt-get >/dev/null && command -v dpkg >/dev/null",
+            "command -v apt-get >/dev/null && command -v dpkg >/dev/null && command -v apt-cache >/dev/null",
             commands.first()
         )
         assertTrue(commands.contains("DEBIAN_FRONTEND=noninteractive apt-get update"))
-        assertTrue(commands.contains(
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends jwm"
-        ))
-        assertTrue(commands.contains(
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xterm"
-        ))
+        assertTrue(commands.any { it.contains("all_packages_available") && it.contains("add-apt-repository -y universe") })
+        plan.packages.forEach { packageName ->
+            assertTrue("apt-cache show $packageName >/dev/null 2>&1" in commands)
+        }
+        assertEquals(1, commands.count { it.contains("apt-get install -y") })
+        assertTrue(
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --install-recommends ${plan.packages.joinToString(" ")}" in commands
+        )
         assertTrue("command -v jwm" in commands)
         assertTrue("jwm -p" in commands)
         assertFalse(commands.any { it.contains("apk ") })

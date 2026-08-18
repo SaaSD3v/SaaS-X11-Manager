@@ -26,47 +26,13 @@ private data class ContainerOperationLease(
 object GraphicSessionInstaller {
 
     internal fun stepsFor(plan: GraphicSessionInstallPlan): List<GraphicSessionInstallStep> {
+        if (plan.session !in setOf(GraphicSession.OPENBOX, GraphicSession.ICEWM, GraphicSession.JWM)) {
+            return emptyList()
+        }
+
+        val packageSteps = legacyPackageSteps(plan)
+
         if (plan.session == GraphicSession.JWM) {
-            val packageSteps = when (plan.platform) {
-                ContainerPlatform.ALPINE -> listOf(
-                    GraphicSessionInstallStep(
-                        title = "Validating Alpine package manager",
-                        command = "command -v apk >/dev/null"
-                    ),
-                    GraphicSessionInstallStep(
-                        title = "Refreshing package index",
-                        command = "apk update"
-                    ),
-                    GraphicSessionInstallStep(
-                        title = "Installing JWM",
-                        command = "apk add jwm"
-                    ),
-                    GraphicSessionInstallStep(
-                        title = "Installing terminal",
-                        command = "apk add xterm"
-                    )
-                )
-
-                ContainerPlatform.UBUNTU -> listOf(
-                    GraphicSessionInstallStep(
-                        title = "Validating Debian package manager",
-                        command = "command -v apt-get >/dev/null && command -v dpkg >/dev/null"
-                    ),
-                    GraphicSessionInstallStep(
-                        title = "Refreshing package index",
-                        command = "DEBIAN_FRONTEND=noninteractive apt-get update"
-                    ),
-                    GraphicSessionInstallStep(
-                        title = "Installing JWM",
-                        command = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends jwm"
-                    ),
-                    GraphicSessionInstallStep(
-                        title = "Installing terminal",
-                        command = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xterm"
-                    )
-                )
-            }
-
             return packageSteps + listOf(
                 GraphicSessionInstallStep(
                     title = "Validating JWM command",
@@ -80,99 +46,9 @@ object GraphicSessionInstaller {
         }
 
         if (plan.session == GraphicSession.ICEWM) {
-            val packageSteps = when (plan.platform) {
-                ContainerPlatform.ALPINE -> listOf(
-                    GraphicSessionInstallStep(
-                        title = "Validating Alpine package manager",
-                        command = "command -v apk >/dev/null"
-                    ),
-                    GraphicSessionInstallStep(
-                        title = "Refreshing package index",
-                        command = "apk update"
-                    ),
-                    GraphicSessionInstallStep(
-                        title = "Installing IceWM",
-                        command = "apk add icewm"
-                    ),
-                    GraphicSessionInstallStep(
-                        title = "Installing terminal",
-                        command = "apk add xterm"
-                    )
-                )
-
-                ContainerPlatform.UBUNTU -> listOf(
-                    GraphicSessionInstallStep(
-                        title = "Validating Debian package manager",
-                        command = "command -v apt-get >/dev/null && command -v dpkg >/dev/null"
-                    ),
-                    GraphicSessionInstallStep(
-                        title = "Refreshing package index",
-                        command = "DEBIAN_FRONTEND=noninteractive apt-get update"
-                    ),
-                    GraphicSessionInstallStep(
-                        title = "Installing IceWM",
-                        command = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends icewm"
-                    ),
-                    GraphicSessionInstallStep(
-                        title = "Installing terminal",
-                        command = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xterm"
-                    )
-                )
-            }
-
             return packageSteps + GraphicSessionInstallStep(
                 title = "Validating IceWM session command",
                 command = "command -v ${plan.verificationCommand}"
-            )
-        }
-
-        if (plan.session != GraphicSession.OPENBOX) return emptyList()
-
-        val packageSteps = when (plan.platform) {
-            ContainerPlatform.ALPINE -> listOf(
-                GraphicSessionInstallStep(
-                    title = "Validating Alpine package manager",
-                    command = "command -v apk >/dev/null"
-                ),
-                GraphicSessionInstallStep(
-                    title = "Refreshing package index",
-                    command = "apk update"
-                ),
-                GraphicSessionInstallStep(
-                    title = "Installing Openbox",
-                    command = "apk add openbox"
-                ),
-                GraphicSessionInstallStep(
-                    title = "Installing terminal",
-                    command = "apk add xterm"
-                ),
-                GraphicSessionInstallStep(
-                    title = "Installing fonts",
-                    command = "apk add font-terminus"
-                )
-            )
-
-            ContainerPlatform.UBUNTU -> listOf(
-                GraphicSessionInstallStep(
-                    title = "Validating Debian package manager",
-                    command = "command -v apt-get >/dev/null && command -v dpkg >/dev/null"
-                ),
-                GraphicSessionInstallStep(
-                    title = "Refreshing package index",
-                    command = "DEBIAN_FRONTEND=noninteractive apt-get update"
-                ),
-                GraphicSessionInstallStep(
-                    title = "Installing Openbox",
-                    command = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openbox"
-                ),
-                GraphicSessionInstallStep(
-                    title = "Installing terminal",
-                    command = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xterm"
-                ),
-                GraphicSessionInstallStep(
-                    title = "Installing fonts",
-                    command = "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends fonts-terminus"
-                )
             )
         }
 
@@ -201,6 +77,132 @@ object GraphicSessionInstaller {
                 command = "command -v ${plan.verificationCommand}"
             )
         )
+    }
+
+    private fun legacyPackageSteps(
+        plan: GraphicSessionInstallPlan
+    ): List<GraphicSessionInstallStep> = when (plan.platform) {
+        ContainerPlatform.ALPINE -> buildList {
+            add(
+                GraphicSessionInstallStep(
+                    title = "Validating Alpine package manager",
+                    command = "command -v apk >/dev/null"
+                )
+            )
+            if (plan.repositoryRequirement == RepositoryRequirement.APK_COMMUNITY) {
+                add(
+                    GraphicSessionInstallStep(
+                        title = "Preparing Alpine community repository",
+                        command = alpineCommunityPreparationCommand()
+                    )
+                )
+            }
+            add(
+                GraphicSessionInstallStep(
+                    title = "Refreshing package index",
+                    command = "apk update"
+                )
+            )
+            plan.packages.forEach { packageName ->
+                add(
+                    GraphicSessionInstallStep(
+                        title = "Checking $packageName availability",
+                        command = "apk search -e $packageName >/dev/null"
+                    )
+                )
+            }
+            if (plan.packages.isNotEmpty()) {
+                add(
+                    GraphicSessionInstallStep(
+                        title = "Installing ${plan.session.label} packages",
+                        command = "apk add ${plan.packages.joinToString(" ")}"
+                    )
+                )
+            }
+        }
+
+        ContainerPlatform.UBUNTU -> buildList {
+            add(
+                GraphicSessionInstallStep(
+                    title = "Validating Debian package manager",
+                    command = "command -v apt-get >/dev/null && command -v dpkg >/dev/null && command -v apt-cache >/dev/null"
+                )
+            )
+            add(
+                GraphicSessionInstallStep(
+                    title = "Refreshing package index",
+                    command = "DEBIAN_FRONTEND=noninteractive apt-get update"
+                )
+            )
+            legacyAptRepositoryPreparationStep(plan)?.let(::add)
+            plan.packages.forEach { packageName ->
+                add(
+                    GraphicSessionInstallStep(
+                        title = "Checking $packageName availability",
+                        command = "apt-cache show $packageName >/dev/null 2>&1"
+                    )
+                )
+            }
+            if (plan.packages.isNotEmpty()) {
+                val recommendsFlag = if (plan.installRecommendedPackages) {
+                    " --install-recommends"
+                } else {
+                    " --no-install-recommends"
+                }
+                add(
+                    GraphicSessionInstallStep(
+                        title = "Installing ${plan.session.label} packages",
+                        command = "DEBIAN_FRONTEND=noninteractive apt-get install -y$recommendsFlag " +
+                            plan.packages.joinToString(" ")
+                    )
+                )
+            }
+        }
+    }
+
+    private fun alpineCommunityPreparationCommand(): String =
+        "if grep -Eq '^[[:space:]]*[^#[:space:]].*/community([[:space:]]|$)' " +
+            "/etc/apk/repositories 2>/dev/null; then :; " +
+            "elif command -v setup-apkrepos >/dev/null 2>&1; then " +
+            "setup-apkrepos -c; " +
+            "elif grep -Eq '^[[:space:]]*#[[:space:]]*[^#[:space:]].*/community([[:space:]]|$)' " +
+            "/etc/apk/repositories 2>/dev/null; then " +
+            "sed -i -E 's|^[[:space:]]*#[[:space:]]*([^[:space:]]*/community)[[:space:]]*$|\\1|' " +
+            "/etc/apk/repositories; " +
+            "else main_repo=\$(awk '/^[[:space:]]*#/ {next} /\\/main([[:space:]]*)$/ {print; exit}' " +
+            "/etc/apk/repositories 2>/dev/null); " +
+            "if [ -z \"\$main_repo\" ]; then " +
+            "echo 'Could not derive Alpine community repository from the configured main repository.' >&2; " +
+            "exit 1; fi; " +
+            "printf '%s\\n' \"\${main_repo%/main}/community\" >> /etc/apk/repositories; fi"
+
+    private fun legacyAptRepositoryPreparationStep(
+        plan: GraphicSessionInstallPlan
+    ): GraphicSessionInstallStep? {
+        if (plan.packages.isEmpty()) return null
+        val component = when (plan.repositoryRequirement) {
+            RepositoryRequirement.APT_UNIVERSE -> "universe"
+            RepositoryRequirement.APT_MULTIVERSE -> "multiverse"
+            RepositoryRequirement.APK_COMMUNITY -> return null
+        }
+        val fallbackDescription = when (plan.repositoryRequirement) {
+            RepositoryRequirement.APT_MULTIVERSE -> "Multiverse/non-free"
+            else -> "Universe or the distro repository containing the packages"
+        }
+        val packageList = plan.packages.joinToString(" ")
+        val command =
+            "all_packages_available() { for pkg in $packageList; do " +
+                "apt-cache show \"\$pkg\" >/dev/null 2>&1 || return 1; done; return 0; }; " +
+                "if all_packages_available; then :; " +
+                "elif grep -Eq '^ID=ubuntu$' /etc/os-release 2>/dev/null && " +
+                "command -v add-apt-repository >/dev/null 2>&1; then " +
+                "add-apt-repository -y $component && " +
+                "DEBIAN_FRONTEND=noninteractive apt-get update && " +
+                "all_packages_available || { " +
+                "echo 'Required apt packages are still unavailable after enabling $component.' >&2; exit 1; }; " +
+                "else echo 'Required apt repository is unavailable. " +
+                "Enable $fallbackDescription for this image.' >&2; exit 1; fi"
+        return GraphicSessionInstallStep("Checking required apt repository", command)
     }
 
     /** Backward-compatible Alpine path used by existing tests/callers. */
