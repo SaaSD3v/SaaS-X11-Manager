@@ -1,6 +1,7 @@
 package com.saas.x11manager.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -47,14 +48,14 @@ class FourthWindowManagerBatchTest {
     }
 
     @Test
-    fun bspwmDefaultExampleToolsAreInstalled() {
+    fun bspwmDefaultExampleToolsAreInstalledWithoutAptRecommendations() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.BSPWM)
         )
 
         assertTrue("rxvt-unicode" in plan.packages)
         assertTrue("suckless-tools" in plan.packages)
-        assertTrue(plan.installRecommendedPackages)
+        assertFalse(plan.installRecommendedPackages)
     }
 
     @Test
