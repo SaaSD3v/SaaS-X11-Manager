@@ -23,7 +23,7 @@ class XfceGraphicSessionTest {
         val debCommands = AdditionalGraphicSessionInstaller.stepsFor(deb).map { it.command }
         assertTrue(alpineCommands.contains("command -v startxfce4"))
         assertTrue(debCommands.contains("command -v startxfce4"))
-        assertTrue(debCommands.any { it.contains("--no-install-recommends xfce4-session") })
+        assertTrue(debCommands.any { it.contains("--install-recommends") && it.contains("xfce4-session") })
         assertFalse(alpineCommands.any { it.trim() == "startxfce4" })
         assertFalse(debCommands.any { it.trim() == "startxfce4" })
     }

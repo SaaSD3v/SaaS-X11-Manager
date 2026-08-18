@@ -22,7 +22,7 @@ class LxqtGraphicSessionTest {
         val debCommands = AdditionalGraphicSessionInstaller.stepsFor(deb).map { it.command }
         assertTrue(alpineCommands.contains("command -v startlxqt"))
         assertTrue(debCommands.contains("command -v startlxqt"))
-        assertTrue(debCommands.any { it.contains("--no-install-recommends lxqt-core") })
+        assertTrue(debCommands.any { it.contains("--install-recommends") && it.contains("lxqt-core") })
         assertFalse(alpineCommands.any { it.trim() == "startlxqt" })
         assertFalse(debCommands.any { it.trim() == "startlxqt" })
     }

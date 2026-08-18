@@ -20,7 +20,7 @@ class FluxboxGraphicSessionTest {
         assertEquals(listOf("fluxbox", "xterm"), deb.packages)
         assertEquals("startfluxbox", alpine.verificationCommand)
         assertEquals("startfluxbox", deb.verificationCommand)
-        assertFalse(deb.installRecommendedPackages)
+        assertTrue(deb.installRecommendedPackages)
     }
 
     @Test
