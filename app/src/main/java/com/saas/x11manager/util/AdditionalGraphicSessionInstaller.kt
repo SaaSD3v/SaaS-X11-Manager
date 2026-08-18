@@ -151,6 +151,28 @@ object AdditionalGraphicSessionInstaller {
                 )
             }
 
+            GraphicSession.GNOME_XORG -> {
+                val command =
+                    "tmpdir=\$(mktemp -d) || exit 1; " +
+                        "cleanup() { rm -rf \"\$tmpdir\"; }; " +
+                        "trap cleanup EXIT HUP INT TERM; " +
+                        "cd \"\$tmpdir\" || exit 1; " +
+                        "if apt-cache show gnome-session-xsession >/dev/null 2>&1; then " +
+                        "candidate=gnome-session-xsession; else candidate=gnome-session; fi; " +
+                        "apt-get download \"\$candidate\" >/dev/null 2>&1 || " +
+                        "{ echo 'Could not download GNOME session package for Xorg capability inspection.' >&2; exit 1; }; " +
+                        "session_deb=\$(find . -maxdepth 1 -type f -name \"\${candidate}_*.deb\" -print -quit); " +
+                        "[ -n \"\$session_deb\" ] || " +
+                        "{ echo 'Could not locate downloaded GNOME session package archive.' >&2; exit 1; }; " +
+                        "dpkg-deb -c \"\$session_deb\" | grep -Fq 'usr/share/xsessions/gnome-xorg.desktop' || " +
+                        "{ echo 'GNOME Xorg is unavailable in the candidate packages; this image provides Wayland-only GNOME support.' >&2; exit 1; }"
+
+                GraphicSessionInstallStep(
+                    "Checking GNOME Xorg package capability",
+                    command
+                )
+            }
+
             else -> null
         }
     }

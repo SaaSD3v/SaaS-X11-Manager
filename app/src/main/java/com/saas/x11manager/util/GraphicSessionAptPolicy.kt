@@ -11,6 +11,7 @@ internal object GraphicSessionAptPolicy {
     fun blockedRecommendedPackages(session: GraphicSession): List<String> = when (session) {
         GraphicSession.XFCE -> listOf("systemd-sysv")
         GraphicSession.LXQT -> listOf("pavucontrol-qt", "pavucontrol")
+        GraphicSession.GNOME_XORG -> listOf("systemd-sysv")
         GraphicSession.CINNAMON_SHELL,
         GraphicSession.CINNAMON_DESKTOP -> listOf("cinnamon-core")
         GraphicSession.MATE -> listOf("pipewire-audio", "pulseaudio")
