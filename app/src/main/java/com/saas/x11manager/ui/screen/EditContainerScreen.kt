@@ -21,6 +21,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.saas.x11manager.ui.component.TerminalDialog
+import com.saas.x11manager.util.ContainerPlatform
 import com.saas.x11manager.util.ContainerStatus
 import com.saas.x11manager.util.GraphicSession
 import com.saas.x11manager.util.InitSystem
@@ -151,9 +152,9 @@ fun EditContainerScreen(
                                     "To apply the change safely, the container will be stopped before you continue."
                             )
                             Text(
-                                "Next you will choose systemd or OpenRC and then the graphic session. " +
-                                    "Sessions that are already installed can be selected without downloading packages again, " +
-                                    "or reinstalled if you want to run the full installer again."
+                                "Next you will choose one of the init backends detected in this container and then " +
+                                    "a graphic session available for its detected package manager. Sessions that are " +
+                                    "already installed can be selected without downloading packages again, or reinstalled."
                             )
                         }
                     }
@@ -323,38 +324,42 @@ fun EditContainerScreen(
         }
 
         viewModel.wizardStage == ConfigurationWizardStage.INIT_SELECTION -> {
+            val capabilities = viewModel.containerCapabilities
+            val packageLabel = when (capabilities?.platform) {
+                ContainerPlatform.ALPINE -> "apk"
+                ContainerPlatform.UBUNTU -> "apt/dpkg"
+                null -> "unknown"
+            }
+            val initSystems = viewModel.availableWizardInitSystems()
+            val pendingInit = viewModel.pendingWizardInitSystem ?: initSystem
             WizardChoiceDialog(
                 title = "Choose init system",
-                subtitle = "This choice controls which Graphic Session catalog is shown next.",
+                subtitle = "$packageLabel package platform detected. Only init backends found in this container are shown.",
                 onDismiss = { viewModel.dismissConfigurationWizard() }
             ) {
-                WizardChoice(
-                    title = "systemd",
-                    subtitle = "Shows Debian/Ubuntu apt/dpkg session plans",
-                    selected = initSystem == InitSystem.SYSTEMD,
-                    installed = false,
-                    onClick = { viewModel.selectWizardInitSystem(InitSystem.SYSTEMD) }
-                )
-                Spacer(Modifier.height(10.dp))
-                WizardChoice(
-                    title = "OpenRC",
-                    subtitle = "Shows Alpine apk session plans",
-                    selected = initSystem == InitSystem.OPENRC,
-                    installed = false,
-                    onClick = { viewModel.selectWizardInitSystem(InitSystem.OPENRC) }
-                )
+                initSystems.forEachIndexed { index, system ->
+                    if (index > 0) Spacer(Modifier.height(10.dp))
+                    WizardChoice(
+                        title = if (system == InitSystem.SYSTEMD) "systemd" else "OpenRC",
+                        subtitle = "Detected in this container",
+                        selected = pendingInit == system,
+                        installed = false,
+                        onClick = { viewModel.selectWizardInitSystem(system) }
+                    )
+                }
             }
         }
 
         viewModel.wizardStage == ConfigurationWizardStage.SESSION_SELECTION -> {
             val selectedInit = viewModel.pendingWizardInitSystem ?: initSystem
+            val packageLabel = when (viewModel.containerCapabilities?.platform) {
+                ContainerPlatform.ALPINE -> "Alpine/apk catalog"
+                ContainerPlatform.UBUNTU -> "Debian-family apt/dpkg catalog"
+                null -> "package catalog unavailable"
+            }
             WizardChoiceDialog(
                 title = "Choose graphic session",
-                subtitle = if (selectedInit == InitSystem.OPENRC) {
-                    "OpenRC selected · Alpine/apk catalog"
-                } else {
-                    "systemd selected · Debian/Ubuntu apt/dpkg catalog"
-                },
+                subtitle = "${if (selectedInit == InitSystem.OPENRC) "OpenRC" else "systemd"} selected · $packageLabel",
                 onDismiss = { viewModel.dismissConfigurationWizard() },
                 secondaryActionLabel = "Back",
                 onSecondaryAction = { viewModel.backToWizardInitSelection() }
@@ -448,17 +453,21 @@ fun EditContainerScreen(
                             onClick = {
                                 installedActionSession = null
                                 selectingInstalledSession = null
-                                viewModel.dismissConfigurationWizard()
-                                if (status == ContainerStatus.RUNNING) {
-                                    runningWarningMode = RunningWarningMode.CONFIGURATION
-                                } else {
-                                    viewModel.backToWizardInitSelection()
-                                }
+                                viewModel.startConfigurationWizard()
                             },
                             modifier = Modifier.fillMaxWidth(),
                             enabled = !isInstalling && !viewModel.isPreparingWizard && !isSaving
                         ) {
-                            Text("Change configuration")
+                            if (viewModel.isPreparingWizard) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text("Detecting container...")
+                            } else {
+                                Text("Change configuration")
+                            }
                         }
                     }
                 }
