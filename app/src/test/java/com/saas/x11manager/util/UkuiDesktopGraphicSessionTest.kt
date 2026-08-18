@@ -41,12 +41,17 @@ class UkuiDesktopGraphicSessionTest {
     }
 
     @Test
-    fun completePlanAddsMenuPolicyNotificationsSidebarAndDesktopFileManager() {
+    fun completePlanPreflightsX11SessionAndAddsPortableComponents() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
                 GraphicSession.UKUI_DESKTOP
             )
+        )
+        val preflight = requireNotNull(
+            AdditionalGraphicSessionInstaller.stepsFor(plan).firstOrNull {
+                it.title == "Checking UKUI X11 package capability"
+            }
         )
 
         assertTrue("ukui-menu" in plan.packages)
@@ -54,6 +59,10 @@ class UkuiDesktopGraphicSessionTest {
         assertTrue("ukui-notification-daemon" in plan.packages)
         assertTrue("ukui-sidebar" in plan.packages)
         assertTrue("peony" in plan.packages)
+        assertTrue(preflight.command.contains("apt-get download ukui-session-manager"))
+        assertTrue(preflight.command.contains("usr/bin/ukui-session"))
+        assertTrue(preflight.command.contains("usr/share/xsessions/ukui.desktop"))
+        assertFalse(preflight.command.contains("VERSION_ID="))
     }
 
     @Test
