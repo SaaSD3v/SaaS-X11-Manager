@@ -73,10 +73,13 @@ internal object GraphicSessionInitFiles {
             "Before=x11-session.service\n\n" +
             "[Service]\n" +
             "Type=oneshot\n" +
-            "ExecStart=/bin/mkdir -p /tmp/.X11-unix\n" +
-            "ExecStart=/bin/mount --bind /usr/.X11-unix /tmp/.X11-unix\n" +
-            "ExecStart=/bin/mkdir -p /tmp/runtime-root\n" +
-            "ExecStart=/bin/chmod 700 /tmp/runtime-root\n" +
+            "ExecStart=/bin/sh -c 'test -d /usr/.X11-unix && " +
+            "mkdir -p /tmp/.X11-unix /tmp/runtime-root && " +
+            "chmod 700 /tmp/runtime-root && " +
+            "{ mountpoint -q /tmp/.X11-unix 2>/dev/null || " +
+            "mount --bind /usr/.X11-unix /tmp/.X11-unix; }'\n" +
+            "ExecStop=/bin/sh -c 'if mountpoint -q /tmp/.X11-unix 2>/dev/null; then " +
+            "umount /tmp/.X11-unix; fi'\n" +
             "RemainAfterExit=yes\n\n" +
             "[Install]\n" +
             "WantedBy=multi-user.target\n"
