@@ -107,31 +107,31 @@ internal object DebianAptComponentSource {
             fi
             rm -f "__DOLLAR__piece"
         done
+
         if [ "__DOLLAR__generated" -eq 1 ]; then
             cat "__DOLLAR__tmp" > "__DOLLAR__target_base.sources"
             rm -f "__DOLLAR__target_base.list" "__DOLLAR__tmp"
-            exit 0
-        fi
+        else
+            : > "__DOLLAR__tmp"
+            for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+                [ -f "__DOLLAR__source_file" ] || continue
+                [ "__DOLLAR__source_file" = "__DOLLAR__target_base.list" ] && continue
+                piece=__DOLLAR__(mktemp) || exit 1
+                if emit_list_component_sources "__DOLLAR__source_file" "__DOLLAR__component" > "__DOLLAR__piece"; then
+                    cat "__DOLLAR__piece" >> "__DOLLAR__tmp"
+                    generated=1
+                fi
+                rm -f "__DOLLAR__piece"
+            done
 
-        : > "__DOLLAR__tmp"
-        for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
-            [ -f "__DOLLAR__source_file" ] || continue
-            [ "__DOLLAR__source_file" = "__DOLLAR__target_base.list" ] && continue
-            piece=__DOLLAR__(mktemp) || exit 1
-            if emit_list_component_sources "__DOLLAR__source_file" "__DOLLAR__component" > "__DOLLAR__piece"; then
-                cat "__DOLLAR__piece" >> "__DOLLAR__tmp"
-                generated=1
+            if [ "__DOLLAR__generated" -eq 1 ]; then
+                cat "__DOLLAR__tmp" > "__DOLLAR__target_base.list"
+                rm -f "__DOLLAR__target_base.sources" "__DOLLAR__tmp"
+            else
+                rm -f "__DOLLAR__tmp"
+                echo 'Could not derive a trusted Debian archive source for __COMPONENT__.' >&2
+                exit 1
             fi
-            rm -f "__DOLLAR__piece"
-        done
-        if [ "__DOLLAR__generated" -eq 1 ]; then
-            cat "__DOLLAR__tmp" > "__DOLLAR__target_base.list"
-            rm -f "__DOLLAR__target_base.sources" "__DOLLAR__tmp"
-            exit 0
         fi
-
-        rm -f "__DOLLAR__tmp"
-        echo 'Could not derive a trusted Debian archive source for __COMPONENT__.' >&2
-        exit 1
     """.trimIndent()
 }
