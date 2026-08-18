@@ -270,9 +270,11 @@ elif command -v apt-get >/dev/null 2>&1 && command -v apt-cache >/dev/null 2>&1 
     simulate_apt MATE mate-desktop-environment dbus-x11
     simulate_apt LXDE-safe-candidate \
         openbox-lxde-session lxpanel pcmanfm lxterminal dbus-x11 suckless-tools
+    simulate_apt Compiz-cross-distro-candidate \
+        compiz-core compiz-plugins dbus-x11 xterm
     audit_catalog apt
 else
     fail "No supported package family found"
 fi
 
-info "Rootfs compatibility probe passed"
+info "[+] Rootfs compatibility probe passed"
