@@ -9,6 +9,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saas.x11manager.util.AdditionalGraphicSessionInstaller
+import com.saas.x11manager.util.ContainerCapabilities
+import com.saas.x11manager.util.ContainerCapabilitiesDetector
 import com.saas.x11manager.util.ContainerManager
 import com.saas.x11manager.util.ContainerSettingsManager
 import com.saas.x11manager.util.ContainerStatus
@@ -39,6 +41,8 @@ class EditContainerViewModel : ViewModel() {
     var initSystem by mutableStateOf(InitSystem.SYSTEMD)
         private set
     var graphicSession by mutableStateOf(GraphicSession.XFCE)
+        private set
+    var containerCapabilities by mutableStateOf<ContainerCapabilities?>(null)
         private set
 
     private val installedSessions = mutableStateMapOf<GraphicSession, Boolean>()
@@ -92,6 +96,7 @@ class EditContainerViewModel : ViewModel() {
         this.containerName = containerName
         this.cacheDir = cacheDir
         loaded = true
+        containerCapabilities = null
 
         viewModelScope.launch {
             val info = ContainerManager.getContainerInfo(containerName) ?: return@launch
@@ -128,18 +133,49 @@ class EditContainerViewModel : ViewModel() {
     fun startConfigurationWizard() {
         if (wizardStarted || name.isEmpty() || isInstallingSession || isPreparingWizard) return
         wizardStarted = true
-        pendingWizardInitSystem = initSystem
+        wizardStage = ConfigurationWizardStage.HIDDEN
         wizardError = null
-        wizardStage = if (status == ContainerStatus.RUNNING) {
-            ConfigurationWizardStage.RUNNING_WARNING
-        } else {
-            ConfigurationWizardStage.INIT_SELECTION
+        isPreparingWizard = true
+
+        viewModelScope.launch {
+            try {
+                val detected = ContainerCapabilitiesDetector.detect(containerName)
+                if (detected == null || detected.platform == null) {
+                    wizardError = "Could not detect a supported package manager (apk or apt/dpkg) in this container."
+                    wizardStage = ConfigurationWizardStage.HIDDEN
+                    return@launch
+                }
+                if (detected.availableInitSystems.isEmpty()) {
+                    wizardError = "No supported init backend was detected. Install or provide systemd or OpenRC before configuring a graphic session."
+                    wizardStage = ConfigurationWizardStage.HIDDEN
+                    return@launch
+                }
+
+                containerCapabilities = detected
+                pendingWizardInitSystem = if (detected.supports(initSystem)) {
+                    initSystem
+                } else {
+                    detected.availableInitSystems.first()
+                }
+                wizardStage = if (status == ContainerStatus.RUNNING) {
+                    ConfigurationWizardStage.RUNNING_WARNING
+                } else {
+                    ConfigurationWizardStage.INIT_SELECTION
+                }
+            } catch (e: Exception) {
+                Log.e("EditContainerViewModel", "capability detection failed", e)
+                wizardError = e.message ?: "Could not detect container capabilities."
+                wizardStage = ConfigurationWizardStage.HIDDEN
+            } finally {
+                isPreparingWizard = false
+            }
         }
     }
 
     fun dismissConfigurationWizard() {
         if (isPreparingWizard || isInstallingSession) return
         wizardStage = ConfigurationWizardStage.HIDDEN
+        wizardStarted = false
     }
 
     fun confirmRunningContainerRestart() {
@@ -160,10 +196,12 @@ class EditContainerViewModel : ViewModel() {
                     wizardStage = ConfigurationWizardStage.INIT_SELECTION
                 } else {
                     wizardStage = ConfigurationWizardStage.HIDDEN
+                    wizardStarted = false
                     wizardError = "Could not stop the running container. Configuration was not started."
                 }
             } catch (e: Exception) {
                 wizardStage = ConfigurationWizardStage.HIDDEN
+                wizardStarted = false
                 wizardError = e.message ?: "Could not stop the running container."
             } finally {
                 isPreparingWizard = false
@@ -171,8 +209,16 @@ class EditContainerViewModel : ViewModel() {
         }
     }
 
+    fun availableWizardInitSystems(): List<InitSystem> =
+        InitSystem.entries.filter { system -> containerCapabilities?.supports(system) == true }
+
     fun selectWizardInitSystem(system: InitSystem) {
         if (isPreparingWizard || isInstallingSession) return
+        val capabilities = containerCapabilities
+        if (capabilities == null || !capabilities.supports(system)) {
+            wizardError = "${system.name.lowercase()} is not available in this container."
+            return
+        }
         pendingWizardInitSystem = system
         wizardStage = ConfigurationWizardStage.SESSION_SELECTION
     }
@@ -183,13 +229,23 @@ class EditContainerViewModel : ViewModel() {
     }
 
     fun wizardSessions(): List<GraphicSession> =
-        GraphicSessionWizard.sessionsFor(pendingWizardInitSystem ?: initSystem)
+        containerCapabilities?.platform?.let(GraphicSessionWizard::sessionsFor).orEmpty()
 
     fun configureWizardSession(session: GraphicSession) {
         if (isPreparingWizard || isInstallingSession || isSaving) return
         val selectedInit = pendingWizardInitSystem ?: initSystem
-        if (session !in GraphicSessionWizard.sessionsFor(selectedInit)) {
-            wizardError = "${session.label} is not available for ${selectedInit.name.lowercase()}."
+        val capabilities = containerCapabilities
+        val platform = capabilities?.platform
+        if (capabilities == null || platform == null) {
+            wizardError = "Container package capabilities are unavailable. Reopen the configuration wizard and retry detection."
+            return
+        }
+        if (!capabilities.supports(selectedInit)) {
+            wizardError = "${selectedInit.name.lowercase()} is not available in this container."
+            return
+        }
+        if (session !in GraphicSessionWizard.sessionsFor(platform)) {
+            wizardError = "${session.label} is not available for the detected ${platform.label} package platform."
             return
         }
         wizardStage = ConfigurationWizardStage.HIDDEN
@@ -197,6 +253,7 @@ class EditContainerViewModel : ViewModel() {
     }
 
     fun selectInitSystem(system: InitSystem) {
+        if (containerCapabilities?.let { !it.supports(system) } == true) return
         initSystem = system
     }
 
@@ -233,13 +290,14 @@ class EditContainerViewModel : ViewModel() {
 
         beginSessionOperation("Installing ${session.label}", session)
         val logger = operationLogger()
+        val detectedPlatform = containerCapabilities?.platform
 
         viewModelScope.launch {
             try {
                 val installed = if (usesLegacyInstaller(session)) {
                     GraphicSessionInstaller.install(
                         containerName = containerName,
-                        platform = null,
+                        platform = detectedPlatform,
                         session = session,
                         initSystem = selectedInitSystem,
                         cacheDir = cd,
@@ -248,7 +306,7 @@ class EditContainerViewModel : ViewModel() {
                 } else {
                     AdditionalGraphicSessionInstaller.install(
                         containerName = containerName,
-                        platform = null,
+                        platform = detectedPlatform,
                         session = session,
                         initSystem = selectedInitSystem,
                         cacheDir = cd,
@@ -354,13 +412,14 @@ class EditContainerViewModel : ViewModel() {
         beginSessionOperation("Verifying ${session.label}", session)
         val selectedInitSystem = initSystem
         val logger = operationLogger()
+        val detectedPlatform = containerCapabilities?.platform
 
         viewModelScope.launch {
             try {
                 val verified = if (usesLegacyInstaller(session)) {
                     GraphicSessionInstaller.verify(
                         containerName = containerName,
-                        platform = null,
+                        platform = detectedPlatform,
                         session = session,
                         initSystem = selectedInitSystem,
                         logger = logger
@@ -368,7 +427,7 @@ class EditContainerViewModel : ViewModel() {
                 } else {
                     AdditionalGraphicSessionInstaller.verify(
                         containerName = containerName,
-                        platform = null,
+                        platform = detectedPlatform,
                         session = session,
                         initSystem = selectedInitSystem,
                         logger = logger
