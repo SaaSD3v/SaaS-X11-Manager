@@ -78,6 +78,28 @@ object ContainerSettingsManager {
         cacheDir = cacheDir
     )
 
+    fun setProfile(
+        containerName: String,
+        platform: ContainerPlatform,
+        initSystem: InitSystem,
+        graphicSession: GraphicSession,
+        cacheDir: File
+    ): Boolean = setValues(
+        containerName = containerName,
+        values = linkedMapOf(
+            PLATFORM_KEY to when (platform) {
+                ContainerPlatform.UBUNTU -> "ubuntu"
+                ContainerPlatform.ALPINE -> "alpine"
+            },
+            INIT_SYSTEM_KEY to when (initSystem) {
+                InitSystem.SYSTEMD -> "systemd"
+                InitSystem.OPENRC -> "openrc"
+            },
+            GRAPHIC_SESSION_KEY to graphicSession.name.lowercase()
+        ),
+        cacheDir = cacheDir
+    )
+
     fun isGraphicSessionInstalled(
         containerName: String,
         graphicSession: GraphicSession
@@ -131,20 +153,31 @@ object ContainerSettingsManager {
         key: String,
         value: String,
         cacheDir: File
+    ): Boolean = setValues(
+        containerName = containerName,
+        values = linkedMapOf(key to value),
+        cacheDir = cacheDir
+    )
+
+    private fun setValues(
+        containerName: String,
+        values: Map<String, String>,
+        cacheDir: File
     ): Boolean {
         val containerDir = containerDir(containerName)
         val settingsPath = settingsPath(containerName)
         val lines = readLines(containerName).toMutableList()
+        val keys = values.keys
 
         lines.removeAll { line ->
             val trimmed = line.trim()
-            !trimmed.startsWith("#") && trimmed.substringBefore("=", "").trim() == key
+            !trimmed.startsWith("#") && trimmed.substringBefore("=", "").trim() in keys
         }
 
         if (lines.none { it.trim().isNotEmpty() }) {
             lines.add("# SaaS-X11-Manager container settings")
         }
-        lines.add("$key=$value")
+        values.forEach { (key, value) -> lines.add("$key=$value") }
 
         val safeName = containerName.replace(Regex("[^A-Za-z0-9_.-]"), "_")
         val tmpFile = File.createTempFile("saas_x11_${safeName}_", ".conf", cacheDir)
