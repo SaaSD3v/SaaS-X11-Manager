@@ -36,7 +36,7 @@ object GraphicSessionInstallPlans {
         repositoryRequirement = repositoryRequirement,
         packages = packages,
         verificationCommand = session.startCommand,
-        installRecommendedPackages = false
+        installRecommendedPackages = true
     )
 
     private fun apk(

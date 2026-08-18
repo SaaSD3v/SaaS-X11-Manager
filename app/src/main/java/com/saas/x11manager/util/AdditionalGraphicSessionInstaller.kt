@@ -52,7 +52,11 @@ object AdditionalGraphicSessionInstaller {
                         )
                     )
                 }
-                val recommendsFlag = if (plan.installRecommendedPackages) "" else " --no-install-recommends"
+                val recommendsFlag = if (plan.installRecommendedPackages) {
+                    " --install-recommends"
+                } else {
+                    " --no-install-recommends"
+                }
                 plan.packages.forEach { packageName ->
                     add(
                         GraphicSessionInstallStep(
