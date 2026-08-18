@@ -11,13 +11,36 @@ class DesktopSessionBatchTest {
         assertPlan(
             ContainerPlatform.UBUNTU,
             GraphicSession.MATE,
-            listOf("mate-desktop-environment-core", "dbus-x11")
+            listOf("mate-desktop-environment", "dbus-x11")
         )
         assertPlan(
             ContainerPlatform.ALPINE,
             GraphicSession.MATE,
             listOf("mate-desktop-environment", "dbus")
         )
+    }
+
+    @Test
+    fun mateUsesFullDesktopRecommendsWithoutProvisioningAudioServers() {
+        val plan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.MATE)
+        )
+        val install = requireNotNull(
+            AdditionalGraphicSessionInstaller.stepsFor(plan).firstOrNull {
+                it.title == "Installing MATE packages"
+            }
+        )
+
+        assertTrue(plan.installRecommendedPackages)
+        assertEquals(
+            listOf("pipewire-audio", "pulseaudio"),
+            GraphicSessionAptPolicy.blockedRecommendedPackages(GraphicSession.MATE)
+        )
+        assertTrue(install.command.contains("--install-recommends"))
+        assertTrue(install.command.contains("mate-desktop-environment dbus-x11"))
+        assertTrue(install.command.contains("pipewire-audio"))
+        assertTrue(install.command.contains("pulseaudio"))
+        assertTrue(install.command.contains("\$pkg-"))
     }
 
     @Test

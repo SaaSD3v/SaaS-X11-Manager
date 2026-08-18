@@ -145,7 +145,7 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.CINNAMON_SHELL, listOf("cinnamon", "dbus-x11", "xterm")),
         apt(GraphicSession.COMPIZ, listOf("compiz-core", "compiz-plugins-default", "dbus-x11", "xterm")),
         apt(GraphicSession.SUBTLE, listOf("subtle", "xterm")),
-        apt(GraphicSession.MATE, listOf("mate-desktop-environment-core", "dbus-x11")),
+        apt(GraphicSession.MATE, listOf("mate-desktop-environment", "dbus-x11")),
         apk(GraphicSession.MATE, listOf("mate-desktop-environment", "dbus")),
         apt(GraphicSession.LXDE, listOf("lxde-core", "openbox-lxde-session", "dbus-x11", "xterm")),
         apt(

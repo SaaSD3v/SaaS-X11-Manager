@@ -11,6 +11,7 @@ internal object GraphicSessionAptPolicy {
     fun blockedRecommendedPackages(session: GraphicSession): List<String> = when (session) {
         GraphicSession.CINNAMON_SHELL,
         GraphicSession.CINNAMON_DESKTOP -> listOf("cinnamon-core")
+        GraphicSession.MATE -> listOf("pipewire-audio", "pulseaudio")
         else -> emptyList()
     }
 }
