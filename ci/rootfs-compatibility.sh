@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+set -f
 
 fail() {
     echo "[-] $*" >&2
@@ -17,6 +18,7 @@ if [ -r /etc/os-release ]; then
 else
     info "Rootfs: unknown"
 fi
+ROOTFS_ID=${ID:-unknown}
 
 APT_BLOCKED='xorg|xserver-xorg.*|gdm3|lightdm|sddm|lxdm|xdm|slim|nodm|pulseaudio|pipewire-pulse|pipewire-audio'
 APK_BLOCKED='(^|[[:space:](])(xorg-server|lightdm|sddm|gdm|lxdm|xdm|slim|nodm|pulseaudio|pipewire-pulse)(-[0-9][^[:space:]]*)?([[:space:])]|$)'
@@ -84,6 +86,129 @@ simulate_apk() {
     info "$session_name apk transaction is available and safe"
 }
 
+AUDIT_SAFE=0
+AUDIT_UNAVAILABLE=0
+AUDIT_BLOCKED=0
+AUDIT_UNRESOLVABLE=0
+AUDIT_PROCESSED=0
+AUDIT_REPORT=''
+
+record_audit() {
+    platform=$1
+    session_name=$2
+    status=$3
+    detail=$4
+    printf '%s\t%s\t%s\t%s\t%s\n' \
+        "$ROOTFS_ID" "$platform" "$session_name" "$status" "$detail" >> "$AUDIT_REPORT"
+}
+
+audit_apt_plan() {
+    session_name=$1
+    shift
+    missing=''
+    for package_name in "$@"; do
+        if ! apt-cache show "$package_name" >/dev/null 2>&1; then
+            missing="${missing}${missing:+,}$package_name"
+        fi
+    done
+    if [ -n "$missing" ]; then
+        AUDIT_UNAVAILABLE=$((AUDIT_UNAVAILABLE + 1))
+        record_audit apt "$session_name" UNAVAILABLE "$missing"
+        return 0
+    fi
+
+    simulation=$(mktemp)
+    if ! LC_ALL=C DEBIAN_FRONTEND=noninteractive \
+        apt-get -s --no-install-recommends install "$@" >"$simulation" 2>&1; then
+        rm -f "$simulation"
+        AUDIT_UNRESOLVABLE=$((AUDIT_UNRESOLVABLE + 1))
+        record_audit apt "$session_name" UNRESOLVABLE dependency-simulation
+        return 0
+    fi
+
+    removed=$(awk '$1 == "Remv" { print $2 }' "$simulation" | tr '\n' ',' | sed 's/,$//')
+    if [ -n "$removed" ]; then
+        rm -f "$simulation"
+        AUDIT_BLOCKED=$((AUDIT_BLOCKED + 1))
+        record_audit apt "$session_name" BLOCKED "removes:$removed"
+        return 0
+    fi
+
+    blocked=$(awk '$1 == "Inst" { print $2 }' "$simulation" | \
+        grep -Ex "$APT_BLOCKED" | tr '\n' ',' | sed 's/,$//' || true)
+    rm -f "$simulation"
+    if [ -n "$blocked" ]; then
+        AUDIT_BLOCKED=$((AUDIT_BLOCKED + 1))
+        record_audit apt "$session_name" BLOCKED "host-infra:$blocked"
+        return 0
+    fi
+
+    AUDIT_SAFE=$((AUDIT_SAFE + 1))
+    record_audit apt "$session_name" SAFE packages-and-transaction
+}
+
+audit_apk_plan() {
+    session_name=$1
+    shift
+    missing=''
+    for package_name in "$@"; do
+        if ! apk search -e "$package_name" >/dev/null 2>&1; then
+            missing="${missing}${missing:+,}$package_name"
+        fi
+    done
+    if [ -n "$missing" ]; then
+        AUDIT_UNAVAILABLE=$((AUDIT_UNAVAILABLE + 1))
+        record_audit apk "$session_name" UNAVAILABLE "$missing"
+        return 0
+    fi
+
+    simulation=$(mktemp)
+    if ! LC_ALL=C apk --simulate add "$@" >"$simulation" 2>&1; then
+        rm -f "$simulation"
+        AUDIT_UNRESOLVABLE=$((AUDIT_UNRESOLVABLE + 1))
+        record_audit apk "$session_name" UNRESOLVABLE dependency-simulation
+        return 0
+    fi
+
+    blocked=$(grep -E "$APK_BLOCKED" "$simulation" | tr '\n' ';' | sed 's/;$//' || true)
+    rm -f "$simulation"
+    if [ -n "$blocked" ]; then
+        AUDIT_BLOCKED=$((AUDIT_BLOCKED + 1))
+        record_audit apk "$session_name" BLOCKED "host-infra:$blocked"
+        return 0
+    fi
+
+    AUDIT_SAFE=$((AUDIT_SAFE + 1))
+    record_audit apk "$session_name" SAFE packages-and-transaction
+}
+
+audit_catalog() {
+    family=$1
+    catalog=${GRAPHIC_SESSION_PLAN_CATALOG:-}
+    [ -n "$catalog" ] || return 0
+    [ -r "$catalog" ] || fail "Graphic session plan catalog is unreadable: $catalog"
+
+    AUDIT_REPORT=${ROOTFS_AUDIT_REPORT:-/tmp/rootfs-session-catalog.tsv}
+    : > "$AUDIT_REPORT"
+    printf 'rootfs\tplatform\tsession\tstatus\tdetail\n' >> "$AUDIT_REPORT"
+
+    tab=$(printf '\t')
+    while IFS="$tab" read -r plan_platform session_name package_list; do
+        [ -n "$plan_platform" ] || continue
+        [ "$plan_platform" = "$family" ] || continue
+        AUDIT_PROCESSED=$((AUDIT_PROCESSED + 1))
+        set -- $package_list
+        if [ "$family" = apt ]; then
+            audit_apt_plan "$session_name" "$@"
+        else
+            audit_apk_plan "$session_name" "$@"
+        fi
+    done < "$catalog"
+
+    [ "$AUDIT_PROCESSED" -gt 0 ] || fail "No $family plans were found in the exported catalog"
+    info "Catalog audit: $AUDIT_SAFE safe, $AUDIT_UNAVAILABLE unavailable, $AUDIT_BLOCKED blocked, $AUDIT_UNRESOLVABLE unresolvable"
+}
+
 if command -v apk >/dev/null 2>&1; then
     info "Detected apk package family"
     apk update >/dev/null
@@ -97,6 +222,7 @@ if command -v apk >/dev/null 2>&1; then
     simulate_apk XFCE dbus dbus-x11 xfce4 xfce4-terminal xfce4-notifyd
     simulate_apk LXQt dbus dbus-x11 lxqt-desktop
     simulate_apk MATE mate-desktop-environment dbus
+    audit_catalog apk
 elif command -v apt-get >/dev/null 2>&1 && command -v apt-cache >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1; then
     info "Detected apt/dpkg package family"
     DEBIAN_FRONTEND=noninteractive apt-get update >/dev/null
@@ -115,6 +241,7 @@ elif command -v apt-get >/dev/null 2>&1 && command -v apt-cache >/dev/null 2>&1 
         xfce4-terminal xfce4-notifyd xfce4-power-manager
     simulate_apt LXQt dbus-x11 lxqt-core openbox
     simulate_apt MATE mate-desktop-environment dbus-x11
+    audit_catalog apt
 else
     fail "No supported package family found"
 fi

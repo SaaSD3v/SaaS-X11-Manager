@@ -39,10 +39,13 @@ jobs:
       matrix:
         include:
           - name: Alpine current
+            slug: alpine-current
             image: alpine:latest
           - name: Debian stable
+            slug: debian-stable
             image: debian:stable-slim
           - name: Ubuntu current
+            slug: ubuntu-current
             image: ubuntu:latest
     steps:
       - uses: actions/checkout@v4
@@ -61,11 +64,26 @@ jobs:
 
       - name: Validate current rootfs package compatibility
         run: |
+          mkdir -p "${RUNNER_TEMP}/rootfs-audit"
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/workspace:ro" \
+            -v "${RUNNER_TEMP}/graphic-session-plans.tsv:/graphic-session-plans.tsv:ro" \
+            -v "${RUNNER_TEMP}/rootfs-audit:/audit" \
+            -e GRAPHIC_SESSION_PLAN_CATALOG=/graphic-session-plans.tsv \
+            -e ROOTFS_AUDIT_REPORT="/audit/${{ matrix.slug }}.tsv" \
             -w /workspace \
             "${{ matrix.image }}" \
             sh ci/rootfs-compatibility.sh
+          test -s "${RUNNER_TEMP}/rootfs-audit/${{ matrix.slug }}.tsv"
+          cat "${RUNNER_TEMP}/rootfs-audit/${{ matrix.slug }}.tsv"
+
+      - name: Upload rootfs catalog audit
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rootfs-catalog-audit-${{ matrix.slug }}-${{ github.run_id }}
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/rootfs-audit/${{ matrix.slug }}.tsv
 
   publish-status:
     name: Publish compatibility status
@@ -88,7 +106,7 @@ jobs:
               state: succeeded ? 'success' : 'failure',
               context: 'rootfs-compatibility',
               description: succeeded
-                ? 'Current Alpine/Debian/Ubuntu probes passed'
+                ? 'Current rootfs probes and catalog audits passed'
                 : 'A current rootfs compatibility probe failed',
               target_url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
             });
