@@ -225,7 +225,9 @@ object AdditionalGraphicSessionInstaller {
                 "if all_packages_available; then :; " +
                 "elif grep -Eq '^ID=ubuntu$' /etc/os-release 2>/dev/null && " +
                 "command -v add-apt-repository >/dev/null 2>&1; then " +
-                "add-apt-repository -y $component && " +
+                "if add-apt-repository --help 2>&1 | grep -q -- '--component'; then " +
+                "add-apt-repository -y -c $component; " +
+                "else add-apt-repository -y $component; fi && " +
                 "DEBIAN_FRONTEND=noninteractive apt-get update && " +
                 "all_packages_available || { " +
                 "echo 'Required apt packages are still unavailable after enabling $component.' >&2; exit 1; }; " +
