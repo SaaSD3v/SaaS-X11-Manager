@@ -7,13 +7,22 @@ import org.junit.Test
 class FourthWindowManagerBatchTest {
 
     @Test
-    fun fourthBatchUsesAptPlansAndNoUnverifiedAlpinePlans() {
+    fun fourthBatchUsesVerifiedPlans() {
         assertAptOnly(GraphicSession.BSPWM, listOf("bspwm", "sxhkd", "xterm"))
         assertAptOnly(GraphicSession.CLFSWM, listOf("clfswm", "xterm"))
         assertAptOnly(GraphicSession.FVWM_CRYSTAL, listOf("fvwm-crystal", "xterm"))
         assertAptOnly(GraphicSession.QTILE, listOf("qtile", "xterm"))
         assertAptOnly(GraphicSession.MUFFIN, listOf("muffin", "dbus-x11", "xterm"))
-        assertAptOnly(GraphicSession.MUTTER, listOf("mutter", "dbus-x11", "xterm"))
+        assertPlan(
+            ContainerPlatform.UBUNTU,
+            GraphicSession.MUTTER,
+            listOf("mutter", "dbus-x11", "xterm")
+        )
+        assertPlan(
+            ContainerPlatform.ALPINE,
+            GraphicSession.MUTTER,
+            listOf("mutter", "dbus", "xterm")
+        )
         assertAptOnly(GraphicSession.UKWM, listOf("ukwm", "dbus-x11", "xterm"))
         assertAptOnly(GraphicSession.CINNAMON_SHELL, listOf("cinnamon", "dbus-x11", "xterm"))
         assertAptOnly(
@@ -49,11 +58,17 @@ class FourthWindowManagerBatchTest {
     }
 
     private fun assertAptOnly(session: GraphicSession, packages: List<String>) {
-        val plan = requireNotNull(
-            GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, session)
-        )
+        assertPlan(ContainerPlatform.UBUNTU, session, packages)
+        assertTrue(GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, session) == null)
+    }
+
+    private fun assertPlan(
+        platform: ContainerPlatform,
+        session: GraphicSession,
+        packages: List<String>
+    ) {
+        val plan = requireNotNull(GraphicSessionInstallPlans.forSelection(platform, session))
         assertEquals(packages, plan.packages)
         assertEquals(session.startCommand, plan.verificationCommand)
-        assertTrue(GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, session) == null)
     }
 }
