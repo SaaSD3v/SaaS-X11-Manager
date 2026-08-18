@@ -1,5 +1,6 @@
 package com.saas.x11manager.util
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -14,9 +15,22 @@ class XfceGraphicSessionTest {
             GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.XFCE)
         )
 
-        assertTrue(alpine.packages.containsAll(listOf("dbus", "dbus-x11", "xfce4", "xfce4-terminal")))
-        assertTrue(deb.packages.contains("xfce4-session"))
-        assertTrue(deb.packages.contains("xfwm4"))
+        assertTrue(
+            alpine.packages.containsAll(
+                listOf("dbus", "dbus-x11", "xfce4", "xfce4-terminal", "xfce4-notifyd")
+            )
+        )
+        assertTrue(
+            deb.packages.containsAll(
+                listOf(
+                    "xfce4-session",
+                    "xfwm4",
+                    "thunar-volman",
+                    "xfce4-notifyd",
+                    "xfce4-power-manager"
+                )
+            )
+        )
         assertTrue(GraphicSessionSupport.specFor(GraphicSession.XFCE) != null)
 
         val alpineCommands = AdditionalGraphicSessionInstaller.stepsFor(alpine).map { it.command }
@@ -26,6 +40,29 @@ class XfceGraphicSessionTest {
         assertTrue(debCommands.any { it.contains("--install-recommends") && it.contains("xfce4-session") })
         assertFalse(alpineCommands.any { it.trim() == "startxfce4" })
         assertFalse(debCommands.any { it.trim() == "startxfce4" })
+    }
+
+    @Test
+    fun aptPlanKeepsRecommendedDesktopFeaturesWithoutInstallingSystemdSysv() {
+        val plan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.XFCE)
+        )
+        val install = requireNotNull(
+            AdditionalGraphicSessionInstaller.stepsFor(plan).firstOrNull {
+                it.title == "Installing XFCE packages"
+            }
+        )
+
+        assertTrue(plan.installRecommendedPackages)
+        assertEquals(
+            listOf("systemd-sysv"),
+            GraphicSessionAptPolicy.blockedRecommendedPackages(GraphicSession.XFCE)
+        )
+        assertFalse("xorg" in plan.packages)
+        assertFalse("xfce4-pulseaudio-plugin" in plan.packages)
+        assertTrue(install.command.contains("--install-recommends"))
+        assertTrue(install.command.contains("systemd-sysv"))
+        assertTrue(install.command.contains("\$pkg-"))
     }
 
     @Test

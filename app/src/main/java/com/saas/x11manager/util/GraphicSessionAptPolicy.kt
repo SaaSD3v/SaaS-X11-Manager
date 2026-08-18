@@ -9,6 +9,7 @@ package com.saas.x11manager.util
  */
 internal object GraphicSessionAptPolicy {
     fun blockedRecommendedPackages(session: GraphicSession): List<String> = when (session) {
+        GraphicSession.XFCE -> listOf("systemd-sysv")
         GraphicSession.CINNAMON_SHELL,
         GraphicSession.CINNAMON_DESKTOP -> listOf("cinnamon-core")
         GraphicSession.MATE -> listOf("pipewire-audio", "pulseaudio")

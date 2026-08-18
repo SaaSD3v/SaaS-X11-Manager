@@ -58,6 +58,7 @@ object GraphicSessionInstallPlans {
                 "dbus-x11",
                 "libxfce4ui-utils",
                 "thunar",
+                "thunar-volman",
                 "xfce4-appfinder",
                 "xfce4-panel",
                 "xfce4-session",
@@ -65,10 +66,15 @@ object GraphicSessionInstallPlans {
                 "xfconf",
                 "xfdesktop4",
                 "xfwm4",
-                "xfce4-terminal"
+                "xfce4-terminal",
+                "xfce4-notifyd",
+                "xfce4-power-manager"
             )
         ),
-        apk(GraphicSession.XFCE, listOf("dbus", "dbus-x11", "xfce4", "xfce4-terminal")),
+        apk(
+            GraphicSession.XFCE,
+            listOf("dbus", "dbus-x11", "xfce4", "xfce4-terminal", "xfce4-notifyd")
+        ),
         apt(GraphicSession.LXQT, listOf("dbus-x11", "lxqt-core", "openbox")),
         apk(GraphicSession.LXQT, listOf("dbus", "dbus-x11", "lxqt-desktop")),
         apt(GraphicSession.OPENBOX, listOf("openbox", "xterm", "fonts-terminus")),
