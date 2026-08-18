@@ -357,7 +357,10 @@ object ContainerManager {
     suspend fun startContainer(name: String, logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
         try {
             val r = Shell.cmd(
-                "${Constants.DS_BINARY_PATH} --config='${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}' start 2>&1"
+                DroidspacesCliCompatibility.startWithConfigCommand(
+                    binaryPath = Constants.DS_BINARY_PATH,
+                    configPath = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
+                )
             ).exec()
             val out = r.out.joinToString("\n")
             if (out.isNotBlank()) logger?.i(out)
