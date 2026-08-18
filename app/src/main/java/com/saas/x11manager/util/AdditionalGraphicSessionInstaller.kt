@@ -177,6 +177,28 @@ object AdditionalGraphicSessionInstaller {
                 )
             }
 
+            GraphicSession.PLASMA_X11 -> {
+                val command =
+                    "tmpdir=\$(mktemp -d) || exit 1; " +
+                        "cleanup() { rm -rf \"\$tmpdir\"; }; " +
+                        "trap cleanup EXIT HUP INT TERM; " +
+                        "cd \"\$tmpdir\" || exit 1; " +
+                        "apt-get download plasma-workspace >/dev/null 2>&1 || " +
+                        "{ echo 'Could not download Plasma workspace package for X11 capability inspection.' >&2; exit 1; }; " +
+                        "workspace_deb=\$(find . -maxdepth 1 -type f -name 'plasma-workspace_*.deb' -print -quit); " +
+                        "[ -n \"\$workspace_deb\" ] || " +
+                        "{ echo 'Could not locate downloaded Plasma workspace package archive.' >&2; exit 1; }; " +
+                        "dpkg-deb -c \"\$workspace_deb\" | grep -Fq 'usr/bin/startplasma-x11' || " +
+                        "{ if apt-cache show plasma-session-x11 >/dev/null 2>&1; then " +
+                        "echo 'This image provides startplasma-x11 through plasma-session-x11, which requires a local Xorg stack; refusing to provision it over Termux:X11.' >&2; " +
+                        "else echo 'Plasma X11 launcher is unavailable in the candidate workspace package.' >&2; fi; exit 1; }"
+
+                GraphicSessionInstallStep(
+                    "Checking Plasma X11 package capability",
+                    command
+                )
+            }
+
             GraphicSession.UNITY7 -> {
                 val command =
                     "tmpdir=\$(mktemp -d) || exit 1; " +
