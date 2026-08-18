@@ -1,6 +1,7 @@
 package com.saas.x11manager.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -26,7 +27,7 @@ class AtomicGraphicPackageInstallTest {
     }
 
     @Test
-    fun aptPackagesAreInstalledInOneRecommendedTransactionAfterIndividualPreflightChecks() {
+    fun aptPackagesAreInstalledInOneConservativeTransactionAfterIndividualPreflightChecks() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
@@ -42,8 +43,9 @@ class AtomicGraphicPackageInstallTest {
         val installSteps = steps.filter { it.command.contains("apt-get install -y") }
         assertEquals(1, installSteps.size)
         assertEquals(
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y --install-recommends ${plan.packages.joinToString(" ")}",
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${plan.packages.joinToString(" ")}",
             installSteps.single().command
         )
+        assertFalse(installSteps.single().command.contains("--install-recommends"))
     }
 }
