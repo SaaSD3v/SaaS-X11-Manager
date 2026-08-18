@@ -40,6 +40,9 @@ class HomeViewModel : ViewModel() {
     private val _dsStatus = MutableStateFlow(false)
     val dsStatus: StateFlow<Boolean> = _dsStatus
 
+    private val _dsRequirements = MutableStateFlow<DroidspacesRequirementsResult?>(null)
+    val dsRequirements: StateFlow<DroidspacesRequirementsResult?> = _dsRequirements
+
     private val _loaderStatus = MutableStateFlow<LoaderStatus>(LoaderStatus.Stopped)
     val loaderStatus: StateFlow<LoaderStatus> = _loaderStatus
 
@@ -102,7 +105,15 @@ class HomeViewModel : ViewModel() {
                     }
                     val termuxDef = async(Dispatchers.IO) { TermuxChecker.checkTermux() }
                     val x11Def = async(Dispatchers.IO) { TermuxChecker.checkX11Apk() }
-                    val dsDef = async(Dispatchers.IO) { DroidspacesChecker.checkBackend() }
+                    val dsDef = async(Dispatchers.IO) {
+                        val available = DroidspacesChecker.checkBackend()
+                        val requirements = if (available) {
+                            DroidspacesChecker.checkRequirements()
+                        } else {
+                            null
+                        }
+                        available to requirements
+                    }
                     val containersDef = async(Dispatchers.IO) { ContainerManager.listContainers() }
                     val loaderDef = async(Dispatchers.IO) {
                         val status = X11SessionManager.getLoaderStatus()
@@ -128,7 +139,8 @@ class HomeViewModel : ViewModel() {
                 _rootProvider.value = snapshot.root.second
                 _termuxStatus.value = snapshot.termux
                 _x11ApkStatus.value = snapshot.x11Apk
-                _dsStatus.value = snapshot.droidspaces
+                _dsStatus.value = snapshot.droidspaces.first
+                _dsRequirements.value = snapshot.droidspaces.second
 
                 _kernelVersion.value = snapshot.system.kernel
                 _arch.value = snapshot.system.arch
@@ -395,7 +407,7 @@ class HomeViewModel : ViewModel() {
         val root: Pair<RootStatus, String>,
         val termux: TermuxStatus,
         val x11Apk: X11ApkStatus,
-        val droidspaces: Boolean,
+        val droidspaces: Pair<Boolean, DroidspacesRequirementsResult?>,
         val containers: List<ContainerInfo>,
         val loader: Pair<LoaderStatus, Int?>,
         val system: DeviceSnapshot
