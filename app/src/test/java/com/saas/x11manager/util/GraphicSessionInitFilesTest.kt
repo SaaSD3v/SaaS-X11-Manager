@@ -54,12 +54,17 @@ class GraphicSessionInitFilesTest {
     }
 
     @Test
-    fun systemdUsesGenericSessionUnit() {
+    fun systemdUsesGenericSessionUnitAndIdempotentSocketSetup() {
         val socket = GraphicSessionInitFiles.systemdSocketService()
         val session = GraphicSessionInitFiles.systemdSessionService(GraphicSession.OPENBOX)
 
         assertTrue(socket.contains("Before=x11-session.service"))
-        assertTrue(socket.contains("ExecStart=/bin/chmod 700 /tmp/runtime-root"))
+        assertTrue(socket.contains("test -d /usr/.X11-unix"))
+        assertTrue(socket.contains("chmod 700 /tmp/runtime-root"))
+        assertTrue(socket.contains("mountpoint -q /tmp/.X11-unix"))
+        assertTrue(socket.contains("mount --bind /usr/.X11-unix /tmp/.X11-unix"))
+        assertTrue(socket.contains("ExecStop=/bin/sh -c 'if mountpoint -q /tmp/.X11-unix"))
+        assertTrue(socket.contains("umount /tmp/.X11-unix"))
         assertTrue(session.contains("X11 Openbox Session"))
         assertTrue(session.contains("ExecStart=/usr/local/bin/x11-session.sh"))
         assertFalse(session.contains("x11-xfce"))
