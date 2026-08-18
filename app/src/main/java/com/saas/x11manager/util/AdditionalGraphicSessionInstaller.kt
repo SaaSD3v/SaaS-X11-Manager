@@ -254,7 +254,7 @@ object AdditionalGraphicSessionInstaller {
                 "/etc/apk/repositories 2>/dev/null; then :; " +
                 "elif command -v setup-apkrepos >/dev/null 2>&1; then " +
                 "setup-apkrepos -c; " +
-                "elif grep -Eq '^[[:space:]]*#[[:space:]].*/community([[:space:]]|$)' " +
+                "elif grep -Eq '^[[:space:]]*#[[:space:]]*[^#[:space:]].*/community([[:space:]]|$)' " +
                 "/etc/apk/repositories 2>/dev/null; then " +
                 "sed -i -E 's|^[[:space:]]*#[[:space:]]*([^[:space:]]*/community)[[:space:]]*$|\\1|' " +
                 "/etc/apk/repositories; " +
