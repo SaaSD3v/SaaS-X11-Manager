@@ -18,6 +18,7 @@ class DebianAptComponentSourceTest {
         assertTrue(command.contains("Components: %s"))
         assertFalse(command.contains("VERSION_ID"))
         assertFalse(command.contains("sed -i"))
+        assertFalse(command.contains("exit 0"))
     }
 
     @Test
