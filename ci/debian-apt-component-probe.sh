@@ -12,26 +12,22 @@ info() {
 }
 
 apt_package_available() {
-    LC_ALL=C apt-cache policy "$1" | \
+    LC_ALL=C apt-cache policy "$1" |
         awk '$1 == "Candidate:" && $2 != "(none)" { found=1 } END { exit found ? 0 : 1 }'
 }
 
-append_component_deb822_file() {
+emit_deb822_component_sources() {
     file=$1
     component=$2
-    tmp=$(mktemp)
-
-    if awk -v component="$component" '
-        BEGIN { RS=""; ORS="\n\n"; changed=0 }
+    awk -v component="$component" '
+        BEGIN { RS=""; ORS=""; emitted=0 }
         {
-            stanza=$0
-            n=split(stanza, line, "\n")
+            n=split($0, line, "\n")
             enabled=1
             has_deb=0
             has_main=0
             has_component=0
             trusted=0
-            components_line=0
 
             for (i=1; i<=n; i++) {
                 text=line[i]
@@ -39,114 +35,118 @@ append_component_deb822_file() {
                 if (text ~ /^Types:[[:space:]]/ &&
                     (" " text " ") ~ /[[:space:]]deb([[:space:]]|$)/) has_deb=1
                 if (text ~ /^Components:[[:space:]]/) {
-                    components_line=i
                     fields=text
                     sub(/^Components:[[:space:]]*/, "", fields)
                     if ((" " fields " ") ~ /[[:space:]]main([[:space:]]|$)/) has_main=1
-                    needle=" " component " "
-                    if ((" " fields " ") ~ needle) has_component=1
+                    if ((" " fields " ") ~ ("[[:space:]]" component "([[:space:]]|$)")) {
+                        has_component=1
+                    }
                 }
                 if (text ~ /^Signed-By:.*debian-archive-keyring\.gpg([[:space:]]|$)/) trusted=1
-                if (text ~ /^URIs:[[:space:]].*(deb\.debian\.org\/debian|security\.debian\.org\/debian-security|deb\.debian\.org\/debian-security)([[:space:]]|\/|$)/) trusted=1
+                if (text ~ /^URIs:[[:space:]].*(deb\.debian\.org\/debian|security\.debian\.org\/debian-security|deb\.debian\.org\/debian-security)([[:space:]]|\/|$)/) {
+                    trusted=1
+                }
             }
 
-            if (enabled && has_deb && has_main && trusted && !has_component && components_line > 0) {
-                line[components_line]=line[components_line] " " component
-                changed=1
+            if (enabled && has_deb && has_main && trusted && !has_component) {
+                for (i=1; i<=n; i++) {
+                    if (line[i] ~ /^Types:[[:space:]]/) {
+                        printf "Types: deb\n"
+                    } else if (line[i] ~ /^Components:[[:space:]]/) {
+                        printf "Components: %s\n", component
+                    } else {
+                        printf "%s\n", line[i]
+                    }
+                }
+                printf "\n"
+                emitted=1
             }
-
-            for (i=1; i<=n; i++) print line[i]
-            printf "\n"
         }
-        END { if (!changed) exit 2 }
-    ' "$file" > "$tmp"; then
-        cat "$tmp" > "$file"
-        rm -f "$tmp"
-        return 0
-    fi
-
-    rc=$?
-    rm -f "$tmp"
-    [ "$rc" -eq 2 ] && return 1
-    return "$rc"
+        END { if (!emitted) exit 2 }
+    ' "$file"
 }
 
-append_component_list_file() {
+emit_list_component_sources() {
     file=$1
     component=$2
-    tmp=$(mktemp)
-
-    if awk -v component="$component" '
-        BEGIN { changed=0 }
-        {
-            raw=$0
-            if (raw !~ /^[[:space:]]*deb(-src)?[[:space:]]/) {
-                print raw
-                next
+    awk -v component="$component" '
+        BEGIN { emitted=0 }
+        /^[[:space:]]*deb[[:space:]]/ {
+            uri_index=0
+            for (i=2; i<=NF; i++) {
+                if ($i ~ /^https?:\/\//) {
+                    uri_index=i
+                    break
+                }
             }
+            if (!uri_index || uri_index + 1 > NF) next
 
-            trusted=0
+            uri=$uri_index
+            trusted=(uri ~ /^https?:\/\/(deb\.debian\.org\/debian|security\.debian\.org\/debian-security|deb\.debian\.org\/debian-security)(\/|$)/)
+            if (!trusted && $0 ~ /debian-archive-keyring\.gpg/) trusted=1
+            if (!trusted) next
+
             has_main=0
             has_component=0
-            for (i=1; i<=NF; i++) {
-                if ($i ~ /debian-archive-keyring\.gpg/) trusted=1
-                if ($i ~ /^https?:\/\/(deb\.debian\.org\/debian|security\.debian\.org\/debian-security|deb\.debian\.org\/debian-security)(\/|$)/) trusted=1
+            for (i=uri_index+2; i<=NF; i++) {
                 if ($i == "main") has_main=1
                 if ($i == component) has_component=1
             }
+            if (!has_main || has_component) next
 
-            if (trusted && has_main && !has_component) {
-                print raw " " component
-                changed=1
-            } else {
-                print raw
+            for (i=1; i<=uri_index+1; i++) {
+                printf "%s%s", (i == 1 ? "" : " "), $i
             }
+            printf " %s\n", component
+            emitted=1
         }
-        END { if (!changed) exit 2 }
-    ' "$file" > "$tmp"; then
-        cat "$tmp" > "$file"
-        rm -f "$tmp"
-        return 0
-    fi
-
-    rc=$?
-    rm -f "$tmp"
-    [ "$rc" -eq 2 ] && return 1
-    return "$rc"
+        END { if (!emitted) exit 2 }
+    ' "$file"
 }
 
-enable_debian_component() {
+create_debian_component_source() {
     component=$1
-    changed=0
-
-    if [ -f /etc/apt/sources.list.d/debian.sources ]; then
-        if append_component_deb822_file /etc/apt/sources.list.d/debian.sources "$component"; then
-            changed=1
-        fi
-    fi
+    target_base="/etc/apt/sources.list.d/saas-x11-manager-$component"
+    tmp=$(mktemp)
+    generated=0
+    : > "$tmp"
 
     for source_file in /etc/apt/sources.list.d/*.sources; do
         [ -f "$source_file" ] || continue
-        [ "$source_file" = /etc/apt/sources.list.d/debian.sources ] && continue
-        if append_component_deb822_file "$source_file" "$component"; then
-            changed=1
+        [ "$source_file" = "$target_base.sources" ] && continue
+        piece=$(mktemp)
+        if emit_deb822_component_sources "$source_file" "$component" > "$piece"; then
+            cat "$piece" >> "$tmp"
+            generated=1
         fi
+        rm -f "$piece"
     done
 
-    if [ -f /etc/apt/sources.list ]; then
-        if append_component_list_file /etc/apt/sources.list "$component"; then
-            changed=1
-        fi
+    if [ "$generated" -eq 1 ]; then
+        cat "$tmp" > "$target_base.sources"
+        rm -f "$target_base.list" "$tmp"
+        return 0
     fi
 
-    for source_file in /etc/apt/sources.list.d/*.list; do
+    : > "$tmp"
+    for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
         [ -f "$source_file" ] || continue
-        if append_component_list_file "$source_file" "$component"; then
-            changed=1
+        [ "$source_file" = "$target_base.list" ] && continue
+        piece=$(mktemp)
+        if emit_list_component_sources "$source_file" "$component" > "$piece"; then
+            cat "$piece" >> "$tmp"
+            generated=1
         fi
+        rm -f "$piece"
     done
 
-    [ "$changed" -eq 1 ] || fail "Could not identify a trusted Debian archive source to enable $component"
+    [ "$generated" -eq 1 ] || {
+        rm -f "$tmp"
+        return 1
+    }
+
+    cat "$tmp" > "$target_base.list"
+    rm -f "$target_base.sources" "$tmp"
 }
 
 validate_format_fixtures() {
@@ -154,7 +154,7 @@ validate_format_fixtures() {
     trap 'rm -rf "$fixture_dir"' EXIT HUP INT TERM
 
     cat > "$fixture_dir/debian.sources" <<'EOF'
-Types: deb
+Types: deb deb-src
 URIs: http://deb.debian.org/debian
 Suites: stable stable-updates
 Components: main non-free-firmware
@@ -167,13 +167,17 @@ Components: main
 Signed-By: /usr/share/keyrings/example.gpg
 EOF
 
-    append_component_deb822_file "$fixture_dir/debian.sources" non-free ||
-        fail "deb822 fixture was not updated"
-    grep -Fq 'Components: main non-free-firmware non-free' "$fixture_dir/debian.sources" ||
-        fail "deb822 fixture did not receive non-free"
-    grep -A4 -F 'https://example.invalid/repository' "$fixture_dir/debian.sources" |
-        grep -Fq 'Components: main' ||
-        fail "third-party deb822 fixture was unexpectedly changed"
+    emit_deb822_component_sources "$fixture_dir/debian.sources" non-free > "$fixture_dir/generated.sources" ||
+        fail "Could not generate supplemental deb822 fixture"
+    grep -Fq 'Types: deb' "$fixture_dir/generated.sources" ||
+        fail "Supplemental deb822 fixture did not restrict Types to deb"
+    grep -Fq 'Components: non-free' "$fixture_dir/generated.sources" ||
+        fail "Supplemental deb822 fixture did not receive non-free"
+    grep -Fq 'URIs: http://deb.debian.org/debian' "$fixture_dir/generated.sources" ||
+        fail "Supplemental deb822 fixture lost Debian URI"
+    if grep -Fq 'example.invalid' "$fixture_dir/generated.sources"; then
+        fail "Third-party deb822 source leaked into supplemental source"
+    fi
 
     cat > "$fixture_dir/sources.list" <<'EOF'
 deb http://deb.debian.org/debian stable main non-free-firmware
@@ -181,14 +185,15 @@ deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] https://mirror.ex
 deb https://third-party.example.invalid/repo stable main
 EOF
 
-    append_component_list_file "$fixture_dir/sources.list" non-free ||
-        fail "one-line fixture was not updated"
-    grep -Fq 'deb http://deb.debian.org/debian stable main non-free-firmware non-free' "$fixture_dir/sources.list" ||
-        fail "official one-line fixture did not receive non-free"
-    grep -Fq 'deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] https://mirror.example.invalid/debian stable main non-free' "$fixture_dir/sources.list" ||
-        fail "archive-keyring one-line fixture did not receive non-free"
-    grep -Fq 'deb https://third-party.example.invalid/repo stable main' "$fixture_dir/sources.list" ||
-        fail "third-party one-line fixture was unexpectedly changed"
+    emit_list_component_sources "$fixture_dir/sources.list" non-free > "$fixture_dir/generated.list" ||
+        fail "Could not generate supplemental one-line fixture"
+    grep -Fq 'deb http://deb.debian.org/debian stable non-free' "$fixture_dir/generated.list" ||
+        fail "Official one-line fixture did not generate non-free source"
+    grep -Fq 'deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] https://mirror.example.invalid/debian stable non-free' "$fixture_dir/generated.list" ||
+        fail "Archive-keyring one-line fixture did not generate non-free source"
+    if grep -Fq 'third-party.example.invalid' "$fixture_dir/generated.list"; then
+        fail "Third-party one-line source leaked into supplemental source"
+    fi
 
     rm -rf "$fixture_dir"
     trap - EXIT HUP INT TERM
@@ -204,18 +209,38 @@ validate_format_fixtures
 
 command -v apt-get >/dev/null 2>&1 || fail "apt-get is unavailable"
 command -v apt-cache >/dev/null 2>&1 || fail "apt-cache is unavailable"
+command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is unavailable"
 
 DEBIAN_FRONTEND=noninteractive apt-get update >/dev/null
 
+snapshot=$(mktemp)
+for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+    [ -f "$source_file" ] || continue
+    case "$source_file" in
+        /etc/apt/sources.list.d/saas-x11-manager-*) continue ;;
+    esac
+    sha256sum "$source_file" >> "$snapshot"
+done
+
 if apt_package_available amiwm; then
-    info "amiwm candidate already available; no repository mutation required"
+    info "amiwm candidate already available; no supplemental repository is required"
 else
-    enable_debian_component non-free
+    create_debian_component_source non-free ||
+        fail "Could not derive a trusted Debian source for non-free"
     DEBIAN_FRONTEND=noninteractive apt-get update >/dev/null
     apt_package_available amiwm ||
         fail "amiwm still has no installable candidate after enabling Debian non-free"
-    info "Debian non-free enabled and amiwm candidate resolved"
+    info "Supplemental Debian non-free source resolved amiwm candidate"
 fi
+
+while read -r expected_hash source_file; do
+    [ -f "$source_file" ] || fail "Original Debian source disappeared: $source_file"
+    actual_hash=$(sha256sum "$source_file" | awk '{ print $1 }')
+    [ "$actual_hash" = "$expected_hash" ] ||
+        fail "Original Debian source was modified: $source_file"
+done < "$snapshot"
+rm -f "$snapshot"
+info "Original Debian source files remained unchanged"
 
 simulation=$(mktemp)
 trap 'rm -f "$simulation"' EXIT HUP INT TERM
