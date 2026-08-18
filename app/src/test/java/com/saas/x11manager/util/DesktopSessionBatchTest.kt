@@ -22,7 +22,7 @@ class DesktopSessionBatchTest {
     }
 
     @Test
-    fun mateUsesFullDesktopRecommendsWithoutSuppression() {
+    fun mateSuppressesRecommendedDesktopExtrasByDefault() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.MATE)
         )
@@ -32,9 +32,10 @@ class DesktopSessionBatchTest {
             }
         )
 
-        assertTrue(plan.installRecommendedPackages)
-        assertTrue(install.command.contains("--install-recommends"))
+        assertFalse(plan.installRecommendedPackages)
+        assertTrue(install.command.contains("--no-install-recommends"))
         assertTrue(install.command.contains("mate-desktop-environment dbus-x11"))
+        assertFalse(install.command.contains("--install-recommends"))
         assertFalse(install.command.contains("blocked_recommends"))
         assertFalse(install.command.contains("\$pkg-"))
     }
@@ -65,11 +66,11 @@ class DesktopSessionBatchTest {
         assertTrue("plasma-workspace" in plan.packages)
         assertTrue("kwin-x11" in plan.packages)
         assertTrue("kde-plasma-desktop" !in plan.packages)
-        assertTrue(plan.installRecommendedPackages)
+        assertFalse(plan.installRecommendedPackages)
     }
 
     @Test
-    fun cinnamonDesktopKeepsAllAptRecommendsWithoutSuppression() {
+    fun cinnamonDesktopSuppressesAptRecommendsByDefault() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
@@ -82,9 +83,10 @@ class DesktopSessionBatchTest {
             }
         )
 
-        assertTrue(plan.installRecommendedPackages)
-        assertTrue(install.command.contains("--install-recommends"))
+        assertFalse(plan.installRecommendedPackages)
+        assertTrue(install.command.contains("--no-install-recommends"))
         assertTrue(install.command.contains("cinnamon-session cinnamon muffin nemo cinnamon-settings-daemon dbus-x11 xterm"))
+        assertFalse(install.command.contains("--install-recommends"))
         assertFalse(install.command.contains("blocked_recommends"))
         assertFalse(install.command.contains("\$pkg-"))
     }
@@ -103,12 +105,13 @@ class DesktopSessionBatchTest {
         )
 
         assertEquals(listOf("budgie-desktop", "dbus-x11", "xterm"), plan.packages)
-        assertTrue(plan.installRecommendedPackages)
+        assertFalse(plan.installRecommendedPackages)
         assertTrue(preflight.command.contains("apt-get download budgie-core"))
         assertTrue(preflight.command.contains("usr/share/xsessions/budgie-desktop.desktop"))
         assertTrue(preflight.command.contains("usr/bin/budgie-wm"))
         assertTrue(preflight.command.contains("Wayland-only Budgie support"))
-        assertTrue(install.command.contains("--install-recommends"))
+        assertTrue(install.command.contains("--no-install-recommends"))
+        assertFalse(install.command.contains("--install-recommends"))
         assertTrue(install.command.contains("budgie-desktop dbus-x11 xterm"))
     }
 
