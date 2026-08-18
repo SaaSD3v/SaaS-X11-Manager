@@ -21,6 +21,31 @@ class Unity7GraphicSessionTest {
     }
 
     @Test
+    fun aptInstallKeepsUnityRecommendsWithoutSwitchingContainerInit() {
+        val plan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(
+                ContainerPlatform.UBUNTU,
+                GraphicSession.UNITY7
+            )
+        )
+        val install = requireNotNull(
+            AdditionalGraphicSessionInstaller.stepsFor(plan).firstOrNull {
+                it.title == "Installing Unity 7 (Ubuntu) packages"
+            }
+        )
+
+        assertTrue(plan.installRecommendedPackages)
+        assertEquals(
+            listOf("systemd-sysv"),
+            GraphicSessionAptPolicy.blockedRecommendedPackages(GraphicSession.UNITY7)
+        )
+        assertTrue(install.command.contains("--install-recommends"))
+        assertTrue(install.command.contains("unity-session dbus-x11 xterm"))
+        assertTrue(install.command.contains("systemd-sysv"))
+        assertTrue(install.command.contains("\$pkg-"))
+    }
+
+    @Test
     fun wrapperHandlesOldAndNewUnitySessionLaunchers() {
         val spec = requireNotNull(GraphicSessionSupport.specFor(GraphicSession.UNITY7))
         val command = spec.postInstallCommands.joinToString("\n") { it.command }
