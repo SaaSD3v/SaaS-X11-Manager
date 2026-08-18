@@ -23,9 +23,14 @@ ROOTFS_ID=${ID:-unknown}
 APT_BLOCKED='xorg|xserver-xorg.*|gdm3|lightdm|sddm|lxdm|xdm|slim|nodm|pulseaudio|pipewire-pulse|pipewire-audio'
 APK_BLOCKED='(^|[[:space:](])(xorg-server|lightdm|sddm|gdm|lxdm|xdm|slim|nodm|pulseaudio|pipewire-pulse)(-[0-9][^[:space:]]*)?([[:space:])]|$)'
 
+apt_package_available() {
+    LC_ALL=C apt-cache policy "$1" | \
+        awk '$1 == "Candidate:" && $2 != "(none)" { found=1 } END { exit found ? 0 : 1 }'
+}
+
 check_apt_packages() {
     for package_name in "$@"; do
-        apt-cache show "$package_name" >/dev/null 2>&1 || fail "APT package unavailable: $package_name"
+        apt_package_available "$package_name" || fail "APT package unavailable: $package_name"
     done
 }
 
@@ -127,7 +132,7 @@ audit_apt_plan() {
     shift
     missing=''
     for package_name in "$@"; do
-        if ! apt-cache show "$package_name" >/dev/null 2>&1; then
+        if ! apt_package_available "$package_name"; then
             missing="${missing}${missing:+,}$package_name"
         fi
     done
