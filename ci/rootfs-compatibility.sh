@@ -241,8 +241,8 @@ elif command -v apt-get >/dev/null 2>&1 && command -v apt-cache >/dev/null 2>&1 
         xfce4-terminal xfce4-notifyd xfce4-power-manager
     simulate_apt LXQt dbus-x11 lxqt-core openbox
     simulate_apt MATE mate-desktop-environment dbus-x11
-    simulate_apt LXDE-direct-candidate \
-        lxsession lxde-common openbox lxpanel pcmanfm lxterminal dbus-x11
+    simulate_apt LXDE-safe-candidate \
+        openbox-lxde-session lxpanel pcmanfm lxterminal dbus-x11 suckless-tools
     audit_catalog apt
 else
     fail "No supported package family found"
