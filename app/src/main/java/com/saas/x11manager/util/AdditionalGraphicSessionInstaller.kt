@@ -173,6 +173,28 @@ object AdditionalGraphicSessionInstaller {
                 )
             }
 
+            GraphicSession.GNOME_CLASSIC_XORG -> {
+                val command =
+                    "tmpdir=\$(mktemp -d) || exit 1; " +
+                        "cleanup() { rm -rf \"\$tmpdir\"; }; " +
+                        "trap cleanup EXIT HUP INT TERM; " +
+                        "cd \"\$tmpdir\" || exit 1; " +
+                        "if apt-cache show gnome-classic-xsession >/dev/null 2>&1; then " +
+                        "candidate=gnome-classic-xsession; else candidate=gnome-shell-extensions; fi; " +
+                        "apt-get download \"\$candidate\" >/dev/null 2>&1 || " +
+                        "{ echo 'Could not download GNOME Classic package for Xorg capability inspection.' >&2; exit 1; }; " +
+                        "classic_deb=\$(find . -maxdepth 1 -type f -name \"\${candidate}_*.deb\" -print -quit); " +
+                        "[ -n \"\$classic_deb\" ] || " +
+                        "{ echo 'Could not locate downloaded GNOME Classic package archive.' >&2; exit 1; }; " +
+                        "dpkg-deb -c \"\$classic_deb\" | grep -Fq 'usr/share/xsessions/gnome-classic-xorg.desktop' || " +
+                        "{ echo 'GNOME Classic Xorg is unavailable in the candidate packages; this image provides Wayland-only GNOME Classic support.' >&2; exit 1; }"
+
+                GraphicSessionInstallStep(
+                    "Checking GNOME Classic Xorg package capability",
+                    command
+                )
+            }
+
             else -> null
         }
     }

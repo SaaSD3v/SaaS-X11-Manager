@@ -9,7 +9,7 @@ import org.junit.Test
 class GnomeClassicXorgGraphicSessionTest {
 
     @Test
-    fun aptPlanUsesDebianClassicXorgPackages() {
+    fun aptPlanUsesDistroNeutralClassicPackages() {
         val plan = GraphicSessionInstallPlans.forSelection(
             ContainerPlatform.UBUNTU,
             GraphicSession.GNOME_CLASSIC_XORG
@@ -17,15 +17,45 @@ class GnomeClassicXorgGraphicSessionTest {
 
         assertNotNull(plan)
         assertEquals(
-            listOf("gnome-classic", "gnome-classic-xsession", "dbus-x11", "xterm"),
+            listOf("gnome-shell-extensions", "dbus-x11", "xterm"),
             plan?.packages
         )
+        assertEquals("saas-gnome-classic-xorg-session", GraphicSession.GNOME_CLASSIC_XORG.startCommand)
     }
 
     @Test
-    fun wrapperUsesDebianClassicSessionLauncher() {
+    fun installerPreflightsActualClassicXorgProvider() {
+        val plan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(
+                ContainerPlatform.UBUNTU,
+                GraphicSession.GNOME_CLASSIC_XORG
+            )
+        )
+        val steps = AdditionalGraphicSessionInstaller.stepsFor(plan)
+        val preflight = requireNotNull(
+            steps.firstOrNull { it.title == "Checking GNOME Classic Xorg package capability" }
+        )
+        val install = requireNotNull(
+            steps.firstOrNull { it.title == "Installing GNOME Classic Xorg packages" }
+        )
+
+        assertTrue(preflight.command.contains("apt-cache show gnome-classic-xsession"))
+        assertTrue(preflight.command.contains("candidate=gnome-classic-xsession"))
+        assertTrue(preflight.command.contains("candidate=gnome-shell-extensions"))
+        assertTrue(preflight.command.contains("usr/share/xsessions/gnome-classic-xorg.desktop"))
+        assertTrue(preflight.command.contains("Wayland-only GNOME Classic support"))
+        assertEquals(
+            listOf("systemd-sysv"),
+            GraphicSessionAptPolicy.blockedRecommendedPackages(GraphicSession.GNOME_CLASSIC_XORG)
+        )
+        assertTrue(install.command.contains("--install-recommends"))
+        assertTrue(install.command.contains("gnome-shell-extensions dbus-x11 xterm"))
+        assertTrue(install.command.contains("systemd-sysv"))
+    }
+
+    @Test
+    fun wrapperUsesClassicSessionLauncher() {
         val spec = requireNotNull(GraphicSessionSupport.specFor(GraphicSession.GNOME_CLASSIC_XORG))
-        assertEquals("saas-gnome-classic-xorg-session", GraphicSession.GNOME_CLASSIC_XORG.startCommand)
         assertTrue(spec.postInstallCommands.any {
             it.command.contains("dbus-run-session -- gnome-session-classic")
         })

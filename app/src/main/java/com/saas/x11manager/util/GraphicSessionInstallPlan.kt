@@ -170,7 +170,7 @@ object GraphicSessionInstallPlans {
         apk(GraphicSession.DK, listOf("dk", "xterm")),
         apt(GraphicSession.GNOME_XORG, listOf("gnome-session", "dbus-x11", "xterm")),
         apt(GraphicSession.GNOME_FLASHBACK, listOf("gnome-session-flashback", "dbus-x11", "xterm")),
-        apt(GraphicSession.GNOME_CLASSIC_XORG, listOf("gnome-classic", "gnome-classic-xsession", "dbus-x11", "xterm")),
+        apt(GraphicSession.GNOME_CLASSIC_XORG, listOf("gnome-shell-extensions", "dbus-x11", "xterm")),
         apt(GraphicSession.UNITY7, listOf("unity-session", "dbus-x11", "xterm")),
         apt(
             GraphicSession.UKUI_DESKTOP,
