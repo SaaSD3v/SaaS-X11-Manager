@@ -421,19 +421,19 @@ object AdditionalGraphicSessionInstaller {
         cacheDir: File,
         logger: ContainerLogger?
     ): Boolean {
-        val writes = listOf(
-            "Package Platform" to ContainerSettingsManager.setPlatform(containerName, platform, cacheDir),
-            "Init System" to ContainerSettingsManager.setInitSystem(containerName, initSystem, cacheDir),
-            "Graphic Session" to ContainerSettingsManager.setGraphicSession(containerName, session, cacheDir)
+        val success = ContainerSettingsManager.setProfile(
+            containerName = containerName,
+            platform = platform,
+            initSystem = initSystem,
+            graphicSession = session,
+            cacheDir = cacheDir
         )
-        for ((label, success) in writes) {
-            if (!success) {
-                logger?.e("[-] FAIL")
-                logger?.e("[-] Could not persist $label")
-                return false
-            }
+        if (!success) {
+            logger?.e("[-] FAIL")
+            logger?.e("[-] Could not persist package platform, init system and graphic session")
+            return false
         }
-        logger?.i("[+] Saved package platform, init system and graphic session")
+        logger?.i("[+] Saved package platform, init system and graphic session atomically")
         logger?.i("")
         return true
     }
