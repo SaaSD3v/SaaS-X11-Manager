@@ -7,26 +7,46 @@ import org.junit.Test
 class AptRecommendedPackagesPolicyTest {
 
     @Test
-    fun allAptPlansInstallRecommendedPackagesWithoutSuppression() {
+    fun aptPlansSuppressRecommendedPackagesUnlessExplicitlyOptedIn() {
         GraphicSessionSupport.installableSessions.forEach { session ->
             val plan = GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, session)
                 ?: return@forEach
 
-            assertTrue(plan.installRecommendedPackages)
+            assertFalse(plan.installRecommendedPackages)
 
-            if (session !in setOf(GraphicSession.OPENBOX, GraphicSession.ICEWM, GraphicSession.JWM)) {
-                val installCommands = AdditionalGraphicSessionInstaller.stepsFor(plan)
-                    .filter { it.title.startsWith("Installing ") }
-                    .map { it.command }
-
-                assertTrue(installCommands.isNotEmpty())
-                installCommands.forEach { command ->
-                    assertTrue(command.contains("--install-recommends"))
-                    assertFalse(command.contains("--no-install-recommends"))
-                    assertFalse(command.contains("blocked_recommends"))
-                    assertFalse(command.contains("\$pkg-"))
-                }
+            val installCommands = if (session in setOf(
+                    GraphicSession.OPENBOX,
+                    GraphicSession.ICEWM,
+                    GraphicSession.JWM
+                )
+            ) {
+                GraphicSessionInstaller.stepsFor(plan)
+            } else {
+                AdditionalGraphicSessionInstaller.stepsFor(plan)
             }
+                .filter { it.title.startsWith("Installing ") }
+                .map { it.command }
+
+            assertTrue(installCommands.isNotEmpty())
+            installCommands.forEach { command ->
+                assertTrue(command.contains("--no-install-recommends"))
+                assertFalse(command.contains("--install-recommends"))
+            }
+        }
+    }
+
+    @Test
+    fun desktopPlansKnownToRecommendAudioRemainSuppressed() {
+        setOf(
+            GraphicSession.LXQT,
+            GraphicSession.MATE,
+            GraphicSession.CINNAMON_SHELL,
+            GraphicSession.CINNAMON_DESKTOP
+        ).forEach { session ->
+            val plan = requireNotNull(
+                GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, session)
+            )
+            assertFalse(plan.installRecommendedPackages)
         }
     }
 }
