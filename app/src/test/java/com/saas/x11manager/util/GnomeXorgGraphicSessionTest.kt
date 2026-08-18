@@ -1,6 +1,7 @@
 package com.saas.x11manager.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -24,7 +25,7 @@ class GnomeXorgGraphicSessionTest {
     }
 
     @Test
-    fun installerPreflightsActualCandidateForXorgSessionFiles() {
+    fun installerPreflightsActualCandidateAndKeepsAllRecommends() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
@@ -45,14 +46,10 @@ class GnomeXorgGraphicSessionTest {
         assertTrue(preflight.command.contains("apt-get download"))
         assertTrue(preflight.command.contains("usr/share/xsessions/gnome-xorg.desktop"))
         assertTrue(preflight.command.contains("Wayland-only GNOME support"))
-        assertEquals(
-            listOf("systemd-sysv"),
-            GraphicSessionAptPolicy.blockedRecommendedPackages(GraphicSession.GNOME_XORG)
-        )
         assertTrue(install.command.contains("--install-recommends"))
         assertTrue(install.command.contains("gnome-session dbus-x11 xterm"))
-        assertTrue(install.command.contains("systemd-sysv"))
-        assertTrue(install.command.contains("\$pkg-"))
+        assertFalse(install.command.contains("blocked_recommends"))
+        assertFalse(install.command.contains("\$pkg-"))
     }
 
     @Test

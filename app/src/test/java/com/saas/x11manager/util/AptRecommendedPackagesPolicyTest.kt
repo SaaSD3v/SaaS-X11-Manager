@@ -1,12 +1,13 @@
 package com.saas.x11manager.util
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AptRecommendedPackagesPolicyTest {
 
     @Test
-    fun allAptPlansInstallRecommendedPackagesExplicitly() {
+    fun allAptPlansInstallRecommendedPackagesWithoutSuppression() {
         GraphicSessionSupport.installableSessions.forEach { session ->
             val plan = GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, session)
                 ?: return@forEach
@@ -21,7 +22,9 @@ class AptRecommendedPackagesPolicyTest {
                 assertTrue(installCommands.isNotEmpty())
                 installCommands.forEach { command ->
                     assertTrue(command.contains("--install-recommends"))
-                    assertTrue(!command.contains("--no-install-recommends"))
+                    assertFalse(command.contains("--no-install-recommends"))
+                    assertFalse(command.contains("blocked_recommends"))
+                    assertFalse(command.contains("\$pkg-"))
                 }
             }
         }

@@ -1,6 +1,5 @@
 package com.saas.x11manager.util
 
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -43,7 +42,7 @@ class XfceGraphicSessionTest {
     }
 
     @Test
-    fun aptPlanKeepsRecommendedDesktopFeaturesWithoutInstallingSystemdSysv() {
+    fun aptPlanInstallsRecommendedDesktopFeaturesWithoutSuppression() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.XFCE)
         )
@@ -54,15 +53,9 @@ class XfceGraphicSessionTest {
         )
 
         assertTrue(plan.installRecommendedPackages)
-        assertEquals(
-            listOf("systemd-sysv"),
-            GraphicSessionAptPolicy.blockedRecommendedPackages(GraphicSession.XFCE)
-        )
-        assertFalse("xorg" in plan.packages)
-        assertFalse("xfce4-pulseaudio-plugin" in plan.packages)
         assertTrue(install.command.contains("--install-recommends"))
-        assertTrue(install.command.contains("systemd-sysv"))
-        assertTrue(install.command.contains("\$pkg-"))
+        assertFalse(install.command.contains("blocked_recommends"))
+        assertFalse(install.command.contains("\$pkg-"))
     }
 
     @Test

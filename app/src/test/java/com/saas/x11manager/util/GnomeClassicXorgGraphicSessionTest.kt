@@ -1,6 +1,7 @@
 package com.saas.x11manager.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -24,7 +25,7 @@ class GnomeClassicXorgGraphicSessionTest {
     }
 
     @Test
-    fun installerPreflightsActualClassicXorgProvider() {
+    fun installerPreflightsActualClassicXorgProviderAndKeepsAllRecommends() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
@@ -44,13 +45,10 @@ class GnomeClassicXorgGraphicSessionTest {
         assertTrue(preflight.command.contains("candidate=gnome-shell-extensions"))
         assertTrue(preflight.command.contains("usr/share/xsessions/gnome-classic-xorg.desktop"))
         assertTrue(preflight.command.contains("Wayland-only GNOME Classic support"))
-        assertEquals(
-            listOf("systemd-sysv"),
-            GraphicSessionAptPolicy.blockedRecommendedPackages(GraphicSession.GNOME_CLASSIC_XORG)
-        )
         assertTrue(install.command.contains("--install-recommends"))
         assertTrue(install.command.contains("gnome-shell-extensions dbus-x11 xterm"))
-        assertTrue(install.command.contains("systemd-sysv"))
+        assertFalse(install.command.contains("blocked_recommends"))
+        assertFalse(install.command.contains("\$pkg-"))
     }
 
     @Test

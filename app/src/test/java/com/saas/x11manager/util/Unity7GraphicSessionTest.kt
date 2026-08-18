@@ -1,6 +1,7 @@
 package com.saas.x11manager.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -21,7 +22,7 @@ class Unity7GraphicSessionTest {
     }
 
     @Test
-    fun aptInstallKeepsUnityRecommendsWithoutSwitchingContainerInit() {
+    fun aptInstallKeepsAllUnityRecommendsWithoutSuppression() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
@@ -35,14 +36,10 @@ class Unity7GraphicSessionTest {
         )
 
         assertTrue(plan.installRecommendedPackages)
-        assertEquals(
-            listOf("systemd-sysv"),
-            GraphicSessionAptPolicy.blockedRecommendedPackages(GraphicSession.UNITY7)
-        )
         assertTrue(install.command.contains("--install-recommends"))
         assertTrue(install.command.contains("unity-session dbus-x11 xterm"))
-        assertTrue(install.command.contains("systemd-sysv"))
-        assertTrue(install.command.contains("\$pkg-"))
+        assertFalse(install.command.contains("blocked_recommends"))
+        assertFalse(install.command.contains("\$pkg-"))
     }
 
     @Test

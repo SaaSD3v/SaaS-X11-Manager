@@ -1,6 +1,7 @@
 package com.saas.x11manager.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -21,7 +22,7 @@ class DesktopSessionBatchTest {
     }
 
     @Test
-    fun mateUsesFullDesktopRecommendsWithoutProvisioningAudioServers() {
+    fun mateUsesFullDesktopRecommendsWithoutSuppression() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.MATE)
         )
@@ -32,15 +33,10 @@ class DesktopSessionBatchTest {
         )
 
         assertTrue(plan.installRecommendedPackages)
-        assertEquals(
-            listOf("pipewire-audio", "pulseaudio"),
-            GraphicSessionAptPolicy.blockedRecommendedPackages(GraphicSession.MATE)
-        )
         assertTrue(install.command.contains("--install-recommends"))
         assertTrue(install.command.contains("mate-desktop-environment dbus-x11"))
-        assertTrue(install.command.contains("pipewire-audio"))
-        assertTrue(install.command.contains("pulseaudio"))
-        assertTrue(install.command.contains("\$pkg-"))
+        assertFalse(install.command.contains("blocked_recommends"))
+        assertFalse(install.command.contains("\$pkg-"))
     }
 
     @Test
@@ -73,7 +69,7 @@ class DesktopSessionBatchTest {
     }
 
     @Test
-    fun cinnamonDesktopKeepsSafeRecommendsWithoutCinnamonCoreMeta() {
+    fun cinnamonDesktopKeepsAllAptRecommendsWithoutSuppression() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
@@ -87,14 +83,10 @@ class DesktopSessionBatchTest {
         )
 
         assertTrue(plan.installRecommendedPackages)
-        assertEquals(
-            listOf("cinnamon-core"),
-            GraphicSessionAptPolicy.blockedRecommendedPackages(GraphicSession.CINNAMON_DESKTOP)
-        )
-        assertTrue("cinnamon-core" !in plan.packages)
         assertTrue(install.command.contains("--install-recommends"))
-        assertTrue(install.command.contains("cinnamon-core"))
-        assertTrue(install.command.contains("\$pkg-"))
+        assertTrue(install.command.contains("cinnamon-session cinnamon muffin nemo cinnamon-settings-daemon dbus-x11 xterm"))
+        assertFalse(install.command.contains("blocked_recommends"))
+        assertFalse(install.command.contains("\$pkg-"))
     }
 
     @Test

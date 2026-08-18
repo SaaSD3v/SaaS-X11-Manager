@@ -1,18 +1,13 @@
 package com.saas.x11manager.util
 
-import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CinnamonShellAptPolicyTest {
 
     @Test
-    fun cinnamonShellKeepsRecommendsButBlocksCinnamonCoreWhenAbsent() {
-        assertEquals(
-            listOf("cinnamon-core"),
-            GraphicSessionAptPolicy.blockedRecommendedPackages(GraphicSession.CINNAMON_SHELL)
-        )
-
+    fun cinnamonShellInstallsAptRecommendationsWithoutSuppression() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
@@ -25,10 +20,12 @@ class CinnamonShellAptPolicyTest {
             }
         )
 
+        assertTrue(plan.installRecommendedPackages)
         assertTrue(install.command.contains("--install-recommends"))
-        assertTrue(install.command.contains("dpkg -s \"\$pkg\""))
-        assertTrue(install.command.contains("cinnamon-core"))
-        assertTrue(install.command.contains("\$pkg-"))
-        assertTrue(!install.command.contains("--no-install-recommends"))
+        assertTrue(install.command.contains("cinnamon dbus-x11 xterm"))
+        assertFalse(install.command.contains("blocked_recommends"))
+        assertFalse(install.command.contains("dpkg -s \"\$pkg\""))
+        assertFalse(install.command.contains("\$pkg-"))
+        assertFalse(install.command.contains("--no-install-recommends"))
     }
 }

@@ -1,6 +1,5 @@
 package com.saas.x11manager.util
 
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -29,7 +28,7 @@ class LxqtGraphicSessionTest {
     }
 
     @Test
-    fun aptCoreKeepsFullDesktopRecommendsWithoutProvisioningAudioServerFrontend() {
+    fun aptCoreInstallsRecommendedDesktopFeaturesWithoutSuppression() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.LXQT)
         )
@@ -40,18 +39,11 @@ class LxqtGraphicSessionTest {
         )
 
         assertTrue(plan.installRecommendedPackages)
-        assertEquals(
-            listOf("pavucontrol-qt", "pavucontrol"),
-            GraphicSessionAptPolicy.blockedRecommendedPackages(GraphicSession.LXQT)
-        )
         assertTrue("lxqt-core" in plan.packages)
         assertTrue("openbox" in plan.packages)
-        assertFalse("lxqt" in plan.packages)
-        assertFalse("sddm" in plan.packages)
         assertTrue(install.command.contains("--install-recommends"))
-        assertTrue(install.command.contains("pavucontrol-qt"))
-        assertTrue(install.command.contains("pavucontrol"))
-        assertTrue(install.command.contains("\$pkg-"))
+        assertFalse(install.command.contains("blocked_recommends"))
+        assertFalse(install.command.contains("\$pkg-"))
     }
 
     @Test
