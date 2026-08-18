@@ -11,7 +11,7 @@ class DebianAptComponentSourceTest {
     fun commandUsesSupplementalSourcesWithoutVersionPinning() {
         val command = DebianAptComponentSource.commandFor("non-free")
 
-        assertTrue(command.contains("saas-x11-manager-$component".replace("$component", "\$component")))
+        assertTrue(command.contains("saas-x11-manager-\$component"))
         assertTrue(command.contains("/etc/apt/sources.list.d/*.sources"))
         assertTrue(command.contains("/etc/apt/sources.list.d/*.list"))
         assertTrue(command.contains("debian-archive-keyring\\.gpg"))
