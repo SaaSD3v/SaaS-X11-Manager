@@ -18,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -27,6 +28,7 @@ import com.saas.x11manager.util.Constants
 import com.saas.x11manager.util.DroidspacesRequirementState
 import com.saas.x11manager.util.LoaderStatus
 import com.saas.x11manager.util.RootStatus
+import com.saas.x11manager.util.TermuxChecker
 import com.saas.x11manager.util.TermuxStatus
 import com.saas.x11manager.util.X11ApkStatus
 
@@ -48,6 +50,17 @@ fun RequirementsScreen(
     val androidSdk by viewModel.androidSdk.collectAsState()
     val deviceName by viewModel.deviceName.collectAsState()
 
+    val loaderAssetAvailable by produceState<Boolean?>(
+        initialValue = null,
+        key1 = x11ApkStatus
+    ) {
+        value = if (x11ApkStatus == X11ApkStatus.Installed) {
+            TermuxChecker.checkTermuxX11Loader()
+        } else {
+            false
+        }
+    }
+
     val dsRequirementsBlocking =
         dsRequirements?.state == DroidspacesRequirementState.MISSING_REQUIRED
     val dsRequirementsWarning =
@@ -57,6 +70,7 @@ fun RequirementsScreen(
         rootStatus == RootStatus.Granted &&
             termuxStatus == TermuxStatus.Installed &&
             x11ApkStatus == X11ApkStatus.Installed &&
+            loaderAssetAvailable == true &&
             dsStatus &&
             !dsRequirementsBlocking
 
@@ -179,6 +193,22 @@ fun RequirementsScreen(
                             X11ApkStatus.Installed -> RowState.OK
                             X11ApkStatus.NotInstalled -> RowState.ERROR
                             X11ApkStatus.Checking -> RowState.INFO
+                        }
+                    )
+
+                    RequirementRow(
+                        icon = Icons.Default.DisplaySettings,
+                        label = "Termux:X11 Loader",
+                        value = when (loaderAssetAvailable) {
+                            true -> "Available"
+                            false -> if (x11ApkStatus == X11ApkStatus.Checking) "Checking..." else "Missing"
+                            null -> "Checking..."
+                        },
+                        detail = Constants.LOADER_APK,
+                        state = when (loaderAssetAvailable) {
+                            true -> RowState.OK
+                            false -> if (x11ApkStatus == X11ApkStatus.Checking) RowState.INFO else RowState.ERROR
+                            null -> RowState.INFO
                         }
                     )
                 }
