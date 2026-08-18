@@ -102,6 +102,26 @@ record_audit() {
         "$ROOTFS_ID" "$platform" "$session_name" "$status" "$detail" >> "$AUDIT_REPORT"
 }
 
+compact_failure_detail() {
+    logfile=$1
+    detail=$(awk '
+        /Depends:|Conflicts:|Breaks:|^E:|^ERROR:/ {
+            line = $0
+            gsub(/\t/, " ", line)
+            gsub(/[[:space:]]+/, " ", line)
+            sub(/^ /, "", line)
+            if (result != "") result = result " | "
+            result = result line
+        }
+        END { print result }
+    ' "$logfile" | cut -c1-480)
+    if [ -n "$detail" ]; then
+        printf '%s' "$detail"
+    else
+        printf '%s' dependency-simulation
+    fi
+}
+
 audit_apt_plan() {
     session_name=$1
     shift
@@ -120,9 +140,10 @@ audit_apt_plan() {
     simulation=$(mktemp)
     if ! LC_ALL=C DEBIAN_FRONTEND=noninteractive \
         apt-get -s --no-install-recommends install "$@" >"$simulation" 2>&1; then
+        detail=$(compact_failure_detail "$simulation")
         rm -f "$simulation"
         AUDIT_UNRESOLVABLE=$((AUDIT_UNRESOLVABLE + 1))
-        record_audit apt "$session_name" UNRESOLVABLE dependency-simulation
+        record_audit apt "$session_name" UNRESOLVABLE "$detail"
         return 0
     fi
 
@@ -164,9 +185,10 @@ audit_apk_plan() {
 
     simulation=$(mktemp)
     if ! LC_ALL=C apk --simulate add "$@" >"$simulation" 2>&1; then
+        detail=$(compact_failure_detail "$simulation")
         rm -f "$simulation"
         AUDIT_UNRESOLVABLE=$((AUDIT_UNRESOLVABLE + 1))
-        record_audit apk "$session_name" UNRESOLVABLE dependency-simulation
+        record_audit apk "$session_name" UNRESOLVABLE "$detail"
         return 0
     fi
 
