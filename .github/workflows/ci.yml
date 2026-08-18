@@ -15,7 +15,6 @@ on:
       tag_name:
         description: 'Tag name'
         required: false
-        type: string
         default: 'test'
 
 jobs:
