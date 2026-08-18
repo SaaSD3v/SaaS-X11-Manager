@@ -45,7 +45,7 @@ class AptTransactionSafetyTest {
     }
 
     @Test
-    fun additionalInstallerRunsSafetyCheckBeforeAtomicAptInstall() {
+    fun genericInstallerRunsSafetyCheckBeforeAtomicAptInstall() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
@@ -53,22 +53,6 @@ class AptTransactionSafetyTest {
             )
         )
         val steps = AdditionalGraphicSessionInstaller.stepsFor(plan)
-        val safetyIndex = steps.indexOfFirst { it.title == "Checking APT transaction safety" }
-        val installIndex = steps.indexOfFirst { it.title.startsWith("Installing ") }
-
-        assertTrue(safetyIndex >= 0)
-        assertTrue(installIndex > safetyIndex)
-    }
-
-    @Test
-    fun legacyInstallerRunsSafetyCheckBeforeAtomicAptInstall() {
-        val plan = requireNotNull(
-            GraphicSessionInstallPlans.forSelection(
-                ContainerPlatform.UBUNTU,
-                GraphicSession.OPENBOX
-            )
-        )
-        val steps = GraphicSessionInstaller.stepsFor(plan)
         val safetyIndex = steps.indexOfFirst { it.title == "Checking APT transaction safety" }
         val installIndex = steps.indexOfFirst { it.title.startsWith("Installing ") }
 
