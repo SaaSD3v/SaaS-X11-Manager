@@ -125,11 +125,26 @@ internal object AdditionalGraphicSessionRuntime {
         }
     }
 
+    internal fun isRedundantStandalonePackageAvailabilityStep(
+        step: GraphicSessionInstallStep
+    ): Boolean {
+        val command = step.command.trimStart()
+        return command.startsWith("apk search -e ") ||
+            (command.startsWith("LC_ALL=C apt-cache policy ") && command.contains("Candidate:"))
+    }
+
     suspend fun runStep(
         containerName: String,
         step: GraphicSessionInstallStep,
         logger: ContainerLogger?
     ): Boolean {
+        // Install plans already resolve the full APT package set in the repository
+        // step and simulate the exact APT/APK transaction before installation. The
+        // old one-command-per-package checks repeated that work and made large
+        // sessions unnecessarily slow. Verification uses different package checks
+        // and is intentionally not skipped here.
+        if (isRedundantStandalonePackageAvailabilityStep(step)) return true
+
         logger?.i("[+] ${step.title}")
         logger?.i("root@$containerName: ${step.command}")
 
