@@ -50,7 +50,7 @@ class GraphicSessionInstallerTest {
     }
 
     @Test
-    fun debOpenboxWorkflowPreflightsUniverseAndInstallsRecommendationsAtomically() {
+    fun debOpenboxWorkflowPreflightsUniverseAndSuppressesRecommendationsAtomically() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.OPENBOX)
         )
@@ -67,8 +67,9 @@ class GraphicSessionInstallerTest {
         }
         assertEquals(1, commands.count { it.contains("apt-get install -y") })
         assertTrue(
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y --install-recommends ${plan.packages.joinToString(" ")}" in commands
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${plan.packages.joinToString(" ")}" in commands
         )
+        assertFalse(commands.any { it.contains("--install-recommends") })
         assertFalse(commands.any { it.contains("apk ") })
     }
 
@@ -92,7 +93,7 @@ class GraphicSessionInstallerTest {
     }
 
     @Test
-    fun debIcewmWorkflowPreflightsUniverseAndInstallsRecommendationsAtomically() {
+    fun debIcewmWorkflowPreflightsUniverseAndSuppressesRecommendationsAtomically() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.ICEWM)
         )
@@ -109,8 +110,9 @@ class GraphicSessionInstallerTest {
         }
         assertEquals(1, commands.count { it.contains("apt-get install -y") })
         assertTrue(
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y --install-recommends ${plan.packages.joinToString(" ")}" in commands
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${plan.packages.joinToString(" ")}" in commands
         )
+        assertFalse(commands.any { it.contains("--install-recommends") })
         assertTrue("command -v icewm-session" in commands)
         assertFalse(commands.any { it.contains("apk ") })
     }
@@ -136,7 +138,7 @@ class GraphicSessionInstallerTest {
     }
 
     @Test
-    fun debJwmWorkflowPreflightsUniverseAndInstallsRecommendationsAtomically() {
+    fun debJwmWorkflowPreflightsUniverseAndSuppressesRecommendationsAtomically() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.JWM)
         )
@@ -153,8 +155,9 @@ class GraphicSessionInstallerTest {
         }
         assertEquals(1, commands.count { it.contains("apt-get install -y") })
         assertTrue(
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y --install-recommends ${plan.packages.joinToString(" ")}" in commands
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${plan.packages.joinToString(" ")}" in commands
         )
+        assertFalse(commands.any { it.contains("--install-recommends") })
         assertTrue("command -v jwm" in commands)
         assertTrue("jwm -p" in commands)
         assertFalse(commands.any { it.contains("apk ") })
