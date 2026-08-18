@@ -58,6 +58,7 @@ object AdditionalGraphicSessionInstaller {
                     )
                 }
                 preInstallCapabilityStep(plan)?.let(::add)
+                AptTransactionSafety.stepFor(plan)?.let(::add)
                 val recommendsFlag = if (plan.installRecommendedPackages) {
                     " --install-recommends"
                 } else {
