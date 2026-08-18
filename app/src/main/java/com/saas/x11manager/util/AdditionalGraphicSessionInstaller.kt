@@ -64,11 +64,29 @@ object AdditionalGraphicSessionInstaller {
                     " --no-install-recommends"
                 }
                 if (plan.packages.isNotEmpty()) {
+                    val blockedRecommendedPackages = if (plan.installRecommendedPackages) {
+                        GraphicSessionAptPolicy.blockedRecommendedPackages(plan.session)
+                    } else {
+                        emptyList()
+                    }
+                    val blockedPrelude = if (blockedRecommendedPackages.isEmpty()) {
+                        ""
+                    } else {
+                        "blocked_recommends=''; for pkg in ${blockedRecommendedPackages.joinToString(" ")}; do " +
+                            "if ! dpkg -s \"\$pkg\" >/dev/null 2>&1; then " +
+                            "blocked_recommends=\"\$blocked_recommends \$pkg-\"; fi; done; "
+                    }
+                    val blockedArguments = if (blockedRecommendedPackages.isEmpty()) {
+                        ""
+                    } else {
+                        " \$blocked_recommends"
+                    }
                     add(
                         GraphicSessionInstallStep(
                             "Installing ${plan.session.label} packages",
-                            "DEBIAN_FRONTEND=noninteractive apt-get install -y$recommendsFlag " +
-                                plan.packages.joinToString(" ")
+                            blockedPrelude +
+                                "DEBIAN_FRONTEND=noninteractive apt-get install -y$recommendsFlag " +
+                                plan.packages.joinToString(" ") + blockedArguments
                         )
                     )
                 }
