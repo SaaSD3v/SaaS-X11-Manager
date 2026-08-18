@@ -15,6 +15,7 @@ on:
       tag_name:
         description: 'Tag name'
         required: false
+        type: string
         default: 'test'
 
 jobs:
@@ -38,7 +39,8 @@ jobs:
             sha: context.sha,
             state: 'pending',
             context: 'x11-manager-ci',
-            description: 'Unit tests and release build are running'
+            description: 'Unit tests and release build are running',
+            target_url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
           })
 
     - name: Set up JDK 17
@@ -97,7 +99,8 @@ jobs:
             context: 'x11-manager-ci',
             description: succeeded
               ? 'Unit tests and release build passed'
-              : 'Unit tests or release build failed'
+              : 'Unit tests or release build failed',
+            target_url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
           })
 
   release:
