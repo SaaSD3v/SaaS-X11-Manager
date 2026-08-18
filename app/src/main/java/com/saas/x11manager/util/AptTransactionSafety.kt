@@ -8,7 +8,7 @@ package com.saas.x11manager.util
 internal object AptTransactionSafety {
 
     private const val BLOCKED_PACKAGE_PATTERN =
-        "^(xorg|xserver-xorg($|-.*)|gdm3|lightdm|sddm|lxdm|xdm|slim|nodm|pulseaudio|pipewire-pulse|pipewire-audio)$"
+        "xorg|xserver-xorg.*|gdm3|lightdm|sddm|lxdm|xdm|slim|nodm|pulseaudio|pipewire-pulse|pipewire-audio"
 
     fun stepFor(plan: GraphicSessionInstallPlan): GraphicSessionInstallStep? {
         if (plan.platform != ContainerPlatform.UBUNTU || plan.packages.isEmpty()) return null
@@ -30,7 +30,7 @@ internal object AptTransactionSafety {
                 "[ -z \"\$removed\" ] || { echo 'Refusing APT transaction because it would remove existing packages:' >&2; " +
                 "printf '%s\\n' \"\$removed\" >&2; exit 1; }; " +
                 "blocked=\$(awk '\$1 == \"Inst\" { print \$2 }' \"\$simulation\" | " +
-                "grep -E '$BLOCKED_PACKAGE_PATTERN' || true); " +
+                "grep -Ex '$BLOCKED_PACKAGE_PATTERN' || true); " +
                 "[ -z \"\$blocked\" ] || { " +
                 "echo 'Refusing APT transaction because it would install host-owned X11/display/audio infrastructure:' >&2; " +
                 "printf '%s\\n' \"\$blocked\" >&2; exit 1; }"
