@@ -32,7 +32,7 @@ class DesktopSessionBatchTest {
             listOf("cinnamon-session", "cinnamon", "muffin", "nemo", "cinnamon-settings-daemon", "dbus-x11", "xterm")
         )
         assertAptOnly(GraphicSession.SUGAR, listOf("sugar-session", "dbus-x11", "xterm"))
-        assertAptOnly(GraphicSession.BUDGIE, listOf("budgie-session", "budgie-core", "dbus-x11", "xterm"))
+        assertAptOnly(GraphicSession.BUDGIE, listOf("budgie-desktop", "dbus-x11", "xterm"))
         assertAptOnly(GraphicSession.FVWM3, listOf("fvwm3", "xterm"))
     }
 
@@ -72,6 +72,29 @@ class DesktopSessionBatchTest {
         assertTrue(install.command.contains("--install-recommends"))
         assertTrue(install.command.contains("cinnamon-core"))
         assertTrue(install.command.contains("\$pkg-"))
+    }
+
+    @Test
+    fun budgieUsesFullDesktopPackageAndPreflightsRealX11Capability() {
+        val plan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.BUDGIE)
+        )
+        val steps = AdditionalGraphicSessionInstaller.stepsFor(plan)
+        val preflight = requireNotNull(
+            steps.firstOrNull { it.title == "Checking Budgie X11 package capability" }
+        )
+        val install = requireNotNull(
+            steps.firstOrNull { it.title == "Installing Budgie packages" }
+        )
+
+        assertEquals(listOf("budgie-desktop", "dbus-x11", "xterm"), plan.packages)
+        assertTrue(plan.installRecommendedPackages)
+        assertTrue(preflight.command.contains("apt-get download budgie-core"))
+        assertTrue(preflight.command.contains("usr/share/xsessions/budgie-desktop.desktop"))
+        assertTrue(preflight.command.contains("usr/bin/budgie-wm"))
+        assertTrue(preflight.command.contains("Wayland-only Budgie support"))
+        assertTrue(install.command.contains("--install-recommends"))
+        assertTrue(install.command.contains("budgie-desktop dbus-x11 xterm"))
     }
 
     @Test
