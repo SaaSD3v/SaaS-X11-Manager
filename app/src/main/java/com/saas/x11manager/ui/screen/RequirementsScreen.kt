@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.util.Constants
+import com.saas.x11manager.util.DroidspacesRequirementState
 import com.saas.x11manager.util.LoaderStatus
 import com.saas.x11manager.util.RootStatus
 import com.saas.x11manager.util.TermuxStatus
@@ -37,6 +38,7 @@ fun RequirementsScreen(
     val termuxStatus by viewModel.termuxStatus.collectAsState()
     val x11ApkStatus by viewModel.x11ApkStatus.collectAsState()
     val dsStatus by viewModel.dsStatus.collectAsState()
+    val dsRequirements by viewModel.dsRequirements.collectAsState()
     val loaderStatus by viewModel.loaderStatus.collectAsState()
     val loaderPid by viewModel.loaderPid.collectAsState()
     val rootProvider by viewModel.rootProvider.collectAsState()
@@ -46,11 +48,17 @@ fun RequirementsScreen(
     val androidSdk by viewModel.androidSdk.collectAsState()
     val deviceName by viewModel.deviceName.collectAsState()
 
+    val dsRequirementsBlocking =
+        dsRequirements?.state == DroidspacesRequirementState.MISSING_REQUIRED
+    val dsRequirementsWarning =
+        dsRequirements?.state == DroidspacesRequirementState.INCONCLUSIVE
+
     val requiredReady =
         rootStatus == RootStatus.Granted &&
             termuxStatus == TermuxStatus.Installed &&
             x11ApkStatus == X11ApkStatus.Installed &&
-            dsStatus
+            dsStatus &&
+            !dsRequirementsBlocking
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -85,7 +93,11 @@ fun RequirementsScreen(
                     SectionHeader(
                         icon = Icons.Default.Security,
                         title = "Required environment",
-                        subtitle = if (requiredReady) "Ready" else "Check the items below"
+                        subtitle = when {
+                            requiredReady && dsRequirementsWarning -> "Ready with a DroidSpaces diagnostic warning"
+                            requiredReady -> "Ready"
+                            else -> "Check the items below"
+                        }
                     )
                     Spacer(Modifier.height(12.dp))
                     HorizontalDivider()
@@ -117,6 +129,26 @@ fun RequirementsScreen(
                         detail = Constants.DS_BINARY_PATH,
                         state = if (dsStatus) RowState.OK else RowState.ERROR
                     )
+
+                    if (dsStatus && dsRequirements != null) {
+                        RequirementRow(
+                            icon = Icons.Default.Security,
+                            label = "DroidSpaces Host Check",
+                            value = when (dsRequirements?.state) {
+                                DroidspacesRequirementState.READY -> "Ready"
+                                DroidspacesRequirementState.MISSING_REQUIRED -> "Missing requirements"
+                                DroidspacesRequirementState.INCONCLUSIVE -> "Inconclusive"
+                                null -> "Not checked"
+                            },
+                            detail = dsRequirements?.summary,
+                            state = when (dsRequirements?.state) {
+                                DroidspacesRequirementState.READY -> RowState.OK
+                                DroidspacesRequirementState.MISSING_REQUIRED -> RowState.ERROR
+                                DroidspacesRequirementState.INCONCLUSIVE -> RowState.WARNING
+                                null -> RowState.INFO
+                            }
+                        )
+                    }
 
                     RequirementRow(
                         icon = Icons.Default.Terminal,
