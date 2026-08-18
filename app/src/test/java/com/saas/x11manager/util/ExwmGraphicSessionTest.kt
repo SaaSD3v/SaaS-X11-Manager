@@ -1,6 +1,7 @@
 package com.saas.x11manager.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -18,6 +19,25 @@ class ExwmGraphicSessionTest {
         assertNotNull(plan)
         assertEquals(listOf("elpa-exwm", "emacs-gtk", "dbus-x11", "xterm"), plan?.packages)
         assertEquals("saas-exwm-session", GraphicSession.EXWM.startCommand)
+    }
+
+    @Test
+    fun aptInstallPreflightsExwmX11SessionArtifact() {
+        val plan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(
+                ContainerPlatform.UBUNTU,
+                GraphicSession.EXWM
+            )
+        )
+        val preflight = requireNotNull(
+            AdditionalGraphicSessionInstaller.stepsFor(plan).firstOrNull {
+                it.title == "Checking EXWM X11 package capability"
+            }
+        )
+
+        assertTrue(preflight.command.contains("apt-get download elpa-exwm"))
+        assertTrue(preflight.command.contains("usr/share/xsessions/exwm.desktop"))
+        assertFalse(preflight.command.contains("VERSION_ID="))
     }
 
     @Test
