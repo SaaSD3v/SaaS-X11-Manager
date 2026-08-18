@@ -17,14 +17,6 @@ object AdditionalGraphicSessionInstaller {
                 add(GraphicSessionInstallStep("Validating Alpine package manager", "command -v apk >/dev/null"))
                 alpineRepositoryPreparationStep(plan)?.let(::add)
                 add(GraphicSessionInstallStep("Refreshing package index", "apk update"))
-                plan.packages.forEach { packageName ->
-                    add(
-                        GraphicSessionInstallStep(
-                            "Checking $packageName availability",
-                            "apk search -e $packageName >/dev/null"
-                        )
-                    )
-                }
                 ApkTransactionSafety.stepFor(plan)?.let(::add)
                 if (plan.packages.isNotEmpty()) {
                     add(
@@ -50,14 +42,6 @@ object AdditionalGraphicSessionInstaller {
                     )
                 )
                 aptRepositoryPreparationStep(plan)?.let(::add)
-                plan.packages.forEach { packageName ->
-                    add(
-                        GraphicSessionInstallStep(
-                            "Checking $packageName availability",
-                            AptPackageAvailability.candidateCommand(packageName)
-                        )
-                    )
-                }
                 preInstallCapabilityStep(plan)?.let(::add)
                 AptTransactionSafety.stepFor(plan)?.let(::add)
                 val recommendsFlag = if (plan.installRecommendedPackages) {
@@ -333,6 +317,16 @@ object AdditionalGraphicSessionInstaller {
         }
         val packageList = plan.packages.joinToString(" ")
         val availabilityFunction = AptPackageAvailability.shellFunctionDefinition()
+        val debianFallback = if (plan.repositoryRequirement == RepositoryRequirement.APT_MULTIVERSE) {
+            val enableNonFree = DebianAptComponentSource.commandFor("non-free")
+            "elif grep -Eq '^ID=debian$' /etc/os-release 2>/dev/null; then " +
+                "{ $enableNonFree; } && " +
+                "DEBIAN_FRONTEND=noninteractive apt-get update && " +
+                "all_packages_available || { " +
+                "echo 'Required apt packages are still unavailable after enabling Debian non-free.' >&2; exit 1; }; "
+        } else {
+            ""
+        }
         val command =
             availabilityFunction + " " +
                 "all_packages_available() { for pkg in $packageList; do " +
@@ -346,6 +340,7 @@ object AdditionalGraphicSessionInstaller {
                 "DEBIAN_FRONTEND=noninteractive apt-get update && " +
                 "all_packages_available || { " +
                 "echo 'Required apt packages are still unavailable after enabling $component.' >&2; exit 1; }; " +
+                debianFallback +
                 "else echo 'Required apt repository is unavailable. " +
                 "Enable $fallbackDescription for this image.' >&2; exit 1; fi"
         return GraphicSessionInstallStep("Checking required apt repository", command)
