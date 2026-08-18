@@ -17,7 +17,7 @@ internal object GraphicSessionInitFiles {
             "export SHELL=$shell\n" +
             "export XDG_SESSION_TYPE=x11\n" +
             "export XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
-            "mkdir -p \"\$XDG_RUNTIME_DIR\"\n" +
+            "mkdir -p \"\$XDG_RUNTIME_DIR\" && chmod 700 \"\$XDG_RUNTIME_DIR\"\n" +
             launch
     }
 
@@ -35,6 +35,7 @@ internal object GraphicSessionInitFiles {
             "        return 1\n" +
             "    fi\n" +
             "    mkdir -p /tmp/.X11-unix /tmp/runtime-root || { eend 1; return 1; }\n" +
+            "    chmod 700 /tmp/runtime-root || { eend 1; return 1; }\n" +
             "    if mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n" +
             "        eend 0\n" +
             "        return 0\n" +
@@ -75,6 +76,7 @@ internal object GraphicSessionInitFiles {
             "ExecStart=/bin/mkdir -p /tmp/.X11-unix\n" +
             "ExecStart=/bin/mount --bind /usr/.X11-unix /tmp/.X11-unix\n" +
             "ExecStart=/bin/mkdir -p /tmp/runtime-root\n" +
+            "ExecStart=/bin/chmod 700 /tmp/runtime-root\n" +
             "RemainAfterExit=yes\n\n" +
             "[Install]\n" +
             "WantedBy=multi-user.target\n"

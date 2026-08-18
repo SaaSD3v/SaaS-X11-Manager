@@ -17,6 +17,14 @@ class GraphicSessionInitFilesTest {
     }
 
     @Test
+    fun sessionScriptSecuresXdgRuntimeDirectory() {
+        val script = GraphicSessionInitFiles.sessionScript(GraphicSession.OPENBOX, "/bin/sh")
+
+        assertTrue(script.contains("export XDG_RUNTIME_DIR=/tmp/runtime-root"))
+        assertTrue(script.contains("mkdir -p \"\$XDG_RUNTIME_DIR\" && chmod 700 \"\$XDG_RUNTIME_DIR\""))
+    }
+
+    @Test
     fun legacyXfceDefaultStillRendersXfceCommand() {
         val script = GraphicSessionInitFiles.sessionScript(GraphicSession.XFCE, "/bin/sh")
         assertTrue(script.contains("exec startxfce4"))
@@ -39,6 +47,7 @@ class GraphicSessionInitFilesTest {
         val session = GraphicSessionInitFiles.openRcSessionService(GraphicSession.OPENBOX)
 
         assertTrue(setup.contains("before x11-session"))
+        assertTrue(setup.contains("chmod 700 /tmp/runtime-root"))
         assertTrue(session.contains("/run/x11-session.pid"))
         assertTrue(session.contains("X11 Openbox Session"))
         assertFalse(session.contains("x11-xfce"))
@@ -50,6 +59,7 @@ class GraphicSessionInitFilesTest {
         val session = GraphicSessionInitFiles.systemdSessionService(GraphicSession.OPENBOX)
 
         assertTrue(socket.contains("Before=x11-session.service"))
+        assertTrue(socket.contains("ExecStart=/bin/chmod 700 /tmp/runtime-root"))
         assertTrue(session.contains("X11 Openbox Session"))
         assertTrue(session.contains("ExecStart=/usr/local/bin/x11-session.sh"))
         assertFalse(session.contains("x11-xfce"))
