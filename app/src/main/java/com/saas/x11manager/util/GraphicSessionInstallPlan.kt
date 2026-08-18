@@ -148,7 +148,10 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.MATE, listOf("mate-desktop-environment-core", "dbus-x11")),
         apk(GraphicSession.MATE, listOf("mate-desktop-environment", "dbus")),
         apt(GraphicSession.LXDE, listOf("lxde-core", "openbox-lxde-session", "dbus-x11", "xterm")),
-        apt(GraphicSession.PLASMA_X11, listOf("plasma-workspace", "kwin-x11", "dbus-x11", "xterm")),
+        apt(
+            GraphicSession.PLASMA_X11,
+            listOf("plasma-desktop", "plasma-workspace", "kwin-x11", "dbus-x11", "xterm")
+        ),
         apt(
             GraphicSession.CINNAMON_DESKTOP,
             listOf("cinnamon-session", "cinnamon", "muffin", "nemo", "cinnamon-settings-daemon", "dbus-x11", "xterm")
