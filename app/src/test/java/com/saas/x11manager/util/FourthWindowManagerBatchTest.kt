@@ -8,7 +8,10 @@ class FourthWindowManagerBatchTest {
 
     @Test
     fun fourthBatchUsesVerifiedPlans() {
-        assertAptOnly(GraphicSession.BSPWM, listOf("bspwm", "sxhkd", "xterm"))
+        assertAptOnly(
+            GraphicSession.BSPWM,
+            listOf("bspwm", "sxhkd", "xterm", "rxvt-unicode", "suckless-tools")
+        )
         assertAptOnly(GraphicSession.CLFSWM, listOf("clfswm", "xterm"))
         assertAptOnly(GraphicSession.FVWM_CRYSTAL, listOf("fvwm-crystal", "xterm"))
         assertAptOnly(GraphicSession.QTILE, listOf("qtile", "xterm"))
@@ -41,6 +44,17 @@ class FourthWindowManagerBatchTest {
         assertTrue(qtile.postInstallCommands.any { it.command.contains("exec qtile start") })
         assertEquals("saas-bspwm-session", GraphicSession.BSPWM.startCommand)
         assertEquals("saas-qtile-session", GraphicSession.QTILE.startCommand)
+    }
+
+    @Test
+    fun bspwmDefaultExampleToolsAreInstalled() {
+        val plan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, GraphicSession.BSPWM)
+        )
+
+        assertTrue("rxvt-unicode" in plan.packages)
+        assertTrue("suckless-tools" in plan.packages)
+        assertTrue(plan.installRecommendedPackages)
     }
 
     @Test

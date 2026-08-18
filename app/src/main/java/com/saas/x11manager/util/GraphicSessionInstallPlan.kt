@@ -131,7 +131,10 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.KWIN_X11, listOf("kwin-x11", "dbus-x11", "xterm")),
         apt(GraphicSession.ENLIGHTENMENT, listOf("enlightenment", "dbus-x11", "xterm")),
         apk(GraphicSession.ENLIGHTENMENT, listOf("enlightenment", "dbus", "xterm")),
-        apt(GraphicSession.BSPWM, listOf("bspwm", "sxhkd", "xterm")),
+        apt(
+            GraphicSession.BSPWM,
+            listOf("bspwm", "sxhkd", "xterm", "rxvt-unicode", "suckless-tools")
+        ),
         apt(GraphicSession.CLFSWM, listOf("clfswm", "xterm")),
         apt(GraphicSession.FVWM_CRYSTAL, listOf("fvwm-crystal", "xterm")),
         apt(GraphicSession.QTILE, listOf("qtile", "xterm")),
