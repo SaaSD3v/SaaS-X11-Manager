@@ -270,11 +270,6 @@ elif command -v apt-get >/dev/null 2>&1 && command -v apt-cache >/dev/null 2>&1 
     simulate_apt MATE mate-desktop-environment dbus-x11
     simulate_apt LXDE-safe-candidate \
         openbox-lxde-session lxpanel pcmanfm lxterminal dbus-x11 suckless-tools
-    if [ "$ROOTFS_ID" = ubuntu ]; then
-        check_apt_packages ukui-session-manager ukwm ukui-panel dbus-daemon xterm
-        simulate_apt UKUI-core-candidate \
-            ukui-session-manager ukwm ukui-panel dbus-daemon xterm
-    fi
     audit_catalog apt
 else
     fail "No supported package family found"
