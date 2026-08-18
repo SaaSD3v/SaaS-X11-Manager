@@ -5,6 +5,7 @@ on:
     branches: [ "main", "master", "agent/structural-fixes" ]
     paths:
       - "ci/rootfs-compatibility.sh"
+      - "ci/export-graphic-session-plans.py"
       - "app/src/main/java/com/saas/x11manager/util/GraphicSessionInstallPlan.kt"
       - "app/src/main/java/com/saas/x11manager/util/AdditionalGraphicSessionInstaller.kt"
       - "app/src/main/java/com/saas/x11manager/util/AptTransactionSafety.kt"
@@ -14,6 +15,7 @@ on:
     branches: [ "main", "master" ]
     paths:
       - "ci/rootfs-compatibility.sh"
+      - "ci/export-graphic-session-plans.py"
       - "app/src/main/java/com/saas/x11manager/util/GraphicSessionInstallPlan.kt"
       - "app/src/main/java/com/saas/x11manager/util/AdditionalGraphicSessionInstaller.kt"
       - "app/src/main/java/com/saas/x11manager/util/AptTransactionSafety.kt"
@@ -44,6 +46,15 @@ jobs:
             image: ubuntu:latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Export graphic session plan catalog
+        run: |
+          python3 -m py_compile ci/export-graphic-session-plans.py
+          python3 ci/export-graphic-session-plans.py \
+            --output "${RUNNER_TEMP}/graphic-session-plans.tsv"
+          test -s "${RUNNER_TEMP}/graphic-session-plans.tsv"
+          awk -F '\t' 'NF != 3 { exit 1 } END { if (NR < 1) exit 1 }' \
+            "${RUNNER_TEMP}/graphic-session-plans.tsv"
 
       - name: Validate compatibility probe syntax
         run: sh -n ci/rootfs-compatibility.sh
