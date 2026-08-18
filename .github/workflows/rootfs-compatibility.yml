@@ -1,0 +1,83 @@
+name: Rootfs Compatibility Matrix
+
+on:
+  push:
+    branches: [ "main", "master", "agent/structural-fixes" ]
+    paths:
+      - "ci/rootfs-compatibility.sh"
+      - "app/src/main/java/com/saas/x11manager/util/GraphicSessionInstallPlan.kt"
+      - "app/src/main/java/com/saas/x11manager/util/AdditionalGraphicSessionInstaller.kt"
+      - "app/src/main/java/com/saas/x11manager/util/AptTransactionSafety.kt"
+      - "app/src/main/java/com/saas/x11manager/util/ApkTransactionSafety.kt"
+      - ".github/workflows/rootfs-compatibility.yml"
+  pull_request:
+    branches: [ "main", "master" ]
+    paths:
+      - "ci/rootfs-compatibility.sh"
+      - "app/src/main/java/com/saas/x11manager/util/GraphicSessionInstallPlan.kt"
+      - "app/src/main/java/com/saas/x11manager/util/AdditionalGraphicSessionInstaller.kt"
+      - "app/src/main/java/com/saas/x11manager/util/AptTransactionSafety.kt"
+      - "app/src/main/java/com/saas/x11manager/util/ApkTransactionSafety.kt"
+      - ".github/workflows/rootfs-compatibility.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 0"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rootfs-compatibility:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Alpine current
+            image: alpine:latest
+          - name: Debian stable
+            image: debian:stable-slim
+          - name: Ubuntu current
+            image: ubuntu:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate compatibility probe syntax
+        run: sh -n ci/rootfs-compatibility.sh
+
+      - name: Validate current rootfs package compatibility
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/workspace:ro" \
+            -w /workspace \
+            "${{ matrix.image }}" \
+            sh ci/rootfs-compatibility.sh
+
+  publish-status:
+    name: Publish compatibility status
+    if: ${{ always() && github.event_name == 'push' }}
+    needs: [rootfs-compatibility]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Publish rootfs compatibility result
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const succeeded = '${{ needs.rootfs-compatibility.result }}' === 'success';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: succeeded ? 'success' : 'failure',
+              context: 'rootfs-compatibility',
+              description: succeeded
+                ? 'Current Alpine/Debian/Ubuntu probes passed'
+                : 'A current rootfs compatibility probe failed',
+              target_url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+            });
