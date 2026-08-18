@@ -2,7 +2,7 @@ name: X11 Manager CI
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "agent/structural-fixes" ]
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
