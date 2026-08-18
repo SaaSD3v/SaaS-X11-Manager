@@ -25,7 +25,7 @@ class GnomeClassicXorgGraphicSessionTest {
     }
 
     @Test
-    fun installerPreflightsActualClassicXorgProviderAndKeepsAllRecommends() {
+    fun installerPreflightsActualClassicXorgProviderAndSuppressesRecommends() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
@@ -45,7 +45,9 @@ class GnomeClassicXorgGraphicSessionTest {
         assertTrue(preflight.command.contains("candidate=gnome-shell-extensions"))
         assertTrue(preflight.command.contains("usr/share/xsessions/gnome-classic-xorg.desktop"))
         assertTrue(preflight.command.contains("Wayland-only GNOME Classic support"))
-        assertTrue(install.command.contains("--install-recommends"))
+        assertFalse(plan.installRecommendedPackages)
+        assertTrue(install.command.contains("--no-install-recommends"))
+        assertFalse(install.command.contains("--install-recommends"))
         assertTrue(install.command.contains("gnome-shell-extensions dbus-x11 xterm"))
         assertFalse(install.command.contains("blocked_recommends"))
         assertFalse(install.command.contains("\$pkg-"))
