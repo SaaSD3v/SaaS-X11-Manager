@@ -103,14 +103,7 @@ object GraphicSessionInstaller {
                     command = "apk update"
                 )
             )
-            plan.packages.forEach { packageName ->
-                add(
-                    GraphicSessionInstallStep(
-                        title = "Checking $packageName availability",
-                        command = "apk search -e $packageName >/dev/null"
-                    )
-                )
-            }
+            ApkTransactionSafety.stepFor(plan)?.let(::add)
             if (plan.packages.isNotEmpty()) {
                 add(
                     GraphicSessionInstallStep(
@@ -135,14 +128,7 @@ object GraphicSessionInstaller {
                 )
             )
             legacyAptRepositoryPreparationStep(plan)?.let(::add)
-            plan.packages.forEach { packageName ->
-                add(
-                    GraphicSessionInstallStep(
-                        title = "Checking $packageName availability",
-                        command = AptPackageAvailability.candidateCommand(packageName)
-                    )
-                )
-            }
+            AptTransactionSafety.stepFor(plan)?.let(::add)
             if (plan.packages.isNotEmpty()) {
                 val recommendsFlag = if (plan.installRecommendedPackages) {
                     " --install-recommends"
