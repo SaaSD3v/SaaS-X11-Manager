@@ -7,7 +7,7 @@ import org.junit.Test
 class CinnamonShellAptPolicyTest {
 
     @Test
-    fun cinnamonShellInstallsAptRecommendationsWithoutSuppression() {
+    fun cinnamonShellSuppressesRecommendedPackagesByDefault() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
@@ -20,12 +20,12 @@ class CinnamonShellAptPolicyTest {
             }
         )
 
-        assertTrue(plan.installRecommendedPackages)
-        assertTrue(install.command.contains("--install-recommends"))
+        assertFalse(plan.installRecommendedPackages)
+        assertTrue(install.command.contains("--no-install-recommends"))
         assertTrue(install.command.contains("cinnamon dbus-x11 xterm"))
+        assertFalse(install.command.contains("--install-recommends"))
         assertFalse(install.command.contains("blocked_recommends"))
         assertFalse(install.command.contains("dpkg -s \"\$pkg\""))
         assertFalse(install.command.contains("\$pkg-"))
-        assertFalse(install.command.contains("--no-install-recommends"))
     }
 }
