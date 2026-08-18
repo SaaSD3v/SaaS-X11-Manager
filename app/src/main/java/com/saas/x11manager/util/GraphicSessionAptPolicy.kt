@@ -9,7 +9,8 @@ package com.saas.x11manager.util
  */
 internal object GraphicSessionAptPolicy {
     fun blockedRecommendedPackages(session: GraphicSession): List<String> = when (session) {
-        GraphicSession.CINNAMON_SHELL -> listOf("cinnamon-core")
+        GraphicSession.CINNAMON_SHELL,
+        GraphicSession.CINNAMON_DESKTOP -> listOf("cinnamon-core")
         else -> emptyList()
     }
 }

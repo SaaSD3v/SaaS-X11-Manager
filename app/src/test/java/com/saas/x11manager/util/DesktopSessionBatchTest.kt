@@ -50,6 +50,31 @@ class DesktopSessionBatchTest {
     }
 
     @Test
+    fun cinnamonDesktopKeepsSafeRecommendsWithoutCinnamonCoreMeta() {
+        val plan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(
+                ContainerPlatform.UBUNTU,
+                GraphicSession.CINNAMON_DESKTOP
+            )
+        )
+        val install = requireNotNull(
+            AdditionalGraphicSessionInstaller.stepsFor(plan).firstOrNull {
+                it.title == "Installing Cinnamon Desktop packages"
+            }
+        )
+
+        assertTrue(plan.installRecommendedPackages)
+        assertEquals(
+            listOf("cinnamon-core"),
+            GraphicSessionAptPolicy.blockedRecommendedPackages(GraphicSession.CINNAMON_DESKTOP)
+        )
+        assertTrue("cinnamon-core" !in plan.packages)
+        assertTrue(install.command.contains("--install-recommends"))
+        assertTrue(install.command.contains("cinnamon-core"))
+        assertTrue(install.command.contains("\$pkg-"))
+    }
+
+    @Test
     fun desktopSessionsUseExplicitLaunchersWithoutDisplayManagers() {
         val expected = mapOf(
             GraphicSession.MATE to "mate-session",
