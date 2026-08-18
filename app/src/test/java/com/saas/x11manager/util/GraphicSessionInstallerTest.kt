@@ -41,9 +41,10 @@ class GraphicSessionInstallerTest {
         assertEquals("command -v apk >/dev/null", commands.first())
         assertTrue(commands.any { it.contains("setup-apkrepos -c") })
         assertTrue("apk update" in commands)
-        plan.packages.forEach { packageName ->
-            assertTrue("apk search -e $packageName >/dev/null" in commands)
-        }
+        assertTrue(commands.any {
+            it.contains("apk --simulate add ${plan.packages.joinToString(" ")}")
+        })
+        assertFalse(commands.any { it.startsWith("apk search -e ") })
         assertEquals(1, commands.count { it.startsWith("apk add ") })
         assertTrue("apk add ${plan.packages.joinToString(" ")}" in commands)
         assertFalse(commands.any { it.contains("apt-get") })
@@ -62,9 +63,10 @@ class GraphicSessionInstallerTest {
         )
         assertTrue(commands.contains("DEBIAN_FRONTEND=noninteractive apt-get update"))
         assertTrue(commands.any { it.contains("all_packages_available") && it.contains("add-apt-repository -y universe") })
-        plan.packages.forEach { packageName ->
-            assertTrue(AptPackageAvailability.candidateCommand(packageName) in commands)
-        }
+        assertTrue(commands.any {
+            it.contains("apt-get -s --no-install-recommends install ${plan.packages.joinToString(" ")}")
+        })
+        assertFalse(commands.any { it.startsWith("LC_ALL=C apt-cache policy ") })
         assertEquals(1, commands.count { it.contains("apt-get install -y") })
         assertTrue(
             "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${plan.packages.joinToString(" ")}" in commands
@@ -83,9 +85,10 @@ class GraphicSessionInstallerTest {
         assertEquals("command -v apk >/dev/null", commands.first())
         assertTrue(commands.any { it.contains("setup-apkrepos -c") })
         assertTrue("apk update" in commands)
-        plan.packages.forEach { packageName ->
-            assertTrue("apk search -e $packageName >/dev/null" in commands)
-        }
+        assertTrue(commands.any {
+            it.contains("apk --simulate add ${plan.packages.joinToString(" ")}")
+        })
+        assertFalse(commands.any { it.startsWith("apk search -e ") })
         assertEquals(1, commands.count { it.startsWith("apk add ") })
         assertTrue("apk add ${plan.packages.joinToString(" ")}" in commands)
         assertTrue("command -v icewm-session" in commands)
@@ -105,9 +108,10 @@ class GraphicSessionInstallerTest {
         )
         assertTrue(commands.contains("DEBIAN_FRONTEND=noninteractive apt-get update"))
         assertTrue(commands.any { it.contains("all_packages_available") && it.contains("add-apt-repository -y universe") })
-        plan.packages.forEach { packageName ->
-            assertTrue(AptPackageAvailability.candidateCommand(packageName) in commands)
-        }
+        assertTrue(commands.any {
+            it.contains("apt-get -s --no-install-recommends install ${plan.packages.joinToString(" ")}")
+        })
+        assertFalse(commands.any { it.startsWith("LC_ALL=C apt-cache policy ") })
         assertEquals(1, commands.count { it.contains("apt-get install -y") })
         assertTrue(
             "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${plan.packages.joinToString(" ")}" in commands
@@ -127,9 +131,10 @@ class GraphicSessionInstallerTest {
         assertEquals("command -v apk >/dev/null", commands.first())
         assertTrue(commands.any { it.contains("setup-apkrepos -c") })
         assertTrue("apk update" in commands)
-        plan.packages.forEach { packageName ->
-            assertTrue("apk search -e $packageName >/dev/null" in commands)
-        }
+        assertTrue(commands.any {
+            it.contains("apk --simulate add ${plan.packages.joinToString(" ")}")
+        })
+        assertFalse(commands.any { it.startsWith("apk search -e ") })
         assertEquals(1, commands.count { it.startsWith("apk add ") })
         assertTrue("apk add ${plan.packages.joinToString(" ")}" in commands)
         assertTrue("command -v jwm" in commands)
@@ -150,9 +155,10 @@ class GraphicSessionInstallerTest {
         )
         assertTrue(commands.contains("DEBIAN_FRONTEND=noninteractive apt-get update"))
         assertTrue(commands.any { it.contains("all_packages_available") && it.contains("add-apt-repository -y universe") })
-        plan.packages.forEach { packageName ->
-            assertTrue(AptPackageAvailability.candidateCommand(packageName) in commands)
-        }
+        assertTrue(commands.any {
+            it.contains("apt-get -s --no-install-recommends install ${plan.packages.joinToString(" ")}")
+        })
+        assertFalse(commands.any { it.startsWith("LC_ALL=C apt-cache policy ") })
         assertEquals(1, commands.count { it.contains("apt-get install -y") })
         assertTrue(
             "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${plan.packages.joinToString(" ")}" in commands
