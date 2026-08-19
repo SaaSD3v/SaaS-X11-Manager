@@ -18,6 +18,7 @@ import com.termux.x11.input.InputEventSender;
 import com.termux.x11.input.RenderData;
 
 import java.lang.ref.WeakReference;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Host bridge used when LorieView is rendered directly inside SaaS X11 Manager.
@@ -50,6 +51,8 @@ public final class EmbeddedDisplayHost {
         activeView = new WeakReference<>(view);
         inputSender = new WeakReference<>(new InputEventSender(view));
         renderData = new WeakReference<>(new RenderData());
+        view.setZOrderOnTop(false);
+        view.setZOrderMediaOverlay(false);
         getPrefs(view.getContext());
         reloadInputPreferences(view);
         handler.post(EmbeddedDisplayHost::tryConnect);
@@ -67,6 +70,11 @@ public final class EmbeddedDisplayHost {
 
     public static synchronized LorieView getActiveView() {
         return activeView.get();
+    }
+
+    public static boolean isConnected() {
+        LorieView view = getActiveView();
+        return view != null && view.connected();
     }
 
     private static synchronized InputEventSender senderFor(LorieView view) {
@@ -117,6 +125,50 @@ public final class EmbeddedDisplayHost {
         return sender.sendKeyEvent(event);
     }
 
+    public static boolean sendKeyCode(int keyCode, boolean down) {
+        LorieView view = getActiveView();
+        if (view == null || !view.connected())
+            return false;
+        view.sendKeyEvent(0, keyCode, down);
+        return true;
+    }
+
+    public static boolean tapKeyCode(int keyCode) {
+        return sendKeyCode(keyCode, true) && sendKeyCode(keyCode, false);
+    }
+
+    public static boolean sendText(String text) {
+        LorieView view = getActiveView();
+        if (view == null || !view.connected() || text == null)
+            return false;
+        view.sendTextEvent(text.getBytes(StandardCharsets.UTF_8));
+        return true;
+    }
+
+    public static boolean toggleSoftKeyboard() {
+        LorieView view = getActiveView();
+        if (view == null || !view.connected())
+            return false;
+        view.toggleKeyboardVisible();
+        return true;
+    }
+
+    public static boolean adjustRendererZoom(int delta) {
+        LorieView view = getActiveView();
+        if (view == null || !view.connected())
+            return false;
+        view.adjustRendererZoom(delta);
+        return true;
+    }
+
+    public static boolean resetRendererZoom() {
+        LorieView view = getActiveView();
+        if (view == null || !view.connected())
+            return false;
+        view.resetRendererZoom();
+        return true;
+    }
+
     private static void reloadInputPreferences(LorieView view) {
         InputEventSender sender = senderFor(view);
         Prefs p = getPrefs(view.getContext());
@@ -136,7 +188,7 @@ public final class EmbeddedDisplayHost {
     /**
      * LorieView.reloadPreferences() normally delegates device refresh to
      * TouchInputHandler, whose upstream implementation assumes MainActivity.
-     * Embedded mode performs the only renderer-level action needed here itself.
+     * Embedded mode performs the renderer-level action needed here itself.
      */
     public static void refreshInputDevices(LorieView view) {
         boolean stylusAvailable = false;

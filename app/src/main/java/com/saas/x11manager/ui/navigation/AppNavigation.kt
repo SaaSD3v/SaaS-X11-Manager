@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saas.x11manager.ui.screen.DisplayScreen
 import com.saas.x11manager.ui.screen.EditContainerScreen
+import com.saas.x11manager.ui.screen.FullscreenDisplayScreen
 import com.saas.x11manager.ui.screen.HomeScreen
 import com.saas.x11manager.ui.screen.HomeViewModel
 import com.saas.x11manager.ui.screen.RequirementsScreen
@@ -40,67 +41,82 @@ fun AppNavigation(viewModel: HomeViewModel) {
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { tabs.size })
     val selectedTab = tabs[pagerState.currentPage]
     val scope = rememberCoroutineScope()
+    var displayFullscreen by remember { mutableStateOf(false) }
 
     val navigateToEdit = viewModel.navigateToEdit
 
-    if (navigateToEdit != null) {
-        EditContainerScreen(
-            containerName = navigateToEdit,
-            onDismiss = {
-                viewModel.onEditNavigated()
-                viewModel.refreshRuntimeState()
-            }
-        )
-    } else {
-        Scaffold(
-            containerColor = Color.Transparent,
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = when (selectedTab) {
-                                    TabItem.Home -> Icons.Default.Computer
-                                    TabItem.Display -> Icons.Default.DisplaySettings
-                                    TabItem.Requirements -> Icons.Default.FactCheck
-                                },
-                                contentDescription = null,
-                                modifier = Modifier.padding(end = 8.dp).size(24.dp)
-                            )
-                            Text(
-                                text = selectedTab.title,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Black
-                            )
+    when {
+        navigateToEdit != null -> {
+            EditContainerScreen(
+                containerName = navigateToEdit,
+                onDismiss = {
+                    viewModel.onEditNavigated()
+                    viewModel.refreshRuntimeState()
+                }
+            )
+        }
+
+        displayFullscreen -> {
+            FullscreenDisplayScreen(
+                viewModel = viewModel,
+                onExitFullscreen = { displayFullscreen = false }
+            )
+        }
+
+        else -> {
+            Scaffold(
+                containerColor = Color.Transparent,
+                topBar = {
+                    TopAppBar(
+                        title = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = when (selectedTab) {
+                                        TabItem.Home -> Icons.Default.Computer
+                                        TabItem.Display -> Icons.Default.DisplaySettings
+                                        TabItem.Requirements -> Icons.Default.FactCheck
+                                    },
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(end = 8.dp).size(24.dp)
+                                )
+                                Text(
+                                    text = selectedTab.title,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                        },
+                        windowInsets = WindowInsets.statusBars
+                    )
+                },
+                bottomBar = {
+                    MainBottomBar(
+                        selectedTab = selectedTab,
+                        onTabSelected = { tab ->
+                            scope.launch {
+                                pagerState.animateScrollToPage(tabs.indexOf(tab))
+                            }
                         }
-                    },
-                    windowInsets = WindowInsets.statusBars
-                )
-            },
-            bottomBar = {
-                MainBottomBar(
-                    selectedTab = selectedTab,
-                    onTabSelected = { tab ->
-                        scope.launch {
-                            pagerState.animateScrollToPage(tabs.indexOf(tab))
-                        }
+                    )
+                },
+                contentWindowInsets = WindowInsets(0)
+            ) { innerPadding ->
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                ) { page ->
+                    when (tabs[page]) {
+                        TabItem.Home -> HomeScreen(viewModel = viewModel)
+                        TabItem.Display -> DisplayScreen(
+                            viewModel = viewModel,
+                            onFullscreenChanged = { displayFullscreen = it }
+                        )
+                        TabItem.Requirements -> RequirementsScreen(viewModel = viewModel)
                     }
-                )
-            },
-            contentWindowInsets = WindowInsets(0)
-        ) { innerPadding ->
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-            ) { page ->
-                when (tabs[page]) {
-                    TabItem.Home -> HomeScreen(viewModel = viewModel)
-                    TabItem.Display -> DisplayScreen(viewModel = viewModel)
-                    TabItem.Requirements -> RequirementsScreen(viewModel = viewModel)
                 }
             }
         }
