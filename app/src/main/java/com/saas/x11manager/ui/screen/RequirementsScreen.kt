@@ -28,9 +28,7 @@ import com.saas.x11manager.util.LoaderStatus
 import com.saas.x11manager.util.RootStatus
 
 @Composable
-fun RequirementsScreen(
-    viewModel: HomeViewModel
-) {
+fun RequirementsScreen(viewModel: HomeViewModel) {
     val rootStatus by viewModel.rootStatus.collectAsState()
     val dsStatus by viewModel.dsStatus.collectAsState()
     val dsRequirements by viewModel.dsRequirements.collectAsState()
@@ -47,14 +45,13 @@ fun RequirementsScreen(
         dsRequirements?.state == DroidspacesRequirementState.MISSING_REQUIRED
     val dsRequirementsWarning =
         dsRequirements?.state == DroidspacesRequirementState.INCONCLUSIVE
-
     val requiredReady =
-        rootStatus == RootStatus.Granted &&
-            dsStatus &&
-            !dsRequirementsBlocking
+        rootStatus == RootStatus.Granted && dsStatus && !dsRequirementsBlocking
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -69,146 +66,158 @@ fun RequirementsScreen(
         }
 
         item {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                border = BorderStroke(
-                    1.dp,
-                    if (requiredReady) {
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
-                    } else {
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+            RequirementCard(
+                icon = Icons.Default.Security,
+                title = "Required environment",
+                subtitle = when {
+                    requiredReady && dsRequirementsWarning ->
+                        "Ready with a DroidSpaces diagnostic warning"
+                    requiredReady -> "Ready for DroidSpaces Screen"
+                    else -> "Check the required items below"
+                },
+                highlighted = requiredReady
+            ) {
+                RequirementRow(
+                    icon = Icons.Default.Security,
+                    label = "Root access",
+                    value = when (rootStatus) {
+                        RootStatus.Granted -> rootProvider.ifEmpty { "Granted" }
+                        RootStatus.Denied -> "Denied"
+                        RootStatus.Checking -> "Checking…"
+                    },
+                    detail = when (rootStatus) {
+                        RootStatus.Granted -> "Root permission granted"
+                        RootStatus.Denied -> "Grant root access to use the host X11 runtime"
+                        RootStatus.Checking -> null
+                    },
+                    state = when (rootStatus) {
+                        RootStatus.Granted -> RowState.OK
+                        RootStatus.Denied -> RowState.ERROR
+                        RootStatus.Checking -> RowState.INFO
                     }
                 )
-            ) {
-                Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                    SectionHeader(
-                        icon = Icons.Default.Security,
-                        title = "Required environment",
-                        subtitle = when {
-                            requiredReady && dsRequirementsWarning -> "Ready with a DroidSpaces diagnostic warning"
-                            requiredReady -> "Ready for integrated X11"
-                            else -> "Check the items below"
-                        }
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    HorizontalDivider()
 
+                RequirementRow(
+                    icon = Icons.Default.Computer,
+                    label = "DroidSpaces",
+                    value = if (dsStatus) "Available" else "Not found",
+                    detail = Constants.DS_BINARY_PATH,
+                    state = if (dsStatus) RowState.OK else RowState.ERROR
+                )
+
+                if (dsStatus && dsRequirements != null) {
                     RequirementRow(
                         icon = Icons.Default.Security,
-                        label = "Root Access",
-                        value = when (rootStatus) {
-                            RootStatus.Granted -> rootProvider.ifEmpty { "Granted" }
-                            RootStatus.Denied -> "Denied"
-                            RootStatus.Checking -> "Checking..."
+                        label = "DroidSpaces host check",
+                        value = when (dsRequirements?.state) {
+                            DroidspacesRequirementState.READY -> "Ready"
+                            DroidspacesRequirementState.MISSING_REQUIRED -> "Missing requirements"
+                            DroidspacesRequirementState.INCONCLUSIVE -> "Inconclusive"
+                            null -> "Not checked"
                         },
-                        detail = when (rootStatus) {
-                            RootStatus.Granted -> "Root permission granted"
-                            RootStatus.Denied -> "Grant root access to continue"
-                            RootStatus.Checking -> null
-                        },
-                        state = when (rootStatus) {
-                            RootStatus.Granted -> RowState.OK
-                            RootStatus.Denied -> RowState.ERROR
-                            RootStatus.Checking -> RowState.INFO
+                        detail = dsRequirements?.summary,
+                        state = when (dsRequirements?.state) {
+                            DroidspacesRequirementState.READY -> RowState.OK
+                            DroidspacesRequirementState.MISSING_REQUIRED -> RowState.ERROR
+                            DroidspacesRequirementState.INCONCLUSIVE -> RowState.WARNING
+                            null -> RowState.INFO
                         }
-                    )
-
-                    RequirementRow(
-                        icon = Icons.Default.Computer,
-                        label = "DroidSpaces",
-                        value = if (dsStatus) "Available" else "Not found",
-                        detail = Constants.DS_BINARY_PATH,
-                        state = if (dsStatus) RowState.OK else RowState.ERROR
-                    )
-
-                    if (dsStatus && dsRequirements != null) {
-                        RequirementRow(
-                            icon = Icons.Default.Security,
-                            label = "DroidSpaces Host Check",
-                            value = when (dsRequirements?.state) {
-                                DroidspacesRequirementState.READY -> "Ready"
-                                DroidspacesRequirementState.MISSING_REQUIRED -> "Missing requirements"
-                                DroidspacesRequirementState.INCONCLUSIVE -> "Inconclusive"
-                                null -> "Not checked"
-                            },
-                            detail = dsRequirements?.summary,
-                            state = when (dsRequirements?.state) {
-                                DroidspacesRequirementState.READY -> RowState.OK
-                                DroidspacesRequirementState.MISSING_REQUIRED -> RowState.ERROR
-                                DroidspacesRequirementState.INCONCLUSIVE -> RowState.WARNING
-                                null -> RowState.INFO
-                            }
-                        )
-                    }
-
-                    RequirementRow(
-                        icon = Icons.Default.DisplaySettings,
-                        label = "Integrated X11 Engine",
-                        value = "Bundled",
-                        detail = "Termux:X11/Lorie is compiled into SaaS X11 Manager in this experimental branch",
-                        state = RowState.OK
                     )
                 }
+
+                RequirementRow(
+                    icon = Icons.Default.DisplaySettings,
+                    label = "Integrated X11 engine",
+                    value = "Bundled",
+                    detail = "The pinned Lorie/Xorg engine is compiled into this app",
+                    state = RowState.OK
+                )
             }
         }
 
         item {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                border = BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
+            RequirementCard(
+                icon = Icons.Default.DisplaySettings,
+                title = "Screen runtime",
+                subtitle = "Current project-owned X11 display state"
             ) {
-                Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                    SectionHeader(
-                        icon = Icons.Default.DisplaySettings,
-                        title = "Integrated X11 runtime",
-                        subtitle = "Current SaaS-owned host display state"
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    HorizontalDivider()
+                RequirementRow(
+                    icon = Icons.Default.DisplaySettings,
+                    label = "X11 server",
+                    value = when (serverStatus) {
+                        LoaderStatus.Running -> "Running"
+                        LoaderStatus.Stopped -> "Stopped"
+                    },
+                    detail = if (serverPid != null) {
+                        "${Constants.X11_SERVER_PROCESS} · PID $serverPid"
+                    } else {
+                        "Start and configure it from the Screen tab"
+                    },
+                    state = when (serverStatus) {
+                        LoaderStatus.Running -> RowState.OK
+                        LoaderStatus.Stopped -> RowState.INFO
+                    }
+                )
 
-                    RequirementRow(
-                        icon = Icons.Default.DisplaySettings,
-                        label = "X11 Server",
-                        value = when (serverStatus) {
-                            LoaderStatus.Running -> "Running"
-                            LoaderStatus.Stopped -> "Stopped"
-                        },
-                        detail = if (serverPid != null) {
-                            "${Constants.X11_SERVER_PROCESS} · PID $serverPid"
-                        } else {
-                            "Starts from Home, Display, or the post-install Start X11 action"
-                        },
-                        state = when (serverStatus) {
-                            LoaderStatus.Running -> RowState.OK
-                            LoaderStatus.Stopped -> RowState.WARNING
-                        }
-                    )
+                RequirementRow(
+                    icon = Icons.Default.Info,
+                    label = "X11 display",
+                    value = Constants.X11_DISPLAY,
+                    detail = Constants.X11_SOCK_FILE,
+                    state = RowState.INFO
+                )
 
-                    RequirementRow(
-                        icon = Icons.Default.Info,
-                        label = "X11 Socket",
-                        value = Constants.X11_DISPLAY,
-                        detail = Constants.X11_SOCK_FILE,
-                        state = RowState.INFO
-                    )
-                }
+                RequirementRow(
+                    icon = Icons.Default.Security,
+                    label = "External Termux:X11 APK",
+                    value = "Not required",
+                    detail = "The Screen runtime launches the embedded engine from this APK",
+                    state = RowState.OK
+                )
             }
         }
 
         item {
             Text(
-                "The external Termux:X11 APK and its loader are not requirements in this spike. " +
-                    "The integrated engine is started from the SaaS X11 Manager APK itself.",
+                "The embedded engine still comes from the pinned Termux:X11/Lorie source, " +
+                    "but the external Termux:X11 application and loader.apk are not runtime requirements for Screen.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+@Composable
+private fun RequirementCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    highlighted: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(
+            1.dp,
+            if (highlighted) {
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+            } else {
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+            }
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            SectionHeader(icon = icon, title = title, subtitle = subtitle)
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider()
+            content()
         }
     }
 }
@@ -228,7 +237,9 @@ private fun DeviceOverviewCard(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
@@ -304,7 +315,9 @@ private fun RequirementRow(
     state: RowState
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
