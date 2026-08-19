@@ -17,6 +17,9 @@ library directly into the Manager APK. The upstream project is GPL-3.0 licensed;
 this spike keeps that source and its license in the submodule so licensing can be
 reviewed explicitly before any future product decision.
 
+CI checks out this upstream pin recursively so the native Xorg/Lorie submodules
+used by the engine are part of the same reproducible spike build.
+
 ## Runtime model
 
 The Manager starts the bundled `com.termux.x11.CmdEntryPoint` with Android's
