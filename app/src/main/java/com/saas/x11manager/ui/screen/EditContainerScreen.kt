@@ -21,6 +21,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.saas.x11manager.ui.component.TerminalDialog
+import com.saas.x11manager.util.AlpineInstallProfile
+import com.saas.x11manager.util.AlpineInstallProfileOverride
 import com.saas.x11manager.util.AptInstallRecommendationOverride
 import com.saas.x11manager.util.ContainerPlatform
 import com.saas.x11manager.util.ContainerStatus
@@ -66,12 +68,14 @@ fun EditContainerScreen(
     var quickStartingSelectedSession by remember { mutableStateOf(false) }
     var aptRecommendationSession by remember { mutableStateOf<GraphicSession?>(null) }
     var activeAptRecommendationOverrideSession by remember { mutableStateOf<GraphicSession?>(null) }
+    var alpineProfileSession by remember { mutableStateOf<GraphicSession?>(null) }
+    var activeAlpineProfileOverrideSession by remember { mutableStateOf<GraphicSession?>(null) }
 
     fun requestSessionInstall(session: GraphicSession) {
-        if (viewModel.containerCapabilities?.platform == ContainerPlatform.UBUNTU) {
-            aptRecommendationSession = session
-        } else {
-            viewModel.configureWizardSession(session)
+        when (viewModel.containerCapabilities?.platform) {
+            ContainerPlatform.UBUNTU -> aptRecommendationSession = session
+            ContainerPlatform.ALPINE -> alpineProfileSession = session
+            null -> viewModel.configureWizardSession(session)
         }
     }
 
@@ -79,6 +83,13 @@ fun EditContainerScreen(
         AptInstallRecommendationOverride.set(session, installRecommendedPackages)
         activeAptRecommendationOverrideSession = session
         aptRecommendationSession = null
+        viewModel.configureWizardSession(session)
+    }
+
+    fun startAlpineInstall(session: GraphicSession, profile: AlpineInstallProfile) {
+        AlpineInstallProfileOverride.set(session, profile)
+        activeAlpineProfileOverrideSession = session
+        alpineProfileSession = null
         viewModel.configureWizardSession(session)
     }
 
@@ -90,11 +101,28 @@ fun EditContainerScreen(
         }
     }
 
+    LaunchedEffect(isInstalling, activeAlpineProfileOverrideSession) {
+        val session = activeAlpineProfileOverrideSession
+        if (session != null && !isInstalling) {
+            AlpineInstallProfileOverride.clear(session)
+            activeAlpineProfileOverrideSession = null
+        }
+    }
+
     DisposableEffect(activeAptRecommendationOverrideSession) {
         val session = activeAptRecommendationOverrideSession
         onDispose {
             if (session != null) {
                 AptInstallRecommendationOverride.clear(session)
+            }
+        }
+    }
+
+    DisposableEffect(activeAlpineProfileOverrideSession) {
+        val session = activeAlpineProfileOverrideSession
+        onDispose {
+            if (session != null) {
+                AlpineInstallProfileOverride.clear(session)
             }
         }
     }
@@ -284,6 +312,65 @@ fun EditContainerScreen(
                             }
                         ) {
                             Text("Recommended")
+                        }
+                    }
+                }
+            )
+        }
+
+        alpineProfileSession != null -> {
+            val session = requireNotNull(alpineProfileSession)
+            val selectedInit = viewModel.pendingWizardInitSystem ?: initSystem
+            AlertDialog(
+                onDismissRequest = {
+                    alpineProfileSession = null
+                    viewModel.selectWizardInitSystem(selectedInit)
+                },
+                title = { Text("Alpine package options") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Choose how apk should install ${session.label}.")
+                        Text(
+                            "Minimal keeps the current session package plan exactly as defined."
+                        )
+                        Text(
+                            "Full installs the same session plan plus common desktop integration: " +
+                                "D-Bus X11 support, XDG utilities, fonts and icon themes."
+                        )
+                        Text("This choice applies only to this installation or reinstall.")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            alpineProfileSession = null
+                            viewModel.selectWizardInitSystem(selectedInit)
+                        }
+                    ) {
+                        Text("Back")
+                    }
+                },
+                confirmButton = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                startAlpineInstall(
+                                    session = session,
+                                    profile = AlpineInstallProfile.MINIMAL
+                                )
+                            }
+                        ) {
+                            Text("Minimal")
+                        }
+                        Button(
+                            onClick = {
+                                startAlpineInstall(
+                                    session = session,
+                                    profile = AlpineInstallProfile.FULL
+                                )
+                            }
+                        ) {
+                            Text("Full")
                         }
                     }
                 }
