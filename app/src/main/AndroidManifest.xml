@@ -4,6 +4,12 @@
 
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE"
+        tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:node="remove" />
 
     <application
         android:name=".X11Application"
@@ -26,9 +32,22 @@
         </activity>
 
         <!-- The Lorie renderer is hosted directly in the Display Compose tab.
-             Do not expose or launch Termux:X11's standalone display Activity. -->
+             Keep only the broadcast bridge needed by CmdEntryPoint; standalone
+             display/preferences/accessibility components are not app surfaces. -->
         <activity
             android:name="com.termux.x11.MainActivity"
+            tools:node="remove" />
+        <activity
+            android:name="com.termux.x11.LoriePreferences"
+            tools:node="remove" />
+        <service
+            android:name="com.termux.x11.utils.KeyInterceptor"
+            tools:node="remove" />
+        <receiver
+            android:name="com.termux.x11.LoriePreferences$Receiver"
+            tools:node="remove" />
+        <meta-data
+            android:name="android.allow_multiple_resumed_activities"
             tools:node="remove" />
     </application>
 

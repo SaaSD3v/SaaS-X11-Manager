@@ -61,6 +61,15 @@ internal fun X11ConfigurationDialog(
     var touchMode by remember {
         mutableStateOf(store.getString("touchMode", "1") ?: "1")
     }
+    var capturedPointerTransform by remember {
+        mutableStateOf(store.getString("transformCapturedPointer", "no") ?: "no")
+    }
+    var capturedPointerSpeed by remember {
+        mutableIntStateOf(store.getInt("capturedPointerSpeedFactor", 100))
+    }
+    var extraKeysConfig by remember {
+        mutableStateOf(store.getString("extra_keys_config", "") ?: "")
+    }
 
     var adjustResolution by remember {
         mutableStateOf(store.getBoolean("adjustResolution", false))
@@ -88,6 +97,9 @@ internal fun X11ConfigurationDialog(
     }
     var preferScancodes by remember {
         mutableStateOf(store.getBoolean("preferScancodes", false))
+    }
+    var hardwareScancodeWorkaround by remember {
+        mutableStateOf(store.getBoolean("hardwareKbdScancodesWorkaround", true))
     }
     var filterWinKey by remember {
         mutableStateOf(store.getBoolean("filterOutWinkey", false))
@@ -295,6 +307,42 @@ internal fun X11ConfigurationDialog(
                                 putBoolean("pointerCapture", it)
                             }
 
+                            if (pointerCapture) {
+                                ChoiceSetting(
+                                    "Captured pointer transform",
+                                    capturedPointerTransform,
+                                    listOf("at", "no", "cc", "ud", "c"),
+                                    labels = mapOf(
+                                        "at" to "Automatic",
+                                        "no" to "None",
+                                        "cc" to "Counter-clockwise",
+                                        "ud" to "Upside down",
+                                        "c" to "Clockwise"
+                                    )
+                                ) {
+                                    capturedPointerTransform = it
+                                    putString("transformCapturedPointer", it)
+                                }
+
+                                Text(
+                                    "Captured pointer speed: $capturedPointerSpeed%",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Slider(
+                                    value = capturedPointerSpeed.toFloat(),
+                                    onValueChange = {
+                                        capturedPointerSpeed = it.toInt().coerceIn(1, 300)
+                                    },
+                                    onValueChangeFinished = {
+                                        putInt(
+                                            "capturedPointerSpeedFactor",
+                                            capturedPointerSpeed
+                                        )
+                                    },
+                                    valueRange = 1f..300f
+                                )
+                            }
+
                             SwitchSetting("Tap to move", tapToMove) {
                                 tapToMove = it
                                 putBoolean("tapToMove", it)
@@ -318,6 +366,29 @@ internal fun X11ConfigurationDialog(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
 
+                            if (showAdditionalKbd) {
+                                OutlinedTextField(
+                                    value = extraKeysConfig,
+                                    onValueChange = { extraKeysConfig = it },
+                                    label = { Text("Custom extra-key layout") },
+                                    supportingText = {
+                                        Text("Leave blank to use the built-in layout.")
+                                    },
+                                    minLines = 3,
+                                    maxLines = 8,
+                                    trailingIcon = {
+                                        IconButton(
+                                            onClick = {
+                                                putString("extra_keys_config", extraKeysConfig)
+                                            }
+                                        ) {
+                                            Icon(Icons.Default.Check, contentDescription = "Apply")
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+
                             SwitchSetting(
                                 "Allow Android IME with external keyboard",
                                 showIme
@@ -335,6 +406,14 @@ internal fun X11ConfigurationDialog(
                             SwitchSetting("Prefer scancodes", preferScancodes) {
                                 preferScancodes = it
                                 putBoolean("preferScancodes", it)
+                            }
+
+                            SwitchSetting(
+                                "Hardware keyboard scancode workaround",
+                                hardwareScancodeWorkaround
+                            ) {
+                                hardwareScancodeWorkaround = it
+                                putBoolean("hardwareKbdScancodesWorkaround", it)
                             }
 
                             SwitchSetting("Filter Windows/Meta key", filterWinKey) {
@@ -357,19 +436,10 @@ internal fun X11ConfigurationDialog(
                             }
 
                             Text(
-                                "Advanced Lorie settings remain available for helpers, accessibility, actions, pointer transforms and the custom extra-key layout.",
+                                "Only settings implemented by the embedded X11 host are shown here.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-
-                            OutlinedButton(
-                                onClick = { openLorieSettings(context) },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.Settings, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Advanced X11 settings")
-                            }
                         }
                     }
                 }

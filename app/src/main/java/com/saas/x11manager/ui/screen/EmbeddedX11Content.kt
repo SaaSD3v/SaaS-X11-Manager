@@ -1,6 +1,5 @@
 package com.saas.x11manager.ui.screen
 
-import android.app.Activity
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -24,7 +23,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.termux.x11.EmbeddedDisplayHost
 import com.termux.x11.EmbeddedTouchInputController
-import com.termux.x11.LoriePreferences
 import com.termux.x11.LorieView
 import com.termux.x11.extrakeys.ExtraKeyButton
 import com.termux.x11.extrakeys.ExtraKeysConstants
@@ -39,13 +37,6 @@ internal fun publishLoriePreferenceChange(context: Context, key: String) {
         putExtra("key", key)
         putExtra("fromBroadcast", true)
         setPackage(context.packageName)
-    })
-}
-
-internal fun openLorieSettings(context: Context) {
-    context.startActivity(Intent(context, LoriePreferences::class.java).apply {
-        action = Intent.ACTION_MAIN
-        if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     })
 }
 
