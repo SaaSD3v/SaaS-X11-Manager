@@ -58,7 +58,7 @@ object ScreenManager {
                 prefs.getString("touch_mode", null)
             ),
             keepScreenAwake = prefs.getBoolean("keep_screen_awake", false),
-            showAdditionalKeyboard = prefs.getBoolean("show_additional_keyboard", true)
+            showAdditionalKeyboard = prefs.getBoolean("show_additional_keyboard", false)
         ).normalized()
     }
 
@@ -200,7 +200,7 @@ data class ScreenConfig(
     val clipboard: Boolean = true,
     val touchMode: ScreenTouchMode = ScreenTouchMode.Trackpad,
     val keepScreenAwake: Boolean = false,
-    val showAdditionalKeyboard: Boolean = true
+    val showAdditionalKeyboard: Boolean = false
 ) {
     fun normalized(): ScreenConfig = copy(
         scalePercent = scalePercent.coerceIn(30, 300),
