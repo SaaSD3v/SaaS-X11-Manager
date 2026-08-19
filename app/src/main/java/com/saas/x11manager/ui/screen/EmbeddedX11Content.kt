@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.view.KeyEvent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -58,6 +59,8 @@ internal fun EmbeddedX11Surface(
             LorieView(context).apply {
                 setZOrderOnTop(false)
                 setZOrderMediaOverlay(false)
+                isFocusable = true
+                isFocusableInTouchMode = true
                 setCallback { screenWidth, screenHeight, inputTransform ->
                     EmbeddedDisplayHost.updateInputTransform(
                         this,
@@ -68,7 +71,18 @@ internal fun EmbeddedX11Surface(
                     onConnectionChanged(connected())
                 }
                 setOnTouchListener { _, event ->
-                    EmbeddedDisplayHost.handleTouch(this, event)
+                    EmbeddedDisplayHost.handleMotion(this, event)
+                }
+                setOnHoverListener { _, event ->
+                    EmbeddedDisplayHost.handleMotion(this, event)
+                }
+                setOnGenericMotionListener { _, event ->
+                    EmbeddedDisplayHost.handleMotion(this, event)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    setOnCapturedPointerListener { _, event ->
+                        EmbeddedDisplayHost.handleMotion(this, event)
+                    }
                 }
                 setOnKeyListener { _, _, event ->
                     connected() && EmbeddedDisplayHost.handleKey(this, event)

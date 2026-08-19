@@ -3,6 +3,7 @@ package com.termux.x11;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Matrix;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -13,8 +14,11 @@ import android.util.Log;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.PointerIcon;
+import android.view.Surface;
 
 import com.termux.x11.input.InputEventSender;
+import com.termux.x11.input.InputStub;
 import com.termux.x11.input.RenderData;
 
 import java.lang.ref.WeakReference;
@@ -23,21 +27,23 @@ import java.nio.charset.StandardCharsets;
 /**
  * Host bridge used when LorieView is rendered directly inside SaaS X11 Manager.
  *
- * Upstream Termux:X11 routes its view connection through MainActivity. The
- * Manager has no separate display Activity, so this bridge owns the active
- * SurfaceView, preferences, input state and CmdEntryPoint binder connection.
+ * Upstream Termux:X11 routes its view connection and input pipeline through
+ * MainActivity. Embedded mode keeps that responsibility inside this bridge so
+ * the Manager can host one LorieView without launching the standalone activity.
  */
 public final class EmbeddedDisplayHost {
     public static final Handler handler = new Handler(Looper.getMainLooper());
 
     private static final String ACTION_STOP = "com.termux.x11.ACTION_STOP";
-    private static final String ACTION_PREFERENCES_CHANGED = "com.termux.x11.ACTION_PREFERENCES_CHANGED";
+    private static final String ACTION_PREFERENCES_CHANGED =
+            "com.termux.x11.ACTION_PREFERENCES_CHANGED";
 
     private static WeakReference<LorieView> activeView = new WeakReference<>(null);
     private static WeakReference<InputEventSender> inputSender = new WeakReference<>(null);
     private static WeakReference<RenderData> renderData = new WeakReference<>(null);
     private static volatile ICmdEntryInterface service;
     private static Prefs prefs;
+    private static int savedMouseButtonState;
 
     private EmbeddedDisplayHost() {}
 
@@ -51,6 +57,7 @@ public final class EmbeddedDisplayHost {
         activeView = new WeakReference<>(view);
         inputSender = new WeakReference<>(new InputEventSender(view));
         renderData = new WeakReference<>(new RenderData());
+        savedMouseButtonState = 0;
         view.setZOrderOnTop(false);
         view.setZOrderMediaOverlay(false);
         getPrefs(view.getContext());
@@ -60,11 +67,14 @@ public final class EmbeddedDisplayHost {
 
     public static synchronized void detach(LorieView view) {
         if (activeView.get() == view) {
+            releasePointerCapture(view);
+            restoreAndroidPointer(view);
             if (view.connected())
                 view.connect(-1);
             activeView.clear();
             inputSender.clear();
             renderData.clear();
+            savedMouseButtonState = 0;
         }
     }
 
@@ -107,20 +117,244 @@ public final class EmbeddedDisplayHost {
         data.setInputTransform(inputTransform);
     }
 
-    public static boolean handleTouch(LorieView view, MotionEvent event) {
+    private static boolean hasPointerCapture(LorieView view) {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && view.hasPointerCapture();
+    }
+
+    private static void releasePointerCapture(LorieView view) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && view.hasPointerCapture())
+            view.releasePointerCapture();
+    }
+
+    public static void setCapturingEnabled(boolean enabled) {
+        LorieView view = getActiveView();
+        if (view == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.O)
+            return;
+
+        InputEventSender sender = senderFor(view);
+        if (enabled && sender.pointerCapture && view.connected())
+            view.requestPointerCapture();
+        else
+            releasePointerCapture(view);
+    }
+
+    private static void hideAndroidPointer(LorieView view) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            view.setPointerIcon(
+                    PointerIcon.getSystemIcon(view.getContext(), PointerIcon.TYPE_NULL)
+            );
+        }
+    }
+
+    private static void restoreAndroidPointer(LorieView view) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            view.setPointerIcon(
+                    PointerIcon.getSystemIcon(view.getContext(), PointerIcon.TYPE_DEFAULT)
+            );
+        }
+    }
+
+    private static boolean isMouseEvent(MotionEvent event) {
+        int source = event.getSource();
+        int actionIndex = Math.max(0, event.getActionIndex());
+        int toolType = event.getPointerCount() > 0
+                ? event.getToolType(Math.min(actionIndex, event.getPointerCount() - 1))
+                : MotionEvent.TOOL_TYPE_UNKNOWN;
+
+        return toolType == MotionEvent.TOOL_TYPE_MOUSE
+                || (source & InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE
+                || (source & InputDevice.SOURCE_MOUSE_RELATIVE) == InputDevice.SOURCE_MOUSE_RELATIVE;
+    }
+
+    private static boolean forwardMouseButtons(
+            InputEventSender sender,
+            RenderData data,
+            MotionEvent event
+    ) {
+        int current = event.getButtonState();
+        boolean handled = false;
+        int[][] buttons = {
+                {MotionEvent.BUTTON_PRIMARY, InputStub.BUTTON_LEFT},
+                {MotionEvent.BUTTON_TERTIARY, InputStub.BUTTON_MIDDLE},
+                {MotionEvent.BUTTON_SECONDARY, InputStub.BUTTON_RIGHT}
+        };
+
+        for (int[] button : buttons) {
+            boolean wasDown = (savedMouseButtonState & button[0]) != 0;
+            boolean isDown = (current & button[0]) != 0;
+            if (wasDown != isDown) {
+                sender.sendMouseEvent(data.getCursorPosition(), button[1], isDown, false);
+                handled = true;
+            }
+        }
+
+        savedMouseButtonState = current;
+        return handled;
+    }
+
+    private static void updateAbsoluteMousePosition(
+            InputEventSender sender,
+            RenderData data,
+            MotionEvent event
+    ) {
+        float[] mapped = new float[2];
+        data.mapScreenPoint(event.getX(), event.getY(), mapped);
+        if (data.setCursorPosition(mapped[0], mapped[1]))
+            sender.sendCursorMove(mapped[0], mapped[1], false);
+    }
+
+    private static String resolvedCapturedPointerTransform(LorieView view) {
+        String transform = getPrefs(view.getContext()).transformCapturedPointer.get();
+        if (!"at".equals(transform))
+            return transform;
+
+        if (view.getDisplay() == null)
+            return "no";
+
+        switch (view.getDisplay().getRotation()) {
+            case Surface.ROTATION_90:
+                return "cc";
+            case Surface.ROTATION_180:
+                return "ud";
+            case Surface.ROTATION_270:
+                return "c";
+            case Surface.ROTATION_0:
+            default:
+                return "no";
+        }
+    }
+
+    private static float[] transformRelativePointer(LorieView view, float x, float y) {
+        String transform = resolvedCapturedPointerTransform(view);
+        float originalX = x;
+        switch (transform) {
+            case "c":
+                x = -y;
+                y = originalX;
+                break;
+            case "cc":
+                x = y;
+                y = -originalX;
+                break;
+            case "ud":
+                x = -x;
+                y = -y;
+                break;
+            default:
+                break;
+        }
+        return new float[]{x, y};
+    }
+
+    private static void updateCapturedMousePosition(
+            LorieView view,
+            InputEventSender sender,
+            MotionEvent event
+    ) {
+        InputDevice device = event.getDevice();
+        boolean axisRelative = device != null
+                && device.getMotionRange(MotionEvent.AXIS_RELATIVE_X) != null;
+        boolean sourceRelative =
+                (event.getSource() & InputDevice.SOURCE_MOUSE_RELATIVE)
+                        == InputDevice.SOURCE_MOUSE_RELATIVE;
+
+        if (!axisRelative && !sourceRelative)
+            return;
+
+        float x = axisRelative
+                ? event.getAxisValue(MotionEvent.AXIS_RELATIVE_X)
+                : event.getX();
+        float y = axisRelative
+                ? event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y)
+                : event.getY();
+        float[] transformed = transformRelativePointer(view, x, y);
+        float density = view.getResources().getDisplayMetrics().density;
+        float scale = sender.capturedPointerSpeedFactor * density;
+        sender.sendCursorMove(transformed[0] * scale, transformed[1] * scale, true);
+    }
+
+    private static boolean handleMouseMotion(
+            LorieView view,
+            InputEventSender sender,
+            RenderData data,
+            MotionEvent event
+    ) {
+        if (event.getActionMasked() == MotionEvent.ACTION_SCROLL) {
+            float scrollY = -100f * event.getAxisValue(MotionEvent.AXIS_VSCROLL);
+            float scrollX = -100f * event.getAxisValue(MotionEvent.AXIS_HSCROLL);
+            sender.sendMouseWheelEvent(scrollX, scrollY);
+            return true;
+        }
+
+        boolean buttonsHandled = forwardMouseButtons(sender, data, event);
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_BUTTON_PRESS:
+            case MotionEvent.ACTION_BUTTON_RELEASE:
+                return true;
+
+            case MotionEvent.ACTION_HOVER_MOVE:
+            case MotionEvent.ACTION_MOVE:
+                if (hasPointerCapture(view))
+                    updateCapturedMousePosition(view, sender, event);
+                else
+                    updateAbsoluteMousePosition(sender, data, event);
+                return true;
+
+            case MotionEvent.ACTION_DOWN:
+                if (!hasPointerCapture(view))
+                    updateAbsoluteMousePosition(sender, data, event);
+                return true;
+
+            case MotionEvent.ACTION_UP:
+                if (!hasPointerCapture(view))
+                    updateAbsoluteMousePosition(sender, data, event);
+                setCapturingEnabled(true);
+                return true;
+
+            default:
+                return buttonsHandled;
+        }
+    }
+
+    public static boolean handleMotion(LorieView view, MotionEvent event) {
         if (!view.connected())
             return false;
 
         view.requestFocus();
+        if (event.getActionMasked() == MotionEvent.ACTION_DOWN)
+            view.requestUnbufferedDispatch(event);
+        hideAndroidPointer(view);
+
         InputEventSender sender = senderFor(view);
         RenderData data = renderDataFor(view);
-        sender.releaseStuckModifiers(event.getMetaState());
-        sender.syncLockKeysState(event.getMetaState());
+        if (event.getDeviceId() >= 0) {
+            sender.releaseStuckModifiers(event.getMetaState());
+            sender.syncLockKeysState(event.getMetaState());
+        }
+
+        if (isMouseEvent(event))
+            return handleMouseMotion(view, sender, data, event);
+
         sender.sendTouchEvent(event, data);
         return true;
     }
 
     public static boolean handleKey(LorieView view, KeyEvent event) {
+        if (!view.connected())
+            return false;
+
+        Prefs p = getPrefs(view.getContext());
+        if (p.filterOutWinkey.get()
+                && (event.getKeyCode() == KeyEvent.KEYCODE_META_LEFT
+                || event.getKeyCode() == KeyEvent.KEYCODE_META_RIGHT
+                || event.isMetaPressed()))
+            return false;
+
+        if (event.getKeyCode() == KeyEvent.KEYCODE_ESCAPE
+                && event.getAction() == KeyEvent.ACTION_UP
+                && event.hasNoModifiers())
+            setCapturingEnabled(false);
+
         InputEventSender sender = senderFor(view);
         return sender.sendKeyEvent(event);
     }
@@ -145,11 +379,44 @@ public final class EmbeddedDisplayHost {
         return true;
     }
 
+    private static boolean isExternalInputDevice(InputDevice device) {
+        if (device == null || device.isVirtual())
+            return false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+            return device.isExternal();
+        try {
+            Object result = InputDevice.class
+                    .getDeclaredMethod("isExternal")
+                    .invoke(device);
+            if (result instanceof Boolean)
+                return (Boolean) result;
+        } catch (Exception ignored) {
+        }
+        return true;
+    }
+
+    private static boolean hasExternalKeyboard() {
+        for (int id : InputDevice.getDeviceIds()) {
+            InputDevice device = InputDevice.getDevice(id);
+            if (device != null
+                    && device.supportsSource(InputDevice.SOURCE_KEYBOARD)
+                    && device.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC
+                    && isExternalInputDevice(device))
+                return true;
+        }
+        return false;
+    }
+
     public static boolean toggleSoftKeyboard() {
         LorieView view = getActiveView();
         if (view == null || !view.connected())
             return false;
-        view.toggleKeyboardVisible();
+
+        Prefs p = getPrefs(view.getContext());
+        if (hasExternalKeyboard() && !p.showIMEWhileExternalConnected.get())
+            view.setKeyboardVisible(false);
+        else
+            view.toggleKeyboardVisible();
         return true;
     }
 
@@ -178,11 +445,15 @@ public final class EmbeddedDisplayHost {
         sender.scaleTouchpad = p.scaleTouchpad.get()
                 && "1".equals(p.touchMode.get())
                 && !"native".equals(p.displayResolutionMode.get());
-        sender.capturedPointerSpeedFactor = ((float) p.capturedPointerSpeedFactor.get()) / 100f;
+        sender.capturedPointerSpeedFactor =
+                ((float) p.capturedPointerSpeedFactor.get()) / 100f;
         sender.dexMetaKeyCapture = p.dexMetaKeyCapture.get();
         sender.pauseKeyInterceptingWithEsc = p.pauseKeyInterceptingWithEsc.get();
         sender.stylusIsMouse = p.stylusIsMouse.get();
         sender.stylusButtonContactModifierMode = p.stylusButtonContactModifierMode.get();
+
+        if (!sender.pointerCapture)
+            releasePointerCapture(view);
     }
 
     /**
@@ -200,6 +471,10 @@ public final class EmbeddedDisplayHost {
             }
         }
         view.requestStylusEnabled(stylusAvailable);
+
+        Prefs p = getPrefs(view.getContext());
+        if (hasExternalKeyboard() && !p.showIMEWhileExternalConnected.get())
+            view.setKeyboardVisible(false);
     }
 
     public static void onBroadcastReceive(Context context, Intent intent) {
@@ -215,8 +490,12 @@ public final class EmbeddedDisplayHost {
         } else if (ACTION_STOP.equals(action)) {
             service = null;
             LorieView view = getActiveView();
-            if (view != null && view.connected())
-                view.connect(-1);
+            if (view != null) {
+                releasePointerCapture(view);
+                restoreAndroidPointer(view);
+                if (view.connected())
+                    view.connect(-1);
+            }
         } else if (ACTION_PREFERENCES_CHANGED.equals(action)) {
             LorieView view = getActiveView();
             if (view != null) {
@@ -241,8 +520,12 @@ public final class EmbeddedDisplayHost {
                 service = null;
                 handler.post(() -> {
                     LorieView view = getActiveView();
-                    if (view != null && view.connected())
-                        view.connect(-1);
+                    if (view != null) {
+                        releasePointerCapture(view);
+                        restoreAndroidPointer(view);
+                        if (view.connected())
+                            view.connect(-1);
+                    }
                 });
             }, 0);
         } catch (RemoteException ignored) {
@@ -270,6 +553,8 @@ public final class EmbeddedDisplayHost {
                 view.connect(fd.detachFd());
                 view.reloadPreferences(getPrefs(view.getContext()));
                 reloadInputPreferences(view);
+                hideAndroidPointer(view);
+                view.requestFocus();
                 view.triggerCallback();
                 return;
             }
