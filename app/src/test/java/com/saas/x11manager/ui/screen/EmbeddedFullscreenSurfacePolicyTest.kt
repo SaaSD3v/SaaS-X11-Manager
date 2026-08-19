@@ -28,7 +28,10 @@ class EmbeddedFullscreenSurfacePolicyTest {
         )
 
         assertFalse(navigation.contains("ManagedFullscreenDisplayScreen"))
-        assertFalse(display.contains("onFullscreen: () -> Unit"))
+        assertFalse(
+            Regex("fun\\s+ManagedDisplayScreen\\s*\\([^)]*onFullscreen")
+                .containsMatchIn(display)
+        )
         assertTrue(display.contains("key(\"managed-display-lorie-surface\")"))
         assertTrue(display.contains("setFullscreen(true)"))
         assertEquals(1, Regex("EmbeddedX11Surface\\(").findAll(display).count())

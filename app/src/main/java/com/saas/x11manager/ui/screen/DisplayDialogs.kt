@@ -68,7 +68,7 @@ internal fun X11ConfigurationDialog(
     var displayStretch by remember {
         mutableStateOf(store.getBoolean("displayStretch", false))
     }
-    var hideCutout by remember {
+    var useDisplayCutoutArea by remember {
         mutableStateOf(store.getBoolean("hideCutout", false))
     }
     var scaleTouchpad by remember {
@@ -244,9 +244,9 @@ internal fun X11ConfigurationDialog(
                                 putBoolean("displayStretch", it)
                             }
 
-                            SwitchSetting("Use display cutout area", !hideCutout) {
-                                hideCutout = !it
-                                putBoolean("hideCutout", !it)
+                            SwitchSetting("Use display cutout area", useDisplayCutoutArea) {
+                                useDisplayCutoutArea = it
+                                putBoolean("hideCutout", it)
                             }
 
                             ChoiceSetting(

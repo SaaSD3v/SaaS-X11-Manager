@@ -4,8 +4,6 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
-import android.os.Build
-import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -29,10 +27,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import com.saas.x11manager.util.Constants
+import com.saas.x11manager.util.ContainerInfo
 import com.saas.x11manager.util.LoaderStatus
 import com.saas.x11manager.util.X11SessionManager
 import com.termux.x11.EmbeddedDisplayHost
@@ -65,7 +61,9 @@ fun ManagedDisplayScreen(
     var extraKeysConfig by remember { mutableStateOf(store.getString("extra_keys_config", null)) }
 
     fun publishAdditionalKeysVisible() {
-        store.edit().putBoolean(PREF_ADDITIONAL_KEYS_VISIBLE, additionalKeysVisible).apply()
+        store.edit()
+            .putBoolean(PREF_ADDITIONAL_KEYS_VISIBLE, additionalKeysVisible)
+            .apply()
         publishLoriePreferenceChange(context, PREF_ADDITIONAL_KEYS_VISIBLE)
     }
 
@@ -154,41 +152,12 @@ fun ManagedDisplayScreen(
         onDispose { store.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
-    DisposableEffect(fullscreen, activity) {
-        val window = activity?.window
-        if (!fullscreen || window == null) {
-            onDispose { }
-        } else {
-            val oldCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                window.attributes.layoutInDisplayCutoutMode
-            } else null
-            val controller = WindowCompat.getInsetsController(window, window.decorView)
-
-            WindowCompat.setDecorFitsSystemWindows(window, false)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val attrs = window.attributes
-                attrs.layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-                } else {
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-                }
-                window.attributes = attrs
-            }
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            controller.hide(WindowInsetsCompat.Type.systemBars())
-
-            onDispose {
-                controller.show(WindowInsetsCompat.Type.systemBars())
-                WindowCompat.setDecorFitsSystemWindows(window, false)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && oldCutoutMode != null) {
-                    val attrs = window.attributes
-                    attrs.layoutInDisplayCutoutMode = oldCutoutMode
-                    window.attributes = attrs
-                }
-            }
-        }
-    }
+    ManagedX11WindowEffects(
+        activity = activity,
+        store = store,
+        connected = connected,
+        fullscreen = fullscreen
+    )
 
     LaunchedEffect(serverStatus, fullscreen) {
         if (fullscreen && serverStatus != LoaderStatus.Running) {
@@ -214,123 +183,23 @@ fun ManagedDisplayScreen(
                     )
             ) {
                 if (!fullscreen) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = Color(0xFF0E1116),
-                        tonalElevation = 0.dp,
-                        shadowElevation = 8.dp
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(onClick = ::closeScreen) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = "Close screen",
-                                    tint = Color.White
-                                )
-                            }
-
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(horizontal = 4.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        "Display ${Constants.X11_DISPLAY}",
-                                        color = Color.White,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Surface(
-                                        shape = RoundedCornerShape(50),
-                                        color = when {
-                                            serverStatus != LoaderStatus.Running -> Color(0xFF2B2F36)
-                                            connected -> Color(0xFF163B2C)
-                                            else -> Color(0xFF3A3217)
-                                        }
-                                    ) {
-                                        Text(
-                                            when {
-                                                serverStatus != LoaderStatus.Running -> "Stopped"
-                                                connected -> "Connected"
-                                                else -> "Connecting"
-                                            },
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                            color = Color.White.copy(alpha = 0.9f),
-                                            style = MaterialTheme.typography.labelSmall
-                                        )
-                                    }
-                                }
-                                Text(
-                                    serverPid?.let { "PID $it" } ?: "Embedded X11 workspace",
-                                    color = Color.White.copy(alpha = 0.52f),
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            }
-
-                            DisplayControlButton(
-                                busy = busy,
-                                running = serverStatus == LoaderStatus.Running,
-                                enabled = !busy && (serverStatus == LoaderStatus.Running || xkbSeedContainer != null),
-                                onClick = ::toggleServer
-                            )
-
-                            if (additionalKeysEnabled) {
-                                IconButton(
-                                    onClick = ::toggleAdditionalKeys,
-                                    enabled = serverStatus == LoaderStatus.Running
-                                ) {
-                                    Icon(
-                                        Icons.Default.Keyboard,
-                                        contentDescription = "Additional key bar",
-                                        tint = if (additionalKeysVisible) MaterialTheme.colorScheme.primary else Color.White
-                                    )
-                                }
-                            }
-
-                            IconButton(
-                                onClick = { setFullscreen(true) },
-                                enabled = serverStatus == LoaderStatus.Running
-                            ) {
-                                Icon(
-                                    Icons.Default.Fullscreen,
-                                    contentDescription = "Fullscreen",
-                                    tint = if (serverStatus == LoaderStatus.Running) Color.White else Color.White.copy(alpha = 0.3f)
-                                )
-                            }
-
-                            IconButton(onClick = { showConfiguration = true }) {
-                                Icon(
-                                    Icons.Default.Settings,
-                                    contentDescription = "X11 configuration",
-                                    tint = Color.White
-                                )
-                            }
-                        }
-                    }
+                    ManagedDisplayToolbar(
+                        serverStatus = serverStatus,
+                        serverPid = serverPid,
+                        connected = connected,
+                        busy = busy,
+                        xkbSeedContainer = xkbSeedContainer,
+                        additionalKeysEnabled = additionalKeysEnabled,
+                        additionalKeysVisible = additionalKeysVisible,
+                        onClose = ::closeScreen,
+                        onToggleServer = ::toggleServer,
+                        onToggleAdditionalKeys = ::toggleAdditionalKeys,
+                        onFullscreen = { setFullscreen(true) },
+                        onConfiguration = { showConfiguration = true }
+                    )
                 }
 
-                if (message != null) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.errorContainer
-                    ) {
-                        Text(
-                            message.orEmpty(),
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
+                message?.let { DisplayErrorMessage(it) }
 
                 Box(
                     modifier = Modifier
@@ -343,59 +212,31 @@ fun ManagedDisplayScreen(
                 ) {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
-                        shape = if (fullscreen) RoundedCornerShape(0.dp) else RoundedCornerShape(18.dp),
+                        shape = if (fullscreen) {
+                            RoundedCornerShape(0.dp)
+                        } else {
+                            RoundedCornerShape(18.dp)
+                        },
                         color = Color.Black,
-                        border = if (fullscreen) null else BorderStroke(
-                            1.dp,
-                            if (connected) MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
-                            else Color.White.copy(alpha = 0.12f)
-                        )
-                    ) {
-                        Box(Modifier.fillMaxSize()) {
-                            if (serverStatus == LoaderStatus.Running) {
-                                key("managed-display-lorie-surface") {
-                                    EmbeddedX11Surface(
-                                        modifier = Modifier.fillMaxSize(),
-                                        onConnectionChanged = { connected = it }
-                                    )
+                        border = if (fullscreen) {
+                            null
+                        } else {
+                            BorderStroke(
+                                1.dp,
+                                if (connected) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
+                                } else {
+                                    Color.White.copy(alpha = 0.12f)
                                 }
-                                if (!connected) {
-                                    Column(
-                                        modifier = Modifier.align(Alignment.Center),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        CircularProgressIndicator()
-                                        Text(
-                                            "Connecting to ${Constants.X11_DISPLAY}",
-                                            color = Color.White.copy(alpha = 0.68f),
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
-                                    }
-                                }
-                            } else {
-                                Column(
-                                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        "Display stopped",
-                                        color = Color.White,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Text(
-                                        if (xkbSeedContainer == null)
-                                            "Create a container before starting the embedded X11 server."
-                                        else
-                                            "Use the play button above to start ${Constants.X11_DISPLAY}.",
-                                        color = Color.White.copy(alpha = 0.58f),
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                }
-                            }
+                            )
                         }
+                    ) {
+                        ManagedDisplayViewport(
+                            serverStatus = serverStatus,
+                            connected = connected,
+                            hasSeedContainer = xkbSeedContainer != null,
+                            onConnectionChanged = { connected = it }
+                        )
                     }
                 }
 
@@ -409,44 +250,17 @@ fun ManagedDisplayScreen(
             }
 
             if (fullscreen) {
-                Popup(
-                    alignment = Alignment.TopEnd,
-                    properties = PopupProperties(focusable = false)
-                ) {
-                    Surface(
-                        modifier = Modifier.padding(8.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color.Black.copy(alpha = 0.72f),
-                        shadowElevation = 8.dp
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            DisplayControlButton(
-                                busy = busy,
-                                running = serverStatus == LoaderStatus.Running,
-                                enabled = !busy,
-                                onClick = ::toggleServer
-                            )
-                            if (additionalKeysEnabled) {
-                                IconButton(onClick = ::toggleAdditionalKeys) {
-                                    Icon(
-                                        Icons.Default.Keyboard,
-                                        contentDescription = "Additional key bar",
-                                        tint = if (additionalKeysVisible) MaterialTheme.colorScheme.primary else Color.White
-                                    )
-                                }
-                            }
-                            IconButton(onClick = { showConfiguration = true }) {
-                                Icon(Icons.Default.Settings, contentDescription = "X11 configuration", tint = Color.White)
-                            }
-                            IconButton(onClick = { setFullscreen(false) }) {
-                                Icon(Icons.Default.FullscreenExit, contentDescription = "Exit fullscreen", tint = Color.White)
-                            }
-                            IconButton(onClick = ::closeScreen) {
-                                Icon(Icons.Default.Close, contentDescription = "Close screen", tint = Color.White)
-                            }
-                        }
-                    }
-                }
+                FullscreenDisplayControls(
+                    busy = busy,
+                    running = serverStatus == LoaderStatus.Running,
+                    additionalKeysEnabled = additionalKeysEnabled,
+                    additionalKeysVisible = additionalKeysVisible,
+                    onToggleServer = ::toggleServer,
+                    onToggleAdditionalKeys = ::toggleAdditionalKeys,
+                    onConfiguration = { showConfiguration = true },
+                    onExitFullscreen = { setFullscreen(false) },
+                    onClose = ::closeScreen
+                )
             }
         }
     }
@@ -456,6 +270,280 @@ fun ManagedDisplayScreen(
             store = store,
             onDismiss = { showConfiguration = false }
         )
+    }
+}
+
+@Composable
+private fun ManagedDisplayToolbar(
+    serverStatus: LoaderStatus,
+    serverPid: Int?,
+    connected: Boolean,
+    busy: Boolean,
+    xkbSeedContainer: ContainerInfo?,
+    additionalKeysEnabled: Boolean,
+    additionalKeysVisible: Boolean,
+    onClose: () -> Unit,
+    onToggleServer: () -> Unit,
+    onToggleAdditionalKeys: () -> Unit,
+    onFullscreen: () -> Unit,
+    onConfiguration: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Color(0xFF0E1116),
+        tonalElevation = 0.dp,
+        shadowElevation = 8.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onClose) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Close screen",
+                    tint = Color.White
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 4.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "Display ${Constants.X11_DISPLAY}",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    DisplayStatusPill(serverStatus, connected)
+                }
+                Text(
+                    serverPid?.let { "PID $it" } ?: "Embedded X11 workspace",
+                    color = Color.White.copy(alpha = 0.52f),
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+
+            DisplayControlButton(
+                busy = busy,
+                running = serverStatus == LoaderStatus.Running,
+                enabled = !busy && (
+                    serverStatus == LoaderStatus.Running || xkbSeedContainer != null
+                ),
+                onClick = onToggleServer
+            )
+
+            if (additionalKeysEnabled) {
+                IconButton(
+                    onClick = onToggleAdditionalKeys,
+                    enabled = serverStatus == LoaderStatus.Running
+                ) {
+                    Icon(
+                        Icons.Default.Keyboard,
+                        contentDescription = "Additional key bar",
+                        tint = if (additionalKeysVisible) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            Color.White
+                        }
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onFullscreen,
+                enabled = serverStatus == LoaderStatus.Running
+            ) {
+                Icon(
+                    Icons.Default.Fullscreen,
+                    contentDescription = "Fullscreen",
+                    tint = if (serverStatus == LoaderStatus.Running) {
+                        Color.White
+                    } else {
+                        Color.White.copy(alpha = 0.3f)
+                    }
+                )
+            }
+
+            IconButton(onClick = onConfiguration) {
+                Icon(
+                    Icons.Default.Settings,
+                    contentDescription = "X11 configuration",
+                    tint = Color.White
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DisplayStatusPill(serverStatus: LoaderStatus, connected: Boolean) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = when {
+            serverStatus != LoaderStatus.Running -> Color(0xFF2B2F36)
+            connected -> Color(0xFF163B2C)
+            else -> Color(0xFF3A3217)
+        }
+    ) {
+        Text(
+            when {
+                serverStatus != LoaderStatus.Running -> "Stopped"
+                connected -> "Connected"
+                else -> "Connecting"
+            },
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            color = Color.White.copy(alpha = 0.9f),
+            style = MaterialTheme.typography.labelSmall
+        )
+    }
+}
+
+@Composable
+private fun ManagedDisplayViewport(
+    serverStatus: LoaderStatus,
+    connected: Boolean,
+    hasSeedContainer: Boolean,
+    onConnectionChanged: (Boolean) -> Unit
+) {
+    Box(Modifier.fillMaxSize()) {
+        if (serverStatus == LoaderStatus.Running) {
+            key("managed-display-lorie-surface") {
+                EmbeddedX11Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    onConnectionChanged = onConnectionChanged
+                )
+            }
+            if (!connected) {
+                Column(
+                    modifier = Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CircularProgressIndicator()
+                    Text(
+                        "Connecting to ${Constants.X11_DISPLAY}",
+                        color = Color.White.copy(alpha = 0.68f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "Display stopped",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    if (!hasSeedContainer) {
+                        "Create a container before starting the embedded X11 server."
+                    } else {
+                        "Use the play button above to start ${Constants.X11_DISPLAY}."
+                    },
+                    color = Color.White.copy(alpha = 0.58f),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DisplayErrorMessage(message: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.errorContainer
+    ) {
+        Text(
+            message,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
+
+@Composable
+private fun FullscreenDisplayControls(
+    busy: Boolean,
+    running: Boolean,
+    additionalKeysEnabled: Boolean,
+    additionalKeysVisible: Boolean,
+    onToggleServer: () -> Unit,
+    onToggleAdditionalKeys: () -> Unit,
+    onConfiguration: () -> Unit,
+    onExitFullscreen: () -> Unit,
+    onClose: () -> Unit
+) {
+    Popup(
+        alignment = Alignment.TopEnd,
+        properties = PopupProperties(focusable = false)
+    ) {
+        Surface(
+            modifier = Modifier.padding(8.dp),
+            shape = RoundedCornerShape(14.dp),
+            color = Color.Black.copy(alpha = 0.72f),
+            shadowElevation = 8.dp
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DisplayControlButton(
+                    busy = busy,
+                    running = running,
+                    enabled = !busy,
+                    onClick = onToggleServer
+                )
+                if (additionalKeysEnabled) {
+                    IconButton(onClick = onToggleAdditionalKeys) {
+                        Icon(
+                            Icons.Default.Keyboard,
+                            contentDescription = "Additional key bar",
+                            tint = if (additionalKeysVisible) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                Color.White
+                            }
+                        )
+                    }
+                }
+                IconButton(onClick = onConfiguration) {
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = "X11 configuration",
+                        tint = Color.White
+                    )
+                }
+                IconButton(onClick = onExitFullscreen) {
+                    Icon(
+                        Icons.Default.FullscreenExit,
+                        contentDescription = "Exit fullscreen",
+                        tint = Color.White
+                    )
+                }
+                IconButton(onClick = onClose) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Close screen",
+                        tint = Color.White
+                    )
+                }
+            }
+        }
     }
 }
 
