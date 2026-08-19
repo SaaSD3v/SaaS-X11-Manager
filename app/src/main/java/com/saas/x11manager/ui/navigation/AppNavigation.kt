@@ -20,16 +20,16 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.saas.x11manager.ui.screen.DisplayScreen
 import com.saas.x11manager.ui.screen.EditContainerScreen
 import com.saas.x11manager.ui.screen.HomeScreen
 import com.saas.x11manager.ui.screen.HomeViewModel
 import com.saas.x11manager.ui.screen.RequirementsScreen
+import com.saas.x11manager.ui.screen.ScreenScreen
 import kotlinx.coroutines.launch
 
 enum class TabItem(val title: String, val icon: ImageVector) {
     Home("Home", Icons.Default.Home),
-    Display("Display", Icons.Default.DisplaySettings),
+    Screen("Screen", Icons.Default.DisplaySettings),
     Requirements("Requirements", Icons.Default.FactCheck)
 }
 
@@ -57,17 +57,17 @@ fun AppNavigation(viewModel: HomeViewModel) {
             topBar = {
                 TopAppBar(
                     title = {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 imageVector = when (selectedTab) {
                                     TabItem.Home -> Icons.Default.Computer
-                                    TabItem.Display -> Icons.Default.DisplaySettings
+                                    TabItem.Screen -> Icons.Default.DisplaySettings
                                     TabItem.Requirements -> Icons.Default.FactCheck
                                 },
                                 contentDescription = null,
-                                modifier = Modifier.padding(end = 8.dp).size(24.dp)
+                                modifier = Modifier
+                                    .padding(end = 8.dp)
+                                    .size(24.dp)
                             )
                             Text(
                                 text = selectedTab.title,
@@ -99,7 +99,7 @@ fun AppNavigation(viewModel: HomeViewModel) {
             ) { page ->
                 when (tabs[page]) {
                     TabItem.Home -> HomeScreen(viewModel = viewModel)
-                    TabItem.Display -> DisplayScreen(viewModel = viewModel)
+                    TabItem.Screen -> ScreenScreen(viewModel = viewModel)
                     TabItem.Requirements -> RequirementsScreen(viewModel = viewModel)
                 }
             }
@@ -161,8 +161,11 @@ private fun MainBottomBar(
                     tabs.forEach { tab ->
                         val isSelected = selectedTab == tab
                         val contentColor by animateColorAsState(
-                            targetValue = if (isSelected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            targetValue = if (isSelected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            },
                             label = "IconColor"
                         )
 
