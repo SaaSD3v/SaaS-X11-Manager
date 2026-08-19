@@ -1,6 +1,5 @@
 package com.saas.x11manager.ui.screen
 
-import android.content.SharedPreferences
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -31,38 +30,16 @@ fun DisplayScreen(
     val context = LocalContext.current
     val prefs = remember(context) { EmbeddedDisplayHost.getPrefs(context) }
     val store = remember(prefs) { prefs.get() }
-
     var showConfig by remember { mutableStateOf(false) }
-    var additionalKeysEnabled by remember {
-        mutableStateOf(store.getBoolean(PREF_SHOW_ADDITIONAL_KEYS, false))
-    }
-    var imeEnabled by remember {
-        mutableStateOf(store.getBoolean(PREF_SHOW_IME_WITH_EXTERNAL_KEYBOARD, false))
-    }
 
     LaunchedEffect(store) {
         ensureManagedX11Defaults(context, store)
-        additionalKeysEnabled = store.getBoolean(PREF_SHOW_ADDITIONAL_KEYS, false)
-        imeEnabled = store.getBoolean(PREF_SHOW_IME_WITH_EXTERNAL_KEYBOARD, false)
-    }
-
-    DisposableEffect(store) {
-        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            when (key) {
-                PREF_SHOW_ADDITIONAL_KEYS -> {
-                    additionalKeysEnabled = store.getBoolean(PREF_SHOW_ADDITIONAL_KEYS, false)
-                }
-                PREF_SHOW_IME_WITH_EXTERNAL_KEYBOARD -> {
-                    imeEnabled = store.getBoolean(PREF_SHOW_IME_WITH_EXTERNAL_KEYBOARD, false)
-                }
-            }
-        }
-        store.registerOnSharedPreferenceChangeListener(listener)
-        onDispose { store.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -74,7 +51,7 @@ fun DisplayScreen(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "Configuration stays here. Screen opens as its own workspace and uses the whole Manager area without entering immersive fullscreen.",
+                "Configure the embedded X11 engine or open its managed screen workspace.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -96,39 +73,12 @@ fun DisplayScreen(
                 icon = Icons.Default.DesktopWindows,
                 title = "Screen",
                 subtitle = when (serverStatus) {
-                    LoaderStatus.Running -> "${Constants.X11_DISPLAY} running${serverPid?.let { " · PID $it" } ?: ""}"
-                    else -> "Open the full-size X11 workspace"
+                    LoaderStatus.Running ->
+                        "${Constants.X11_DISPLAY} running${serverPid?.let { " · PID $it" } ?: ""}"
+                    LoaderStatus.Stopped -> "Open the full-size X11 workspace"
                 },
                 onClick = onOpenScreen
             )
-        }
-
-        item {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLow
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text("Current backend", fontWeight = FontWeight.SemiBold)
-                    DisplaySummaryRow("Display", Constants.X11_DISPLAY)
-                    DisplaySummaryRow(
-                        "Server",
-                        if (serverStatus == LoaderStatus.Running) "Running" else "Stopped"
-                    )
-                    DisplaySummaryRow(
-                        "Additional keys",
-                        if (additionalKeysEnabled) "Enabled" else "Disabled"
-                    )
-                    DisplaySummaryRow(
-                        "Android IME with external keyboard",
-                        if (imeEnabled) "Enabled" else "Disabled"
-                    )
-                }
-            }
         }
     }
 
@@ -153,7 +103,10 @@ private fun DisplayLauncherCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+        )
     ) {
         Row(
             modifier = Modifier.padding(18.dp),
@@ -165,31 +118,33 @@ private fun DisplayLauncherCard(
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
             ) {
                 Box(Modifier.size(54.dp), contentAlignment = Alignment.Center) {
-                    Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
+
             Column(modifier = Modifier.weight(1f)) {
-                Text(index, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    index,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+
             Icon(Icons.Default.ChevronRight, contentDescription = null)
         }
-    }
-}
-
-@Composable
-private fun DisplaySummaryRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
     }
 }
