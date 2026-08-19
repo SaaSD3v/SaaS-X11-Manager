@@ -1,5 +1,10 @@
 package com.saas.x11manager.ui.screen
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
+import android.content.SharedPreferences
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -8,38 +13,90 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.DisplaySettings
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.saas.x11manager.util.Constants
 import com.saas.x11manager.util.LoaderStatus
 import com.saas.x11manager.util.X11SessionManager
 import com.termux.x11.EmbeddedDisplayHost
+import com.termux.x11.LoriePreferences
 import com.termux.x11.LorieView
-import com.termux.x11.input.InputEventSender
-import com.termux.x11.input.RenderData
 import kotlinx.coroutines.launch
+
+private const val ACTION_PREFERENCES_CHANGED = "com.termux.x11.ACTION_PREFERENCES_CHANGED"
 
 @Composable
 fun DisplayScreen(viewModel: HomeViewModel) {
     val serverStatus by viewModel.loaderStatus.collectAsState()
     val serverPid by viewModel.loaderPid.collectAsState()
     val containers by viewModel.containers.collectAsState()
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val loriePrefs = remember(context) { EmbeddedDisplayHost.getPrefs(context) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var surfaceConnected by remember { mutableStateOf(false) }
+    var fullscreen by remember { mutableStateOf(loriePrefs.fullscreen.get()) }
 
     val xkbSeedContainer = containers.firstOrNull { it.isRunning } ?: containers.firstOrNull()
 
     fun refresh() = viewModel.refreshRuntimeState()
+
+    fun publishPreferenceChange(key: String) {
+        context.sendBroadcast(Intent(ACTION_PREFERENCES_CHANGED).apply {
+            putExtra("key", key)
+            putExtra("fromBroadcast", true)
+            setPackage(context.packageName)
+        })
+    }
+
+    fun setFullscreen(enabled: Boolean) {
+        loriePrefs.fullscreen.put(enabled)
+        fullscreen = enabled
+        publishPreferenceChange("fullscreen")
+    }
+
+    fun openSettings() {
+        context.startActivity(Intent(context, LoriePreferences::class.java).apply {
+            action = Intent.ACTION_MAIN
+            if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    }
+
+    DisposableEffect(loriePrefs) {
+        val store = loriePrefs.get()
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == "fullscreen") {
+                fullscreen = loriePrefs.fullscreen.get()
+            }
+        }
+        store.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { store.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
+    if (fullscreen && serverStatus == LoaderStatus.Running) {
+        FullscreenX11Dialog(
+            onExitFullscreen = { setFullscreen(false) },
+            onConnectionChanged = { surfaceConnected = it }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -147,6 +204,7 @@ fun DisplayScreen(viewModel: HomeViewModel) {
                                         }
                                     } finally {
                                         surfaceConnected = false
+                                        if (fullscreen) setFullscreen(false)
                                         busy = false
                                         refresh()
                                     }
@@ -158,6 +216,15 @@ fun DisplayScreen(viewModel: HomeViewModel) {
                             Spacer(Modifier.width(6.dp))
                             Text("Stop")
                         }
+                    }
+
+                    OutlinedButton(
+                        onClick = ::openSettings,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("X11 Settings")
                     }
 
                     if (message != null) {
@@ -192,25 +259,48 @@ fun DisplayScreen(viewModel: HomeViewModel) {
             ) {
                 Column {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            "X11 Screen ${Constants.X11_DISPLAY}",
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            when {
-                                serverStatus != LoaderStatus.Running -> "Stopped"
-                                surfaceConnected -> "Connected"
-                                else -> "Connecting…"
-                            },
-                            color = Color.White.copy(alpha = 0.72f),
-                            style = MaterialTheme.typography.labelMedium
-                        )
+                        Column(modifier = Modifier.padding(start = 4.dp)) {
+                            Text(
+                                "X11 Screen ${Constants.X11_DISPLAY}",
+                                color = Color.White,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                when {
+                                    serverStatus != LoaderStatus.Running -> "Stopped"
+                                    surfaceConnected -> "Connected"
+                                    else -> "Connecting…"
+                                },
+                                color = Color.White.copy(alpha = 0.72f),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+
+                        Row {
+                            IconButton(onClick = ::openSettings) {
+                                Icon(
+                                    Icons.Default.Settings,
+                                    contentDescription = "X11 settings",
+                                    tint = Color.White
+                                )
+                            }
+                            IconButton(
+                                onClick = { setFullscreen(true) },
+                                enabled = serverStatus == LoaderStatus.Running
+                            ) {
+                                Icon(
+                                    Icons.Default.Fullscreen,
+                                    contentDescription = "Fullscreen",
+                                    tint = if (serverStatus == LoaderStatus.Running) Color.White
+                                    else Color.White.copy(alpha = 0.35f)
+                                )
+                            }
+                        }
                     }
 
                     Box(
@@ -221,11 +311,13 @@ fun DisplayScreen(viewModel: HomeViewModel) {
                         contentAlignment = Alignment.Center
                     ) {
                         if (serverStatus == LoaderStatus.Running) {
-                            EmbeddedX11Surface(
-                                modifier = Modifier.fillMaxSize(),
-                                onConnectionChanged = { surfaceConnected = it }
-                            )
-                            if (!surfaceConnected) {
+                            if (!fullscreen) {
+                                EmbeddedX11Surface(
+                                    modifier = Modifier.fillMaxSize(),
+                                    onConnectionChanged = { surfaceConnected = it }
+                                )
+                            }
+                            if (!surfaceConnected && !fullscreen) {
                                 CircularProgressIndicator()
                             }
                         } else {
@@ -285,8 +377,8 @@ fun DisplayScreen(viewModel: HomeViewModel) {
 
         item {
             Text(
-                "The X11 SurfaceView above is hosted by SaaS X11 Manager itself. " +
-                    "No separate Termux:X11 display Activity is opened.",
+                "X11 Settings uses the complete preference screen bundled with the pinned Lorie engine. " +
+                    "The X11 SurfaceView stays owned by SaaS X11 Manager; no separate display Activity is launched.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -303,25 +395,20 @@ private fun EmbeddedX11Surface(
         modifier = modifier,
         factory = { context ->
             LorieView(context).apply {
-                val sender = InputEventSender(this)
-                val renderData = RenderData()
-
                 setCallback { screenWidth, screenHeight, inputTransform ->
-                    renderData.screenWidth = screenWidth
-                    renderData.screenHeight = screenHeight
-                    renderData.setInputTransform(inputTransform)
+                    EmbeddedDisplayHost.updateInputTransform(
+                        this,
+                        screenWidth,
+                        screenHeight,
+                        inputTransform
+                    )
                     onConnectionChanged(connected())
                 }
                 setOnTouchListener { _, event ->
-                    if (!connected()) return@setOnTouchListener false
-                    requestFocus()
-                    sender.releaseStuckModifiers(event.metaState)
-                    sender.syncLockKeysState(event.metaState)
-                    sender.sendTouchEvent(event, renderData)
-                    true
+                    EmbeddedDisplayHost.handleTouch(this, event)
                 }
                 setOnKeyListener { _, _, event ->
-                    connected() && sender.sendKeyEvent(event)
+                    connected() && EmbeddedDisplayHost.handleKey(this, event)
                 }
                 requestFocus()
                 EmbeddedDisplayHost.tryConnect()
@@ -333,6 +420,70 @@ private fun EmbeddedX11Surface(
             if (!connected) EmbeddedDisplayHost.tryConnect()
         }
     )
+}
+
+@Composable
+private fun FullscreenX11Dialog(
+    onExitFullscreen: () -> Unit,
+    onConnectionChanged: (Boolean) -> Unit
+) {
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+
+    DisposableEffect(activity) {
+        val window = activity?.window
+        val controller = window?.let {
+            WindowCompat.getInsetsController(it, it.decorView)
+        }
+        controller?.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller?.hide(WindowInsetsCompat.Type.systemBars())
+
+        onDispose {
+            controller?.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onExitFullscreen,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+        ) {
+            EmbeddedX11Surface(
+                modifier = Modifier.fillMaxSize(),
+                onConnectionChanged = onConnectionChanged
+            )
+
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = Color.Black.copy(alpha = 0.55f)
+            ) {
+                IconButton(onClick = onExitFullscreen) {
+                    Icon(
+                        Icons.Default.FullscreenExit,
+                        contentDescription = "Exit fullscreen",
+                        tint = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @Composable

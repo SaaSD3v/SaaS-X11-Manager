@@ -58,7 +58,9 @@ dependencies {
     // Manager instead of forcing the spike to upgrade the whole Android build.
     implementation 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.22'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0'
-    implementation 'androidx.preference:preference:1.2.1'
+    // LoriePreferences/Prefs are part of the embedded module's public API and
+    // are referenced directly by the Manager's Display screen.
+    api 'androidx.preference:preference:1.2.1'
     compileOnly project(':shell-loader:stub')
 }
 
@@ -94,6 +96,8 @@ tasks.register('prepareEmbeddedLorieJava') {
              'MainActivity activity = MainActivity.getInstance();\n        return activity != null ? activity.handleKey(event) : EmbeddedDisplayHost.handleKey(this, event);'],
             ['if (MainActivity.getPrefs().enforceCharBasedInput.get())',
              'if (EmbeddedDisplayHost.getPrefs(getContext()).enforceCharBasedInput.get())'],
+            ['TouchInputHandler.refreshInputDevices();',
+             'EmbeddedDisplayHost.refreshInputDevices(this);'],
             ['mNativeContext = nativeInit();',
              'mNativeContext = nativeInit();\n        EmbeddedDisplayHost.attach(this);'],
             ['super.onDetachedFromWindow();\n        nativeDestroy(mNativeContext);',

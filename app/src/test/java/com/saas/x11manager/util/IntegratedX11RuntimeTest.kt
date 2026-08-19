@@ -22,6 +22,12 @@ class IntegratedX11RuntimeTest {
     }
 
     @Test
+    fun integratedRuntimeDoesNotExposeStandaloneDisplayLaunch() {
+        val methodNames = X11SessionManager::class.java.declaredMethods.map { it.name }
+        assertFalse(methodNames.contains("openIntegratedDisplay"))
+    }
+
+    @Test
     fun x11SocketAndXkbCacheAreOwnedByManagerRuntime() {
         assertTrue(Constants.X11_SOCK_DIR.startsWith(Constants.INTEGRATED_X11_RUNTIME_DIR))
         assertTrue(Constants.X11_SOCK_FILE.endsWith("/.X11-unix/X0"))

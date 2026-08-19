@@ -1,8 +1,6 @@
 package com.saas.x11manager.util
 
-import android.content.Intent
 import com.saas.x11manager.X11Application
-import com.termux.x11.MainActivity
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -311,21 +309,6 @@ object X11SessionManager {
     suspend fun stopLoader(logger: ContainerLogger? = null): Boolean =
         stopIntegratedServer(logger)
 
-    suspend fun openIntegratedDisplay(logger: ContainerLogger? = null): Boolean =
-        withContext(Dispatchers.Main) {
-            try {
-                val intent = Intent(X11Application.instance, MainActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                }
-                X11Application.instance.startActivity(intent)
-                logger?.i("[+] Opened integrated X11 display")
-                true
-            } catch (e: Exception) {
-                logger?.e("[-] Could not open integrated X11 display: ${e.message}")
-                false
-            }
-        }
-
     private suspend fun waitForContainerRuntime(
         containerName: String,
         timeoutMillis: Long = 5_000L,
@@ -432,16 +415,11 @@ object X11SessionManager {
                 logger?.w("[!] Container command channel is still becoming ready")
             }
 
-            logger?.i("[*] Opening integrated display...")
-            if (!openIntegratedDisplay(logger)) {
-                logger?.w("[!] Integrated server is running, but its display Activity could not be opened")
-            }
-
             logger?.i("")
             if (runtimeStatus == ContainerStatus.RUNNING && commandReady) {
-                logger?.i("[+] Integrated X11 session started")
+                logger?.i("[+] Integrated X11 session started; render it from the Display tab")
             } else {
-                logger?.w("[!] Integrated display opened while container startup is still settling")
+                logger?.w("[!] Integrated X11 server is ready while container startup is still settling")
             }
         } catch (e: Exception) {
             if (!containerStartAccepted) {
