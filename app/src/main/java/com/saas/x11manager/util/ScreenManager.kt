@@ -7,12 +7,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Project-owned control plane for the embedded Lorie X11 display.
+ * Project-owned configuration bridge for the embedded Lorie X11 display.
  *
- * The X server lifecycle remains in [X11SessionManager]. This manager owns the
- * user-facing screen configuration, persists it independently from container
- * configuration and translates it to the preference contract exposed by the
- * bundled Lorie module.
+ * X11 process lifecycle remains in [X11SessionManager]. This object only owns
+ * user-facing display/input configuration and translates it to the bundled
+ * Lorie preference contract.
  */
 object ScreenManager {
     private const val PREFS_NAME = "screen_manager"
@@ -87,10 +86,7 @@ object ScreenManager {
             .apply()
     }
 
-    /**
-     * Convert our stable project model to the preference keys used by the exact
-     * Lorie revision pinned by this repository.
-     */
+    /** Convert our stable project model to the pinned Lorie preference keys. */
     internal fun buildPreferencePayload(config: ScreenConfig): Map<String, String> {
         val normalized = config.normalized()
         return linkedMapOf(
@@ -124,8 +120,8 @@ object ScreenManager {
     }
 
     /**
-     * Starts only the embedded X11 server. Rendering is attached by the
-     * EmbeddedX11View that lives in the Screen tab; no secondary Activity is opened.
+     * Starts only the embedded X11 server. Rendering stays attached to the
+     * [com.saas.x11manager.ui.screen.EmbeddedX11View] hosted by the Screen tab.
      */
     suspend fun startServer(
         context: Context,
@@ -144,53 +140,9 @@ object ScreenManager {
         }
     }
 
-    // Legacy detached-Activity path kept temporarily while the existing ScreenScreen
-    // is migrated to the embedded surface.
-    suspend fun start(
-        context: Context,
-        xkbContainerName: String?,
-        config: ScreenConfig,
-        logger: ContainerLogger? = null
-    ): Result<ScreenLaunchResult> = withContext(Dispatchers.IO) {
-        try {
-            apply(context, config)
-
-            val started = X11SessionManager.startIntegratedServer(
-                containerName = xkbContainerName,
-                logger = logger
-            )
-            if (started.isFailure) {
-                return@withContext Result.failure(
-                    started.exceptionOrNull()
-                        ?: IllegalStateException("Integrated X11 server could not start")
-                )
-            }
-
-            val pid = started.getOrThrow()
-            val opened = X11SessionManager.openIntegratedDisplay(logger)
-            Result.success(ScreenLaunchResult(pid = pid, displayOpened = opened))
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun open(
-        context: Context,
-        config: ScreenConfig,
-        logger: ContainerLogger? = null
-    ): Boolean {
-        apply(context, config)
-        return X11SessionManager.openIntegratedDisplay(logger)
-    }
-
     suspend fun stop(logger: ContainerLogger? = null): Boolean =
         X11SessionManager.stopIntegratedServer(logger)
 }
-
-data class ScreenLaunchResult(
-    val pid: Int,
-    val displayOpened: Boolean
-)
 
 data class ScreenConfig(
     val resolutionMode: ScreenResolutionMode = ScreenResolutionMode.Native,
