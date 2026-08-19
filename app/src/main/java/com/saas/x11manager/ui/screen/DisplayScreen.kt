@@ -1,6 +1,7 @@
 package com.saas.x11manager.ui.screen
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,11 +14,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.saas.x11manager.util.Constants
 import com.saas.x11manager.util.LoaderStatus
 import com.saas.x11manager.util.X11SessionManager
+import com.termux.x11.EmbeddedDisplayHost
+import com.termux.x11.LorieView
+import com.termux.x11.input.InputEventSender
+import com.termux.x11.input.RenderData
 import kotlinx.coroutines.launch
 
 @Composable
@@ -28,6 +35,7 @@ fun DisplayScreen(viewModel: HomeViewModel) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    var surfaceConnected by remember { mutableStateOf(false) }
 
     val xkbSeedContainer = containers.firstOrNull { it.isRunning } ?: containers.firstOrNull()
 
@@ -66,7 +74,7 @@ fun DisplayScreen(viewModel: HomeViewModel) {
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                "Termux:X11/Lorie engine bundled inside SaaS X11 Manager",
+                                "X11 is rendered directly inside this tab",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -106,17 +114,13 @@ fun DisplayScreen(viewModel: HomeViewModel) {
                                                 return@launch
                                             }
                                         }
-                                        val opened = X11SessionManager.openIntegratedDisplay()
-                                        if (!opened) message = "Integrated display could not be opened"
                                     } finally {
                                         busy = false
                                         refresh()
                                     }
                                 }
                             },
-                            enabled = !busy && (
-                                serverStatus == LoaderStatus.Running || xkbSeedContainer != null
-                            ),
+                            enabled = !busy && serverStatus != LoaderStatus.Running && xkbSeedContainer != null,
                             modifier = Modifier.weight(1f)
                         ) {
                             if (busy) {
@@ -129,7 +133,7 @@ fun DisplayScreen(viewModel: HomeViewModel) {
                                 Icon(Icons.Default.PlayArrow, contentDescription = null)
                                 Spacer(Modifier.width(6.dp))
                             }
-                            Text(if (serverStatus == LoaderStatus.Running) "Open Display" else "Start Display")
+                            Text(if (serverStatus == LoaderStatus.Running) "Display Active" else "Start Display")
                         }
 
                         OutlinedButton(
@@ -142,6 +146,7 @@ fun DisplayScreen(viewModel: HomeViewModel) {
                                             message = "Integrated X11 server could not be stopped"
                                         }
                                     } finally {
+                                        surfaceConnected = false
                                         busy = false
                                         refresh()
                                     }
@@ -169,6 +174,67 @@ fun DisplayScreen(viewModel: HomeViewModel) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
+                    }
+                }
+            }
+        }
+
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = Color.Black,
+                border = BorderStroke(
+                    1.dp,
+                    if (surfaceConnected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.outlineVariant
+                )
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "X11 Screen ${Constants.X11_DISPLAY}",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            when {
+                                serverStatus != LoaderStatus.Running -> "Stopped"
+                                surfaceConnected -> "Connected"
+                                else -> "Connecting…"
+                            },
+                            color = Color.White.copy(alpha = 0.72f),
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 10f)
+                            .background(Color.Black),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (serverStatus == LoaderStatus.Running) {
+                            EmbeddedX11Surface(
+                                modifier = Modifier.fillMaxSize(),
+                                onConnectionChanged = { surfaceConnected = it }
+                            )
+                            if (!surfaceConnected) {
+                                CircularProgressIndicator()
+                            }
+                        } else {
+                            Text(
+                                "Start the integrated display to render X11 here.",
+                                color = Color.White.copy(alpha = 0.7f),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
                     }
                 }
             }
@@ -219,13 +285,54 @@ fun DisplayScreen(viewModel: HomeViewModel) {
 
         item {
             Text(
-                "This experimental branch does not open or wait for the external Termux:X11 APK. " +
-                    "The server process, socket, cached XKB data and display Activity are controlled by SaaS X11 Manager.",
+                "The X11 SurfaceView above is hosted by SaaS X11 Manager itself. " +
+                    "No separate Termux:X11 display Activity is opened.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
+}
+
+@Composable
+private fun EmbeddedX11Surface(
+    modifier: Modifier = Modifier,
+    onConnectionChanged: (Boolean) -> Unit
+) {
+    AndroidView(
+        modifier = modifier,
+        factory = { context ->
+            LorieView(context).apply {
+                val sender = InputEventSender(this)
+                val renderData = RenderData()
+
+                setCallback { screenWidth, screenHeight, inputTransform ->
+                    renderData.screenWidth = screenWidth
+                    renderData.screenHeight = screenHeight
+                    renderData.setInputTransform(inputTransform)
+                    onConnectionChanged(connected())
+                }
+                setOnTouchListener { _, event ->
+                    if (!connected()) return@setOnTouchListener false
+                    requestFocus()
+                    sender.releaseStuckModifiers(event.metaState)
+                    sender.syncLockKeysState(event.metaState)
+                    sender.sendTouchEvent(event, renderData)
+                    true
+                }
+                setOnKeyListener { _, _, event ->
+                    connected() && sender.sendKeyEvent(event)
+                }
+                requestFocus()
+                EmbeddedDisplayHost.tryConnect()
+            }
+        },
+        update = { view ->
+            val connected = view.connected()
+            onConnectionChanged(connected)
+            if (!connected) EmbeddedDisplayHost.tryConnect()
+        }
+    )
 }
 
 @Composable

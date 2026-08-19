@@ -24,14 +24,11 @@
             </intent-filter>
         </activity>
 
-        <!-- Lorie is embedded as a library. Keep its display Activity available
-             to this app, but remove the extra launcher/home entry contributed by
-             the upstream library manifest. -->
+        <!-- The Lorie renderer is hosted directly in the Display Compose tab.
+             Do not expose or launch Termux:X11's standalone display Activity. -->
         <activity
             android:name="com.termux.x11.MainActivity"
-            tools:node="merge">
-            <intent-filter tools:node="removeAll" />
-        </activity>
+            tools:node="remove" />
     </application>
 
 </manifest>

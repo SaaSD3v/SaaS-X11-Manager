@@ -3,7 +3,8 @@ apply plugin: 'com.android.library'
 def upstream = rootProject.file('third_party/termux-x11/lorie')
 def upstreamCommit = '139f2197e6093d04d5df1400baa998bf1fb07b3c'
 
-def generatedJava = layout.buildDirectory.dir('generated/embeddedLorie/java')
+def generatedUpstreamJava = layout.buildDirectory.dir('generated/embeddedLorie/upstreamJava')
+def generatedPrefsJava = layout.buildDirectory.dir('generated/embeddedLorie/prefsJava')
 def generatedRes = layout.buildDirectory.dir('generated/embeddedLorie/res')
 
 android {
@@ -45,7 +46,7 @@ android {
     sourceSets {
         main {
             manifest.srcFile new File(upstream, 'src/main/AndroidManifest.xml')
-            java.srcDirs new File(upstream, 'src/main/java'), generatedJava
+            java.srcDirs generatedUpstreamJava, generatedPrefsJava, 'src/main/java'
             aidl.srcDirs new File(upstream, 'src/main/aidl')
             res.srcDirs new File(upstream, 'src/main/res'), generatedRes
         }
@@ -61,9 +62,66 @@ dependencies {
     compileOnly project(':shell-loader:stub')
 }
 
+tasks.register('prepareEmbeddedLorieJava') {
+    inputs.dir new File(upstream, 'src/main/java')
+    outputs.dir generatedUpstreamJava
+
+    doLast {
+        def output = generatedUpstreamJava.get().asFile
+        delete output
+        copy {
+            from new File(upstream, 'src/main/java')
+            into output
+        }
+
+        // The upstream renderer is reusable, but its Java view assumes that a
+        // Termux:X11 MainActivity owns it. For the Manager we keep the upstream
+        // source pinned and generate a tiny host adaptation at build time rather
+        // than carrying a forked copy of the whole renderer.
+        def lorie = new File(output, 'com/termux/x11/LorieView.java')
+        def source = lorie.getText('UTF-8')
+
+        def replacements = [
+            ['if (a.useTermuxEKBarBehaviour && a.mExtraKeys != null)',
+             'if (a != null && a.useTermuxEKBarBehaviour && a.mExtraKeys != null)'],
+            ['Prefs prefs = MainActivity.getPrefs();',
+             'Prefs prefs = EmbeddedDisplayHost.getPrefs(getContext());'],
+            ['SamsungDexUtils.checkDeXEnabled(MainActivity.getInstance())',
+             'SamsungDexUtils.checkDeXEnabled(getContext())'],
+            ['MainActivity.handler.post(() -> {\n            MainActivity activity = MainActivity.getInstance();\n            if (activity == null)\n                return;\n\n            LorieView view = activity.getLorieView();',
+             'EmbeddedDisplayHost.handler.post(() -> {\n            LorieView view = EmbeddedDisplayHost.getActiveView();\n            if (view == null)\n                return;'],
+            ['return MainActivity.getInstance().handleKey(event);',
+             'MainActivity activity = MainActivity.getInstance();\n        return activity != null ? activity.handleKey(event) : EmbeddedDisplayHost.handleKey(this, event);'],
+            ['if (MainActivity.getPrefs().enforceCharBasedInput.get())',
+             'if (EmbeddedDisplayHost.getPrefs(getContext()).enforceCharBasedInput.get())'],
+            ['mNativeContext = nativeInit();',
+             'mNativeContext = nativeInit();\n        EmbeddedDisplayHost.attach(this);'],
+            ['super.onDetachedFromWindow();\n        nativeDestroy(mNativeContext);',
+             'super.onDetachedFromWindow();\n        EmbeddedDisplayHost.detach(this);\n        nativeDestroy(mNativeContext);']
+        ]
+
+        replacements.each { pair ->
+            if (!source.contains(pair[0]))
+                throw new GradleException('Pinned LorieView host patch no longer matches upstream source: ' + pair[0])
+            source = source.replace(pair[0], pair[1])
+        }
+        if (source.contains('MainActivity.getPrefs()') || source.contains('MainActivity.handler.post'))
+            throw new GradleException('Unadapted MainActivity dependency remains in embedded LorieView')
+        lorie.setText(source, 'UTF-8')
+
+        def receiver = new File(output, 'com/termux/x11/LorieBroadcastReceiver.java')
+        def receiverSource = receiver.getText('UTF-8')
+        def oldReceiver = '        else\n            Log.w("LorieBroadcastReceiver", "Got " + intent.getAction() + " but no MainActivity instance in this process");'
+        def newReceiver = '        else\n            EmbeddedDisplayHost.onBroadcastReceive(context, intent);'
+        if (!receiverSource.contains(oldReceiver))
+            throw new GradleException('Pinned LorieBroadcastReceiver host patch no longer matches upstream source')
+        receiver.setText(receiverSource.replace(oldReceiver, newReceiver), 'UTF-8')
+    }
+}
+
 tasks.register('generateEmbeddedLoriePrefs') {
     inputs.file new File(upstream, 'src/main/res/xml/preferences.xml')
-    outputs.dir generatedJava
+    outputs.dir generatedPrefsJava
 
     doLast {
         def source = new File(upstream, 'src/main/res/xml/preferences.xml')
@@ -91,7 +149,7 @@ tasks.register('generateEmbeddedLoriePrefs') {
                 preferences << [type: 'Boolean', key: node.getAttribute('app:key'), default: node.getAttribute('app:defaultValue')]
         }
 
-        def out = new File(generatedJava.get().asFile, 'com/termux/x11/Prefs.java')
+        def out = new File(generatedPrefsJava.get().asFile, 'com/termux/x11/Prefs.java')
         out.parentFile.mkdirs()
         out.text = 'package com.termux.x11;\n' +
             'import java.util.HashMap;\n' +
@@ -139,6 +197,7 @@ tasks.register('generateEmbeddedLorieShortcuts') {
 }
 
 afterEvaluate {
+    preBuild.dependsOn prepareEmbeddedLorieJava
     preBuild.dependsOn generateEmbeddedLoriePrefs
     preBuild.dependsOn generateEmbeddedLorieShortcuts
 }
