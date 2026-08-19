@@ -101,7 +101,7 @@ object X11SessionManager {
         }
     }
 
-    private fun stageXkbConfig(
+    private suspend fun stageXkbConfig(
         containerName: String,
         logger: ContainerLogger? = null
     ): Boolean {
@@ -110,9 +110,7 @@ object X11SessionManager {
             return true
         }
 
-        val info = kotlinx.coroutines.runBlocking {
-            ContainerManager.getContainerInfo(containerName)
-        } ?: run {
+        val info = ContainerManager.getContainerInfo(containerName) ?: run {
             logger?.e("[-] Cannot resolve container rootfs for XKB data")
             return false
         }
