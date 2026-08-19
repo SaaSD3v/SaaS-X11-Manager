@@ -16,6 +16,8 @@ import kotlinx.coroutines.withContext
  */
 object ScreenManager {
     private const val PREFS_NAME = "screen_manager"
+    private const val IME_TOOLBAR_KEY = "ime_toolbar_enabled_v2"
+    private const val LEGACY_IME_TOOLBAR_KEY = "show_additional_keyboard"
     private const val LORIE_CHANGE_PREFERENCE = "com.termux.x11.CHANGE_PREFERENCE"
     private const val LORIE_PREFERENCE_RECEIVER = "com.termux.x11.LoriePreferences\$Receiver"
 
@@ -58,7 +60,9 @@ object ScreenManager {
                 prefs.getString("touch_mode", null)
             ),
             keepScreenAwake = prefs.getBoolean("keep_screen_awake", false),
-            showAdditionalKeyboard = prefs.getBoolean("show_additional_keyboard", false)
+            // v2 intentionally ignores the old preference. The redesigned toolbar
+            // starts disabled after an upgrade and is enabled only by explicit user action.
+            showAdditionalKeyboard = prefs.getBoolean(IME_TOOLBAR_KEY, false)
         ).normalized()
     }
 
@@ -78,7 +82,8 @@ object ScreenManager {
             .putBoolean("clipboard", normalized.clipboard)
             .putString("touch_mode", normalized.touchMode.wireValue)
             .putBoolean("keep_screen_awake", normalized.keepScreenAwake)
-            .putBoolean("show_additional_keyboard", normalized.showAdditionalKeyboard)
+            .putBoolean(IME_TOOLBAR_KEY, normalized.showAdditionalKeyboard)
+            .remove(LEGACY_IME_TOOLBAR_KEY)
             .apply()
     }
 
