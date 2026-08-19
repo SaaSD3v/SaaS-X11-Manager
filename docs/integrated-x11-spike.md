@@ -1,79 +1,255 @@
-# Integrated X11 spike
+# DroidSpaces Screen Manager
 
-This document applies only to the experimental branch `agent/integrated-x11-spike`.
-It is not a plan to merge the experiment into `main`.
+This document describes the project-owned X11 display path on the
+`agent/screen-manager` branch.
+
+The branch is based on `agent/structural-fixes`. It keeps the validated
+DroidSpaces container, init-system and Graphic Session work from that branch,
+then adds an integrated screen/display layer on top of it.
 
 ## Goal
 
-Run the X11 server and display UI from the SaaS X11 Manager APK itself instead of
-waiting for an installed `com.termux.x11` application and a Termux-side
-`loader.apk`.
+Make graphical DroidSpaces sessions a first-class feature of the app instead of
+requiring the user to install, open and coordinate a separate Termux:X11 APK.
 
-## Upstream engine
+The user-facing flow becomes:
+
+```text
+DroidSpaces Manager
+    -> Screen
+       -> configure display/input
+       -> Start
+       -> integrated X11 server
+       -> embedded display Activity
+       -> DroidSpaces container / Graphic Session
+```
+
+The container still talks standard X11 over display `:0`. It does not receive
+direct control of the Android display hardware.
+
+## Upstream X11 engine
 
 The branch pins `termux/termux-x11` as a git submodule at commit
 `139f2197e6093d04d5df1400baa998bf1fb07b3c` and builds its `:lorie` Android
-library directly into the Manager APK. The upstream project is GPL-3.0 licensed;
-this spike keeps that source and its license in the submodule so licensing can be
-reviewed explicitly before any future product decision.
+library directly into the Manager APK.
 
-CI checks out this upstream pin recursively so the native Xorg/Lorie submodules
-used by the engine are part of the same reproducible spike build.
+The X11/Xorg/Lorie engine is therefore reused rather than reimplemented from
+scratch, while lifecycle, runtime paths, configuration, UX and DroidSpaces
+integration are owned by this project.
 
-## Runtime model
+The upstream project is GPL-3.0 licensed. The source and license remain present
+through the pinned submodule so the dependency and license boundary stay
+explicit and reproducible.
 
-The Manager starts the bundled `com.termux.x11.CmdEntryPoint` with Android's
-`app_process`, but the classpath points to the Manager's own installed APK. The
-process name is `saas-x11` and the display is `:0`.
+## Runtime ownership
 
-Runtime files are owned by the Manager under:
+The integrated server no longer loads Termux's external `loader.apk` and does
+not launch the installed `com.termux.x11` application.
 
-- `/data/local/tmp/saas-x11/.X11-unix/X0`
-- `/data/local/tmp/saas-x11/.X0-lock`
-- `/data/local/tmp/saas-x11/server.log`
-- `/data/local/tmp/saas-x11/xkb`
+The Manager starts the embedded `com.termux.x11.CmdEntryPoint` through Android's
+`app_process`, with the Manager APK itself as the classpath.
 
-Lorie requires XKB keyboard data when the server starts. Instead of depending on
-Termux for `/usr/share/X11/xkb`, the Manager opens a configured DroidSpaces
-rootfs through the existing `RootfsAccessor`, copies its XKB data into the
-Manager-owned runtime cache, then starts the bundled server with
-`XKB_CONFIG_ROOT=/data/local/tmp/saas-x11/xkb`. The cache can be reused by later
-sessions and by the Display tab.
+Runtime files are project-owned under:
 
-DroidSpaces containers bind the Manager-owned `.X11-unix` directory to
-`/usr/.X11-unix`. The DroidSpaces `enable_termux_x11` integration remains
-disabled because this branch supplies the socket itself.
+```text
+/data/local/tmp/saas-x11/
+```
 
-## UI
+Important paths:
 
-The main navigation contains a new `Display` tab. It can prepare/start the
-integrated X11 server using XKB data from an available container, reopen the
-bundled display Activity, show the server PID/socket, and stop the server.
-Starting a container's X11 session also opens the same bundled Activity.
+- display: `:0`
+- process name: `saas-x11`
+- socket: `/data/local/tmp/saas-x11/.X11-unix/X0`
+- lock: `/data/local/tmp/saas-x11/.X0-lock`
+- log: `/data/local/tmp/saas-x11/server.log`
+- cached XKB data: `/data/local/tmp/saas-x11/xkb`
 
-The existing post-install `Start X11` action now routes through this integrated
-runtime, so finishing a graphical-session install no longer hands the user off to
-an external Termux:X11 application.
+DroidSpaces containers bind the Manager-owned X11 socket directory to the
+container X11 path. The normal DroidSpaces `enable_termux_x11` integration stays
+disabled because this branch provides the socket itself.
 
-## Removed runtime dependency
+## XKB bootstrap
 
-The main Home/Requirements refresh no longer checks whether Termux or the
-Termux:X11 APK is installed. Starting an X11 session no longer launches
-`com.termux.x11/.MainActivity` as an external package, waits for a `termux-x11`
-process, or loads `$PREFIX/libexec/termux-x11/loader.apk`.
+Lorie needs XKB keyboard data when its X server starts. The Manager does not use
+Termux's prefix for that data.
 
-## First device proof
+On first start it selects an available DroidSpaces container, opens its rootfs
+through the existing `RootfsAccessor`, and looks for XKB data under the Linux
+rootfs. That data is copied into the Manager-owned cache.
 
-A successful Android build proves only that the embedded engine is packaged and
-linked. The decisive runtime proof is still device-side:
+After a successful seed, later starts can reuse the cache and do not require the
+same container to be running.
 
-1. install the APK from this branch;
-2. make sure at least one configured container contains `/usr/share/X11/xkb`;
-3. open `Display` and start the integrated server;
-4. confirm `/data/local/tmp/saas-x11/.X11-unix/X0` and the XKB cache exist;
-5. start a DroidSpaces container whose config was prepared by the Manager;
-6. run an X11 client/session with `DISPLAY=:0`;
-7. confirm it renders in the Manager-owned display Activity and accepts keyboard/touch input.
+The `Screen` page exposes the selected XKB source container so this dependency is
+visible instead of being a hidden runtime assumption.
 
-Do not remove the external-X11 implementation from other branches based only on a
-successful CI build; this branch exists specifically to prove the runtime model.
+## Main menu: Screen
+
+The main navigation is:
+
+```text
+Home | Screen | Requirements
+```
+
+`Screen` is the dedicated control surface for the integrated X11 display.
+
+The top runtime card shows:
+
+- X11 server state;
+- display number;
+- socket path;
+- server PID;
+- XKB source container;
+- `Start` / `Open`;
+- `Stop`.
+
+When the server is stopped, `Start` applies the saved configuration, starts the
+embedded server, waits for the X11 socket and opens the embedded display
+Activity.
+
+When the server is already running, the same primary action becomes `Open` and
+brings the display Activity back to the foreground without restarting the
+server.
+
+## Screen configuration
+
+The UI exposes only settings that map to preference keys supported by the pinned
+Lorie engine.
+
+### Output
+
+- resolution mode: Native, Scaled, Exact or Custom;
+- scale: 30% to 300%;
+- exact resolution presets;
+- custom `widthxheight` resolution;
+- Nearest or Bilinear filtering;
+- orientation;
+- fullscreen;
+- exact/custom stretching;
+- cutout avoidance.
+
+### Input and Android integration
+
+- Trackpad, Simulated Touch or Direct Touch mode;
+- clipboard synchronization;
+- additional keyboard bar;
+- keep-screen-awake behavior.
+
+The app persists these choices in its own `screen_manager` SharedPreferences.
+They are independent from per-container `.saas-x11-manager.conf` settings.
+
+## Preference bridge
+
+`ScreenManager` is the project-owned control layer between the Compose UI and
+the embedded Lorie engine.
+
+It translates the app model into Lorie's real preference contract, including:
+
+- `displayResolutionMode`
+- `displayScale`
+- `displayResolutionExact`
+- `displayResolutionCustom`
+- `displayFilteringMode`
+- `displayStretch`
+- `fullscreen`
+- `forceOrientation`
+- `hideCutout`
+- `clipboardEnable`
+- `touchMode`
+- `screenIdleTimeout`
+- `showAdditionalKbd`
+
+Updates are sent directly to the embedded Lorie preference receiver in the same
+APK. The Screen UI therefore does not maintain a second fake set of display
+options.
+
+## Separation of responsibilities
+
+The branch intentionally keeps three layers separate:
+
+```text
+ScreenScreen
+    UI and user interaction
+
+ScreenManager
+    persistence + Lorie preference bridge + high-level Start/Open/Stop
+
+X11SessionManager
+    X server process + socket + XKB staging + container session lifecycle
+```
+
+This prevents the Home screen or container configuration code from becoming the
+owner of Android display preferences.
+
+## Relationship with Graphic Sessions
+
+Graphic Sessions remain container-side components:
+
+```text
+Openbox / XFCE / Qtile / ...
+    -> DISPLAY=:0
+    -> DroidSpaces X11 socket bind
+    -> integrated Screen server
+    -> Android display Activity
+```
+
+The Screen manager is not a desktop environment and is not tied to a specific
+session. The same server can display any supported X11 Graphic Session.
+
+## External Termux:X11 dependency
+
+For this integrated path, the external Termux:X11 APK is not required at
+runtime.
+
+The embedded engine still originates from the Termux:X11/Lorie open-source
+project, but its code is built into this APK and its server is launched from the
+Manager-owned runtime.
+
+This distinction is important:
+
+```text
+No external Termux:X11 APK dependency
+!=
+No Termux:X11/Lorie source dependency
+```
+
+## CI
+
+The branch CI initializes the pinned X11 source explicitly instead of hiding the
+entire recursive submodule operation inside `actions/checkout`.
+
+Submodule initialization uses parallel jobs and retry logic before the Gradle
+build. The workflow then runs:
+
+```text
+testReleaseUnitTest
+assembleRelease
+```
+
+Unit tests include the integrated server command/runtime contract and the Screen
+to-Lorie preference contract.
+
+A successful CI build proves that the embedded source compiles with the Android
+app and that the automated contracts pass. It does not replace device-side X11
+render/input validation.
+
+## Device validation checklist
+
+The decisive runtime test is:
+
+1. install the APK built from `agent/screen-manager`;
+2. ensure at least one configured container contains XKB data for the first
+   bootstrap;
+3. open `Screen`;
+4. select/configure resolution and input options;
+5. tap `Start`;
+6. confirm `/data/local/tmp/saas-x11/.X11-unix/X0` exists;
+7. start a DroidSpaces Graphic Session;
+8. confirm its X11 client connects to `DISPLAY=:0`;
+9. confirm the desktop renders in the embedded display Activity;
+10. validate touch, keyboard, orientation, clipboard and resolution changes;
+11. stop the Screen server and confirm only the Manager-owned X11 process/socket
+    are cleaned up.
+
+Do not treat CI alone as proof of final runtime behavior. The branch is structured
+so build validation and real-device validation can be performed independently.
