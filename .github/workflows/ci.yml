@@ -2,7 +2,7 @@ name: X11 Manager CI
 
 on:
   push:
-    branches: [ "main", "master", "agent/structural-fixes", "agent/integrated-x11-spike" ]
+    branches: [ "main", "master", "agent/structural-fixes", "agent/integrated-x11-spike", "agent/screen-manager" ]
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
@@ -31,7 +31,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        submodules: recursive
+        submodules: false
         fetch-depth: 1
 
     - name: Mark branch CI pending
@@ -56,8 +56,26 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
+    - name: Initialize integrated X11 source
+      if: ${{ hashFiles('.gitmodules') != '' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        git submodule sync --recursive
+        for attempt in 1 2 3; do
+          if git -c protocol.version=2 submodule update \
+            --init --recursive --depth=1 --jobs=8; then
+            exit 0
+          fi
+          if [ "$attempt" -eq 3 ]; then
+            echo "Integrated X11 submodule initialization failed after 3 attempts" >&2
+            exit 1
+          fi
+          sleep $((attempt * 3))
+        done
+
     - name: Validate integrated X11 source
-      if: ${{ github.ref == 'refs/heads/agent/integrated-x11-spike' }}
+      if: ${{ hashFiles('.gitmodules') != '' }}
       run: |
         test -f third_party/termux-x11/lorie/src/main/cpp/CMakeLists.txt
         test -f third_party/termux-x11/lorie/src/main/java/com/termux/x11/CmdEntryPoint.java
