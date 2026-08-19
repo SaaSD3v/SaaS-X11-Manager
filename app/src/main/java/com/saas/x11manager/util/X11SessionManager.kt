@@ -90,6 +90,73 @@ object X11SessionManager {
         }
     }
 
+    private fun hasCachedXkbConfig(): Boolean {
+        val root = shellQuote(Constants.INTEGRATED_X11_XKB_DIR)
+        return try {
+            Shell.cmd(
+                "test -d $root/rules && test -d $root/symbols && test -d $root/keycodes"
+            ).exec().isSuccess
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun stageXkbConfig(
+        containerName: String,
+        logger: ContainerLogger? = null
+    ): Boolean {
+        if (hasCachedXkbConfig()) {
+            logger?.i("[+] Reusing cached XKB configuration")
+            return true
+        }
+
+        val info = kotlinx.coroutines.runBlocking {
+            ContainerManager.getContainerInfo(containerName)
+        } ?: run {
+            logger?.e("[-] Cannot resolve container rootfs for XKB data")
+            return false
+        }
+
+        val staged = RootfsAccessor.use(
+            rootfsPath = info.rootfsPath,
+            tag = "xkb_$containerName"
+        ) { root ->
+            val x11Path = "$root/usr/share/X11/xkb"
+            val alternatePath = "$root/usr/share/xkeyboard-config-2"
+            val source = when {
+                Shell.cmd("test -d ${shellQuote(x11Path)}").exec().isSuccess -> x11Path
+                Shell.cmd("test -d ${shellQuote(alternatePath)}").exec().isSuccess -> alternatePath
+                else -> null
+            } ?: return@use false
+
+            val destination = Constants.INTEGRATED_X11_XKB_DIR
+            val temporary = "$destination.tmp.${android.os.Process.myPid()}"
+            val result = Shell.cmd(
+                "rm -rf ${shellQuote(temporary)} && " +
+                    "mkdir -p ${shellQuote(temporary)} && " +
+                    "cp -a ${shellQuote("$source/.")} ${shellQuote("$temporary/")} && " +
+                    "chmod -R a+rX ${shellQuote(temporary)} && " +
+                    "rm -rf ${shellQuote(destination)} && " +
+                    "mv ${shellQuote(temporary)} ${shellQuote(destination)}"
+            ).exec()
+            if (!result.isSuccess) {
+                Shell.cmd("rm -rf ${shellQuote(temporary)} 2>/dev/null").exec()
+            }
+            result.isSuccess
+        } ?: false
+
+        if (staged && hasCachedXkbConfig()) {
+            logger?.i("[+] Cached XKB configuration from $containerName")
+            return true
+        }
+
+        logger?.e(
+            "[-] XKB configuration was not found in $containerName; " +
+                "expected /usr/share/X11/xkb"
+        )
+        return false
+    }
+
     private fun clearX11SocketFiles() {
         Shell.cmd("rm -f ${shellQuote(Constants.X11_SOCK_FILE)} 2>/dev/null").exec()
         Shell.cmd("rm -f ${shellQuote(Constants.X11_LOCK_FILE)} 2>/dev/null").exec()
@@ -107,6 +174,7 @@ object X11SessionManager {
 
     internal fun buildIntegratedServerCommand(apkPath: String): String =
         "TMPDIR=${shellQuote(Constants.INTEGRATED_X11_RUNTIME_DIR)} " +
+            "XKB_CONFIG_ROOT=${shellQuote(Constants.INTEGRATED_X11_XKB_DIR)} " +
             "CLASSPATH=${shellQuote(apkPath)} " +
             "/system/bin/app_process -Xnoimage-dex2oat / " +
             "--nice-name=${Constants.X11_SERVER_PROCESS} " +
@@ -126,6 +194,7 @@ object X11SessionManager {
     }
 
     private suspend fun startIntegratedServerTracked(
+        containerName: String? = null,
         logger: ContainerLogger? = null
     ): Result<ServerLease> = withContext(Dispatchers.IO) {
         try {
@@ -149,6 +218,21 @@ object X11SessionManager {
                 return@withContext Result.failure(
                     IllegalStateException("Could not prepare integrated X11 runtime directory")
                 )
+            }
+
+            if (!hasCachedXkbConfig()) {
+                if (containerName.isNullOrBlank()) {
+                    return@withContext Result.failure(
+                        IllegalStateException(
+                            "Integrated X11 needs XKB data from a configured container before its first start"
+                        )
+                    )
+                }
+                if (!stageXkbConfig(containerName, logger)) {
+                    return@withContext Result.failure(
+                        IllegalStateException("Could not prepare XKB data for integrated X11")
+                    )
+                }
             }
 
             val apkPath = X11Application.instance.applicationInfo.sourceDir
@@ -183,7 +267,8 @@ object X11SessionManager {
             clearX11SocketFiles()
             Result.failure(
                 IllegalStateException(
-                    "Integrated X11 server did not create ${Constants.X11_SOCK_FILE}"
+                    "Integrated X11 server did not create ${Constants.X11_SOCK_FILE}; " +
+                        "see ${Constants.X11_LOG_FILE}"
                 )
             )
         } catch (e: Exception) {
@@ -192,12 +277,14 @@ object X11SessionManager {
         }
     }
 
-    suspend fun startIntegratedServer(logger: ContainerLogger? = null): Result<Int> =
-        startIntegratedServerTracked(logger).map { it.pid }
+    suspend fun startIntegratedServer(
+        containerName: String? = null,
+        logger: ContainerLogger? = null
+    ): Result<Int> = startIntegratedServerTracked(containerName, logger).map { it.pid }
 
-    // Compatibility name used by the current HomeViewModel.
+    // Compatibility name used by older code paths in this spike.
     suspend fun startLoader(logger: ContainerLogger? = null): Result<Int> =
-        startIntegratedServer(logger)
+        startIntegratedServer(logger = logger)
 
     private suspend fun rollbackServer(lease: ServerLease, logger: ContainerLogger? = null) {
         if (lease.reused) return
@@ -302,7 +389,7 @@ object X11SessionManager {
             }
 
             logger?.i("")
-            val serverResult = startIntegratedServerTracked(logger)
+            val serverResult = startIntegratedServerTracked(containerName, logger)
             if (serverResult.isFailure) {
                 logger?.e("[-] Integrated X11 failed: ${serverResult.exceptionOrNull()?.message}")
                 return@withContext

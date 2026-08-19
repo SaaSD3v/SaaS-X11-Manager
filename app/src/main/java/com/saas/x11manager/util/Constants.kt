@@ -8,6 +8,7 @@ object Constants {
     const val DAEMON_MODE_FILE = "/data/local/Droidspaces/.daemon_mode"
 
     const val INTEGRATED_X11_RUNTIME_DIR = "/data/local/tmp/saas-x11"
+    const val INTEGRATED_X11_XKB_DIR = "$INTEGRATED_X11_RUNTIME_DIR/xkb"
     const val X11_SERVER_PROCESS = "saas-x11"
     const val X11_DISPLAY = ":0"
     const val X11_SOCK_DIR = "$INTEGRATED_X11_RUNTIME_DIR/.X11-unix"

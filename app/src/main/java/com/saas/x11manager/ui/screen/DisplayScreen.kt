@@ -29,6 +29,8 @@ fun DisplayScreen(viewModel: HomeViewModel) {
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
 
+    val xkbSeedContainer = containers.firstOrNull { it.isRunning } ?: containers.firstOrNull()
+
     fun refresh() = viewModel.refreshRuntimeState()
 
     LazyColumn(
@@ -79,6 +81,10 @@ fun DisplayScreen(viewModel: HomeViewModel) {
                     DisplayInfoRow("Display", Constants.X11_DISPLAY)
                     DisplayInfoRow("Socket", Constants.X11_SOCK_FILE)
                     DisplayInfoRow("PID", serverPid?.toString() ?: "—")
+                    DisplayInfoRow(
+                        "XKB source",
+                        xkbSeedContainer?.name ?: "No container available"
+                    )
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -91,7 +97,9 @@ fun DisplayScreen(viewModel: HomeViewModel) {
                                     message = null
                                     try {
                                         if (serverStatus != LoaderStatus.Running) {
-                                            val started = X11SessionManager.startIntegratedServer()
+                                            val started = X11SessionManager.startIntegratedServer(
+                                                containerName = xkbSeedContainer?.name
+                                            )
                                             if (started.isFailure) {
                                                 message = started.exceptionOrNull()?.message
                                                     ?: "Integrated X11 server could not start"
@@ -106,7 +114,9 @@ fun DisplayScreen(viewModel: HomeViewModel) {
                                     }
                                 }
                             },
-                            enabled = !busy,
+                            enabled = !busy && (
+                                serverStatus == LoaderStatus.Running || xkbSeedContainer != null
+                            ),
                             modifier = Modifier.weight(1f)
                         ) {
                             if (busy) {
@@ -152,6 +162,14 @@ fun DisplayScreen(viewModel: HomeViewModel) {
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
+
+                    if (serverStatus != LoaderStatus.Running && xkbSeedContainer == null) {
+                        Text(
+                            "Create a container first. Lorie needs XKB keyboard data from a Linux rootfs on its first start.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             }
         }
@@ -186,7 +204,7 @@ fun DisplayScreen(viewModel: HomeViewModel) {
                     val running = containers.filter { it.isRunning }
                     if (running.isEmpty()) {
                         Text(
-                            "No container is running. You can still start the display server here, then start a container from Home.",
+                            "No container is running. The display can still be prepared from an installed container and then reused when its session starts.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -202,7 +220,7 @@ fun DisplayScreen(viewModel: HomeViewModel) {
         item {
             Text(
                 "This experimental branch does not open or wait for the external Termux:X11 APK. " +
-                    "The server process, socket and display Activity are owned by SaaS X11 Manager.",
+                    "The server process, socket, cached XKB data and display Activity are controlled by SaaS X11 Manager.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
