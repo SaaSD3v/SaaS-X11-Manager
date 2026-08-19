@@ -7,11 +7,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Project-owned configuration bridge for the embedded Lorie X11 display.
+ * Project-owned configuration bridge for the embedded X11 display.
  *
- * X11 process lifecycle remains in [X11SessionManager]. This object only owns
- * user-facing display/input configuration and translates it to the bundled
- * Lorie preference contract.
+ * This object owns persisted display/input preferences and only forwards the
+ * subset that the embedded Lorie renderer actually consumes. X11 process and
+ * container lifecycle stay in [X11SessionManager].
  */
 object ScreenManager {
     private const val PREFS_NAME = "screen_manager"
@@ -48,19 +48,15 @@ object ScreenManager {
             filtering = ScreenFiltering.fromWireValue(
                 prefs.getString("filtering", null)
             ),
+            adjustResolution = prefs.getBoolean("adjust_resolution", false),
             stretch = prefs.getBoolean("stretch", false),
-            fullscreen = prefs.getBoolean("fullscreen", false),
-            orientation = ScreenOrientation.fromWireValue(
-                prefs.getString("orientation", null)
-            ),
-            hideCutout = prefs.getBoolean("hide_cutout", false),
             clipboard = prefs.getBoolean("clipboard", true),
             touchMode = ScreenTouchMode.fromWireValue(
                 prefs.getString("touch_mode", null)
             ),
             keepScreenAwake = prefs.getBoolean("keep_screen_awake", false),
-            // v2 intentionally ignores the old preference. The redesigned toolbar
-            // starts disabled after an upgrade and is enabled only by explicit user action.
+            // v2 intentionally ignores the old key so upgraded installations
+            // also start with the redesigned IME toolbar disabled.
             showAdditionalKeyboard = prefs.getBoolean(IME_TOOLBAR_KEY, false)
         ).normalized()
     }
@@ -74,19 +70,24 @@ object ScreenManager {
             .putString("exact_resolution", normalized.exactResolution)
             .putString("custom_resolution", normalized.customResolution)
             .putString("filtering", normalized.filtering.wireValue)
+            .putBoolean("adjust_resolution", normalized.adjustResolution)
             .putBoolean("stretch", normalized.stretch)
-            .putBoolean("fullscreen", normalized.fullscreen)
-            .putString("orientation", normalized.orientation.wireValue)
-            .putBoolean("hide_cutout", normalized.hideCutout)
             .putBoolean("clipboard", normalized.clipboard)
             .putString("touch_mode", normalized.touchMode.wireValue)
             .putBoolean("keep_screen_awake", normalized.keepScreenAwake)
             .putBoolean(IME_TOOLBAR_KEY, normalized.showAdditionalKeyboard)
             .remove(LEGACY_IME_TOOLBAR_KEY)
+            // Standalone-Lorie Activity settings are intentionally retired.
+            .remove("fullscreen")
+            .remove("orientation")
+            .remove("hide_cutout")
             .apply()
     }
 
-    /** Convert our stable project model to the pinned Lorie preference keys. */
+    /**
+     * Only keys read by LorieView itself belong in this payload. Touch mode,
+     * keep-awake, fullscreen and our IME toolbar are implemented by the host UI.
+     */
     internal fun buildPreferencePayload(config: ScreenConfig): Map<String, String> {
         val normalized = config.normalized()
         return linkedMapOf(
@@ -95,14 +96,9 @@ object ScreenManager {
             "displayResolutionExact" to normalized.exactResolution,
             "displayResolutionCustom" to normalized.customResolution,
             "displayFilteringMode" to normalized.filtering.wireValue,
+            "adjustResolution" to normalized.adjustResolution.toString(),
             "displayStretch" to normalized.stretch.toString(),
-            "fullscreen" to normalized.fullscreen.toString(),
-            "forceOrientation" to normalized.orientation.wireValue,
-            "hideCutout" to normalized.hideCutout.toString(),
-            "clipboardEnable" to normalized.clipboard.toString(),
-            "touchMode" to normalized.touchMode.wireValue,
-            "screenIdleTimeout" to if (normalized.keepScreenAwake) "never" else "system",
-            "showAdditionalKbd" to normalized.showAdditionalKeyboard.toString()
+            "clipboardEnable" to normalized.clipboard.toString()
         )
     }
 
@@ -112,17 +108,12 @@ object ScreenManager {
 
         val intent = Intent(LORIE_CHANGE_PREFERENCE).apply {
             component = ComponentName(context.packageName, LORIE_PREFERENCE_RECEIVER)
-            buildPreferencePayload(normalized).forEach { (key, value) ->
-                putExtra(key, value)
-            }
+            buildPreferencePayload(normalized).forEach { (key, value) -> putExtra(key, value) }
         }
         context.sendBroadcast(intent)
     }
 
-    /**
-     * Starts only the embedded X11 server. Rendering stays attached to the
-     * [com.saas.x11manager.ui.screen.EmbeddedX11View] hosted by the Screen tab.
-     */
+    /** Starts only the server; rendering remains hosted by the Screen tab. */
     suspend fun startServer(
         context: Context,
         xkbContainerName: String?,
@@ -150,10 +141,8 @@ data class ScreenConfig(
     val exactResolution: String = "1280x1024",
     val customResolution: String = "1280x1024",
     val filtering: ScreenFiltering = ScreenFiltering.Nearest,
+    val adjustResolution: Boolean = false,
     val stretch: Boolean = false,
-    val fullscreen: Boolean = false,
-    val orientation: ScreenOrientation = ScreenOrientation.Auto,
-    val hideCutout: Boolean = false,
     val clipboard: Boolean = true,
     val touchMode: ScreenTouchMode = ScreenTouchMode.Trackpad,
     val keepScreenAwake: Boolean = false,
@@ -194,19 +183,6 @@ enum class ScreenFiltering(val label: String, val wireValue: String) {
     companion object {
         fun fromWireValue(value: String?): ScreenFiltering =
             entries.firstOrNull { it.wireValue == value } ?: Nearest
-    }
-}
-
-enum class ScreenOrientation(val label: String, val wireValue: String) {
-    Auto("Auto", "auto"),
-    Portrait("Portrait", "portrait"),
-    Landscape("Landscape", "landscape"),
-    ReversePortrait("Reverse portrait", "reverse portrait"),
-    ReverseLandscape("Reverse landscape", "reverse landscape");
-
-    companion object {
-        fun fromWireValue(value: String?): ScreenOrientation =
-            entries.firstOrNull { it.wireValue == value } ?: Auto
     }
 }
 

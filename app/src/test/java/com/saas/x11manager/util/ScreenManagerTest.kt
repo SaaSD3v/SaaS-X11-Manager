@@ -2,26 +2,25 @@ package com.saas.x11manager.util
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ScreenManagerTest {
 
     @Test
-    fun preferencePayloadMatchesEmbeddedLorieContract() {
+    fun preferencePayloadContainsOnlyEmbeddedRendererKeys() {
         val config = ScreenConfig(
             resolutionMode = ScreenResolutionMode.Scaled,
             scalePercent = 140,
             exactResolution = "1920x1080",
             customResolution = "1600x900",
             filtering = ScreenFiltering.Bilinear,
+            adjustResolution = true,
             stretch = true,
-            fullscreen = true,
-            orientation = ScreenOrientation.Landscape,
-            hideCutout = true,
             clipboard = false,
             touchMode = ScreenTouchMode.DirectTouch,
             keepScreenAwake = true,
-            showAdditionalKeyboard = false
+            showAdditionalKeyboard = true
         )
 
         val payload = ScreenManager.buildPreferencePayload(config)
@@ -31,22 +30,46 @@ class ScreenManagerTest {
         assertEquals("1920x1080", payload["displayResolutionExact"])
         assertEquals("1600x900", payload["displayResolutionCustom"])
         assertEquals("bilinear", payload["displayFilteringMode"])
+        assertEquals("true", payload["adjustResolution"])
         assertEquals("true", payload["displayStretch"])
-        assertEquals("true", payload["fullscreen"])
-        assertEquals("landscape", payload["forceOrientation"])
-        assertEquals("true", payload["hideCutout"])
         assertEquals("false", payload["clipboardEnable"])
-        assertEquals("3", payload["touchMode"])
-        assertEquals("never", payload["screenIdleTimeout"])
-        assertEquals("false", payload["showAdditionalKbd"])
+
+        assertFalse(payload.containsKey("fullscreen"))
+        assertFalse(payload.containsKey("forceOrientation"))
+        assertFalse(payload.containsKey("hideCutout"))
+        assertFalse(payload.containsKey("touchMode"))
+        assertFalse(payload.containsKey("screenIdleTimeout"))
+        assertFalse(payload.containsKey("showAdditionalKbd"))
     }
 
     @Test
-    fun redesignedImeToolbarStartsDisabled() {
+    fun hostOwnedInputSettingsDoNotLeakIntoLoriePayload() {
         val defaults = ScreenConfig()
+        val enabledHostControls = defaults.copy(
+            touchMode = ScreenTouchMode.DirectTouch,
+            keepScreenAwake = true,
+            showAdditionalKeyboard = true
+        )
 
         assertFalse(defaults.showAdditionalKeyboard)
-        assertEquals("false", ScreenManager.buildPreferencePayload(defaults)["showAdditionalKbd"])
+        assertEquals(
+            ScreenManager.buildPreferencePayload(defaults),
+            ScreenManager.buildPreferencePayload(enabledHostControls)
+        )
+    }
+
+    @Test
+    fun realLorieAdjustResolutionSettingIsForwarded() {
+        assertEquals(
+            "false",
+            ScreenManager.buildPreferencePayload(ScreenConfig())["adjustResolution"]
+        )
+        assertEquals(
+            "true",
+            ScreenManager.buildPreferencePayload(
+                ScreenConfig(adjustResolution = true)
+            )["adjustResolution"]
+        )
     }
 
     @Test
@@ -60,5 +83,6 @@ class ScreenManagerTest {
         assertEquals(300, normalized.scalePercent)
         assertEquals("1280x1024", normalized.exactResolution)
         assertEquals("1280x1024", normalized.customResolution)
+        assertTrue(normalized.clipboard)
     }
 }
