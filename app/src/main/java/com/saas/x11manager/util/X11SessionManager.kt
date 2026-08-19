@@ -1,8 +1,6 @@
 package com.saas.x11manager.util
 
-import android.content.Intent
 import com.saas.x11manager.X11Application
-import com.termux.x11.MainActivity
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -10,14 +8,7 @@ import kotlinx.coroutines.withContext
 
 enum class LoaderStatus { Running, Stopped }
 
-/**
- * Experimental integrated X11 runtime.
- *
- * The public LoaderStatus/getLoader* names are intentionally kept for this first
- * spike so the existing ViewModels do not need an unrelated state-model refactor.
- * They now describe the SaaS-owned embedded Lorie server, not an external
- * Termux:X11 loader process.
- */
+/** Owns the project X11 server process, socket, XKB bootstrap and container session startup. */
 object X11SessionManager {
 
     private data class ServerLease(
@@ -149,8 +140,7 @@ object X11SessionManager {
         }
 
         logger?.e(
-            "[-] XKB configuration was not found in $containerName; " +
-                "expected /usr/share/X11/xkb"
+            "[-] XKB configuration was not found in $containerName; expected /usr/share/X11/xkb"
         )
         return false
     }
@@ -280,10 +270,6 @@ object X11SessionManager {
         logger: ContainerLogger? = null
     ): Result<Int> = startIntegratedServerTracked(containerName, logger).map { it.pid }
 
-    // Compatibility name used by older code paths in this spike.
-    suspend fun startLoader(logger: ContainerLogger? = null): Result<Int> =
-        startIntegratedServer(logger = logger)
-
     private suspend fun rollbackServer(lease: ServerLease, logger: ContainerLogger? = null) {
         if (lease.reused) return
         killPids(listOf(lease.pid))
@@ -303,25 +289,6 @@ object X11SessionManager {
                 true
             } catch (e: Exception) {
                 logger?.e("[-] Could not stop integrated X11 server: ${e.message}")
-                false
-            }
-        }
-
-    // Compatibility name used by the current HomeViewModel.
-    suspend fun stopLoader(logger: ContainerLogger? = null): Boolean =
-        stopIntegratedServer(logger)
-
-    suspend fun openIntegratedDisplay(logger: ContainerLogger? = null): Boolean =
-        withContext(Dispatchers.Main) {
-            try {
-                val intent = Intent(X11Application.instance, MainActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                }
-                X11Application.instance.startActivity(intent)
-                logger?.i("[+] Opened integrated X11 display")
-                true
-            } catch (e: Exception) {
-                logger?.e("[-] Could not open integrated X11 display: ${e.message}")
                 false
             }
         }
@@ -432,16 +399,12 @@ object X11SessionManager {
                 logger?.w("[!] Container command channel is still becoming ready")
             }
 
-            logger?.i("[*] Opening integrated display...")
-            if (!openIntegratedDisplay(logger)) {
-                logger?.w("[!] Integrated server is running, but its display Activity could not be opened")
-            }
-
+            logger?.i("[+] X11 output is available in the Screen tab")
             logger?.i("")
             if (runtimeStatus == ContainerStatus.RUNNING && commandReady) {
                 logger?.i("[+] Integrated X11 session started")
             } else {
-                logger?.w("[!] Integrated display opened while container startup is still settling")
+                logger?.w("[!] X11 server is ready while container startup is still settling")
             }
         } catch (e: Exception) {
             if (!containerStartAccepted) {
