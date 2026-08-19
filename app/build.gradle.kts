@@ -79,6 +79,9 @@ android {
 }
 
 dependencies {
+    // Local compatibility wrapper around the pinned Termux:X11/Lorie sources.
+    implementation(project(":embedded-lorie"))
+
     // Compose BOM
     implementation(platform("androidx.compose:compose-bom:2024.02.00"))
     implementation("androidx.compose.ui:ui")

@@ -4,10 +4,6 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
@@ -21,25 +17,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.launch
+import com.saas.x11manager.ui.screen.DisplayScreen
 import com.saas.x11manager.ui.screen.EditContainerScreen
 import com.saas.x11manager.ui.screen.HomeScreen
 import com.saas.x11manager.ui.screen.HomeViewModel
 import com.saas.x11manager.ui.screen.RequirementsScreen
+import kotlinx.coroutines.launch
 
 enum class TabItem(val title: String, val icon: ImageVector) {
     Home("Home", Icons.Default.Home),
+    Display("Display", Icons.Default.DisplaySettings),
     Requirements("Requirements", Icons.Default.FactCheck)
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun AppNavigation(viewModel: HomeViewModel) {
-    val context = LocalContext.current
     val tabs = remember { TabItem.entries }
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { tabs.size })
     val selectedTab = tabs[pagerState.currentPage]
@@ -65,7 +61,11 @@ fun AppNavigation(viewModel: HomeViewModel) {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Computer,
+                                imageVector = when (selectedTab) {
+                                    TabItem.Home -> Icons.Default.Computer
+                                    TabItem.Display -> Icons.Default.DisplaySettings
+                                    TabItem.Requirements -> Icons.Default.FactCheck
+                                },
                                 contentDescription = null,
                                 modifier = Modifier.padding(end = 8.dp).size(24.dp)
                             )
@@ -99,6 +99,7 @@ fun AppNavigation(viewModel: HomeViewModel) {
             ) { page ->
                 when (tabs[page]) {
                     TabItem.Home -> HomeScreen(viewModel = viewModel)
+                    TabItem.Display -> DisplayScreen(viewModel = viewModel)
                     TabItem.Requirements -> RequirementsScreen(viewModel = viewModel)
                 }
             }
@@ -161,7 +162,7 @@ private fun MainBottomBar(
                         val isSelected = selectedTab == tab
                         val contentColor by animateColorAsState(
                             targetValue = if (isSelected) MaterialTheme.colorScheme.primary
-                                          else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                             label = "IconColor"
                         )
 

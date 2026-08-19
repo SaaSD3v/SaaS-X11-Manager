@@ -6,11 +6,10 @@ import kotlinx.coroutines.withContext
 
 /**
  * Owns the minimum DroidSpaces container.config changes required by the
- * manual Termux:X11 loader path used by SaaS-X11-Manager.
+ * integrated SaaS X11 backend.
  *
- * This intentionally does not rewrite unrelated DroidSpaces settings. Existing
- * bind mounts are preserved, while any mount targeting /usr/.X11-unix is
- * replaced by the Termux:X11 host socket directory used by this app.
+ * Existing bind mounts are preserved, while any mount targeting
+ * /usr/.X11-unix is replaced by the host socket directory owned by this app.
  */
 object ContainerConfigManager {
 
@@ -37,7 +36,7 @@ object ContainerConfigManager {
             val originalText = original.joinToString("\n") + "\n"
             val updatedText = updated.joinToString("\n") + "\n"
             if (updatedText == originalText) {
-                logger?.i("[+] Manual X11 container config already ready")
+                logger?.i("[+] Integrated X11 container config already ready")
                 return@withContext true
             }
 
@@ -50,11 +49,11 @@ object ContainerConfigManager {
 
             if (!write.isSuccess) {
                 Shell.cmd("rm -f ${shellQuote(tempPath)} 2>/dev/null").exec()
-                logger?.e("[-] Failed to update manual X11 container config")
+                logger?.e("[-] Failed to update integrated X11 container config")
                 return@withContext false
             }
 
-            logger?.i("[+] Manual X11 container config ready")
+            logger?.i("[+] Integrated X11 container config ready")
             true
         } catch (e: Exception) {
             logger?.e("[-] X11 config error: ${e.message}")
@@ -75,6 +74,8 @@ object ContainerConfigManager {
             val key = trimmed.substringBefore('=').trim()
             when (key) {
                 "enable_termux_x11" -> {
+                    // DroidSpaces' own Termux:X11 integration stays disabled: this
+                    // app provides and owns the X11 socket itself.
                     x11FlagFound = true
                     updated[index] = "enable_termux_x11=0"
                 }
