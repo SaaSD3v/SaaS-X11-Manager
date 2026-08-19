@@ -203,4 +203,5 @@ object GraphicSessionInstallPlans {
         session: GraphicSession
     ): GraphicSessionInstallPlan? =
         plans.firstOrNull { it.platform == platform && it.session == session }
+            ?.let(AptInstallRecommendationOverride::apply)
 }

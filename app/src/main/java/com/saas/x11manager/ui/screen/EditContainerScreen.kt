@@ -21,6 +21,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.saas.x11manager.ui.component.TerminalDialog
+import com.saas.x11manager.util.AptInstallRecommendationOverride
 import com.saas.x11manager.util.ContainerPlatform
 import com.saas.x11manager.util.ContainerStatus
 import com.saas.x11manager.util.GraphicSession
@@ -63,6 +64,40 @@ fun EditContainerScreen(
     var installedActionSession by remember { mutableStateOf<GraphicSession?>(null) }
     var selectingInstalledSession by remember { mutableStateOf<GraphicSession?>(null) }
     var quickStartingSelectedSession by remember { mutableStateOf(false) }
+    var aptRecommendationSession by remember { mutableStateOf<GraphicSession?>(null) }
+    var activeAptRecommendationOverrideSession by remember { mutableStateOf<GraphicSession?>(null) }
+
+    fun requestSessionInstall(session: GraphicSession) {
+        if (viewModel.containerCapabilities?.platform == ContainerPlatform.UBUNTU) {
+            aptRecommendationSession = session
+        } else {
+            viewModel.configureWizardSession(session)
+        }
+    }
+
+    fun startAptInstall(session: GraphicSession, installRecommendedPackages: Boolean) {
+        AptInstallRecommendationOverride.set(session, installRecommendedPackages)
+        activeAptRecommendationOverrideSession = session
+        aptRecommendationSession = null
+        viewModel.configureWizardSession(session)
+    }
+
+    LaunchedEffect(isInstalling, activeAptRecommendationOverrideSession) {
+        val session = activeAptRecommendationOverrideSession
+        if (session != null && !isInstalling) {
+            AptInstallRecommendationOverride.clear(session)
+            activeAptRecommendationOverrideSession = null
+        }
+    }
+
+    DisposableEffect(activeAptRecommendationOverrideSession) {
+        val session = activeAptRecommendationOverrideSession
+        onDispose {
+            if (session != null) {
+                AptInstallRecommendationOverride.clear(session)
+            }
+        }
+    }
 
     LaunchedEffect(name, status, containerName) {
         if (!entryRunningWarningHandled && name == containerName) {
@@ -196,6 +231,65 @@ fun EditContainerScreen(
             )
         }
 
+        aptRecommendationSession != null -> {
+            val session = requireNotNull(aptRecommendationSession)
+            val selectedInit = viewModel.pendingWizardInitSystem ?: initSystem
+            AlertDialog(
+                onDismissRequest = {
+                    aptRecommendationSession = null
+                    viewModel.selectWizardInitSystem(selectedInit)
+                },
+                title = { Text("APT package options") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Choose how APT should install ${session.label}.")
+                        Text(
+                            "Recommended lets APT include packages marked as recommended by the selected packages. " +
+                                "This can install a larger desktop stack."
+                        )
+                        Text(
+                            "No recommends installs the explicit session plan and required dependencies only."
+                        )
+                        Text("This choice applies only to this installation or reinstall.")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            aptRecommendationSession = null
+                            viewModel.selectWizardInitSystem(selectedInit)
+                        }
+                    ) {
+                        Text("Back")
+                    }
+                },
+                confirmButton = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                startAptInstall(
+                                    session = session,
+                                    installRecommendedPackages = false
+                                )
+                            }
+                        ) {
+                            Text("No recommends")
+                        }
+                        Button(
+                            onClick = {
+                                startAptInstall(
+                                    session = session,
+                                    installRecommendedPackages = true
+                                )
+                            }
+                        ) {
+                            Text("Recommended")
+                        }
+                    }
+                }
+            )
+        }
+
         installedActionSession != null -> {
             val session = requireNotNull(installedActionSession)
             val selectedInit = viewModel.pendingWizardInitSystem ?: initSystem
@@ -227,7 +321,7 @@ fun EditContainerScreen(
                         OutlinedButton(
                             onClick = {
                                 installedActionSession = null
-                                viewModel.configureWizardSession(session)
+                                requestSessionInstall(session)
                             }
                         ) {
                             Text("Reinstall")
@@ -382,7 +476,7 @@ fun EditContainerScreen(
                                 viewModel.dismissConfigurationWizard()
                                 installedActionSession = session
                             } else {
-                                viewModel.configureWizardSession(session)
+                                requestSessionInstall(session)
                             }
                         }
                     )

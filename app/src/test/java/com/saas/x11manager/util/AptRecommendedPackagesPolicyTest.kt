@@ -36,6 +36,51 @@ class AptRecommendedPackagesPolicyTest {
     }
 
     @Test
+    fun explicitAptOverrideCanInstallRecommendedPackagesForOneOperation() {
+        val session = GraphicSession.QTILE
+        AptInstallRecommendationOverride.set(session, installRecommendedPackages = true)
+        try {
+            val plan = requireNotNull(
+                GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, session)
+            )
+            assertTrue(plan.installRecommendedPackages)
+
+            val installCommand = AdditionalGraphicSessionInstaller.stepsFor(plan)
+                .single { it.command.contains("apt-get install -y") }
+                .command
+            assertTrue(
+                Regex("""(^|\s)--install-recommends(\s|$)""").containsMatchIn(installCommand)
+            )
+            assertFalse(installCommand.contains("--no-install-recommends"))
+        } finally {
+            AptInstallRecommendationOverride.clear(session)
+        }
+
+        val defaultPlan = requireNotNull(
+            GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, session)
+        )
+        assertFalse(defaultPlan.installRecommendedPackages)
+    }
+
+    @Test
+    fun aptOverrideNeverChangesAlpinePackagePolicy() {
+        val session = GraphicSession.OPENBOX
+        AptInstallRecommendationOverride.set(session, installRecommendedPackages = false)
+        try {
+            val alpinePlan = requireNotNull(
+                GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, session)
+            )
+            assertTrue(alpinePlan.installRecommendedPackages)
+            val installCommand = GraphicSessionInstaller.stepsFor(alpinePlan)
+                .single { it.command.startsWith("apk add ") }
+                .command
+            assertFalse(installCommand.contains("recommends"))
+        } finally {
+            AptInstallRecommendationOverride.clear(session)
+        }
+    }
+
+    @Test
     fun desktopPlansKnownToRecommendAudioRemainSuppressed() {
         setOf(
             GraphicSession.LXQT,
