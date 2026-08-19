@@ -22,9 +22,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saas.x11manager.ui.screen.DisplayScreen
 import com.saas.x11manager.ui.screen.EditContainerScreen
-import com.saas.x11manager.ui.screen.FullscreenDisplayScreen
 import com.saas.x11manager.ui.screen.HomeScreen
 import com.saas.x11manager.ui.screen.HomeViewModel
+import com.saas.x11manager.ui.screen.ManagedFullscreenDisplayScreen
 import com.saas.x11manager.ui.screen.RequirementsScreen
 import kotlinx.coroutines.launch
 
@@ -57,7 +57,7 @@ fun AppNavigation(viewModel: HomeViewModel) {
         }
 
         displayFullscreen -> {
-            FullscreenDisplayScreen(
+            ManagedFullscreenDisplayScreen(
                 viewModel = viewModel,
                 onExitFullscreen = { displayFullscreen = false }
             )
@@ -69,9 +69,7 @@ fun AppNavigation(viewModel: HomeViewModel) {
                 topBar = {
                     TopAppBar(
                         title = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
                                     imageVector = when (selectedTab) {
                                         TabItem.Home -> Icons.Default.Computer
