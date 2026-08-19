@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.termux.x11.EmbeddedDisplayHost
+import com.termux.x11.EmbeddedTouchInputController
 import com.termux.x11.LoriePreferences
 import com.termux.x11.LorieView
 import com.termux.x11.extrakeys.ExtraKeyButton
@@ -57,6 +58,8 @@ internal fun EmbeddedX11Surface(
         modifier = modifier,
         factory = { context ->
             LorieView(context).apply {
+                val touchInput = EmbeddedTouchInputController(this)
+
                 setZOrderOnTop(false)
                 setZOrderMediaOverlay(false)
                 isFocusable = true
@@ -68,21 +71,26 @@ internal fun EmbeddedX11Surface(
                         screenHeight,
                         inputTransform
                     )
+                    touchInput.updateInputTransform(
+                        screenWidth,
+                        screenHeight,
+                        inputTransform
+                    )
                     onConnectionChanged(connected())
                 }
-                setOnTouchListener { _, event ->
-                    EmbeddedDisplayHost.handleMotion(this, event)
-                }
-                setOnHoverListener { _, event ->
-                    EmbeddedDisplayHost.handleMotion(this, event)
-                }
-                setOnGenericMotionListener { _, event ->
-                    EmbeddedDisplayHost.handleMotion(this, event)
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    setOnCapturedPointerListener { _, event ->
+
+                fun routeMotion(event: android.view.MotionEvent): Boolean =
+                    if (touchInput.handles(event)) {
+                        touchInput.handle(event)
+                    } else {
                         EmbeddedDisplayHost.handleMotion(this, event)
                     }
+
+                setOnTouchListener { _, event -> routeMotion(event) }
+                setOnHoverListener { _, event -> routeMotion(event) }
+                setOnGenericMotionListener { _, event -> routeMotion(event) }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    setOnCapturedPointerListener { _, event -> routeMotion(event) }
                 }
                 setOnKeyListener { _, _, event ->
                     connected() && EmbeddedDisplayHost.handleKey(this, event)
