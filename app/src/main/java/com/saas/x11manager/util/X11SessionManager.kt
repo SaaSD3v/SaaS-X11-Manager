@@ -1,5 +1,8 @@
 package com.saas.x11manager.util
 
+import android.content.Intent
+import com.saas.x11manager.X11Application
+import com.termux.x11.MainActivity
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -7,15 +10,20 @@ import kotlinx.coroutines.withContext
 
 enum class LoaderStatus { Running, Stopped }
 
+/**
+ * Experimental integrated X11 runtime.
+ *
+ * The public LoaderStatus/getLoader* names are intentionally kept for this first
+ * spike so the existing ViewModels do not need an unrelated state-model refactor.
+ * They now describe the SaaS-owned embedded Lorie server, not an external
+ * Termux:X11 loader process.
+ */
 object X11SessionManager {
 
-    private data class LoaderLease(
-        val pid: Int?,
-        val ownedPids: List<Int>,
+    private data class ServerLease(
+        val pid: Int,
         val reused: Boolean
     )
-
-    private var ownedLoaderPids: Set<Int> = emptySet()
 
     private fun parsePids(lines: List<String>): List<Int> = lines
         .flatMap { it.trim().split(Regex("\\s+")) }
@@ -57,20 +65,34 @@ object X11SessionManager {
         }
     }
 
-    private fun getLiveLoaderPids(): List<Int> =
-        getProcessPids("termux-x11").filter(::isPidAlive).distinct()
+    private fun getLiveServerPids(): List<Int> =
+        getProcessPids(Constants.X11_SERVER_PROCESS)
+            .filter(::isPidAlive)
+            .distinct()
 
     private fun hasX0Socket(): Boolean {
         return try {
-            Shell.cmd("test -S '${Constants.X11_SOCK_FILE}'").exec().isSuccess
+            Shell.cmd("test -S ${shellQuote(Constants.X11_SOCK_FILE)}").exec().isSuccess
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun prepareRuntimeDirectory(): Boolean {
+        return try {
+            Shell.cmd(
+                "mkdir -p ${shellQuote(Constants.X11_SOCK_DIR)} && " +
+                    "chmod 1777 ${shellQuote(Constants.INTEGRATED_X11_RUNTIME_DIR)} " +
+                    "${shellQuote(Constants.X11_SOCK_DIR)}"
+            ).exec().isSuccess
         } catch (_: Exception) {
             false
         }
     }
 
     private fun clearX11SocketFiles() {
-        Shell.cmd("rm -f '${Constants.X11_SOCK_FILE}' 2>/dev/null").exec()
-        Shell.cmd("rm -f '${Constants.TERMUX_PREFIX}/tmp/.X0-lock' 2>/dev/null").exec()
+        Shell.cmd("rm -f ${shellQuote(Constants.X11_SOCK_FILE)} 2>/dev/null").exec()
+        Shell.cmd("rm -f ${shellQuote(Constants.X11_LOCK_FILE)} 2>/dev/null").exec()
     }
 
     private fun killPids(pids: Collection<Int>) {
@@ -80,17 +102,19 @@ object X11SessionManager {
         }
     }
 
-    private fun aliveOwnedLoaderPids(candidatePids: Collection<Int>): List<Int> {
-        return ownedLoaderPids
-            .filter { it in candidatePids && isPidAlive(it) }
-            .distinct()
-    }
-
     private fun shellQuote(value: String): String =
         "'" + value.replace("'", "'\\''") + "'"
 
+    internal fun buildIntegratedServerCommand(apkPath: String): String =
+        "TMPDIR=${shellQuote(Constants.INTEGRATED_X11_RUNTIME_DIR)} " +
+            "CLASSPATH=${shellQuote(apkPath)} " +
+            "/system/bin/app_process -Xnoimage-dex2oat / " +
+            "--nice-name=${Constants.X11_SERVER_PROCESS} " +
+            "com.termux.x11.CmdEntryPoint ${Constants.X11_DISPLAY} " +
+            ">${shellQuote(Constants.X11_LOG_FILE)} 2>&1 & echo ${'$'}!"
+
     suspend fun getLoaderStatus(): LoaderStatus = withContext(Dispatchers.IO) {
-        if (hasX0Socket() && getLiveLoaderPids().isNotEmpty()) {
+        if (hasX0Socket() && getLiveServerPids().isNotEmpty()) {
             LoaderStatus.Running
         } else {
             LoaderStatus.Stopped
@@ -98,160 +122,124 @@ object X11SessionManager {
     }
 
     suspend fun getLoaderPid(): Int? = withContext(Dispatchers.IO) {
-        getLiveLoaderPids().firstOrNull()
+        getLiveServerPids().firstOrNull()
     }
 
-    private suspend fun startLoaderTracked(
+    private suspend fun startIntegratedServerTracked(
         logger: ContainerLogger? = null
-    ): Result<LoaderLease> = withContext(Dispatchers.IO) {
-        var launchAttempted = false
-        var pidsBeforeLaunch = emptySet<Int>()
-        var capturedPid: Int? = null
-
+    ): Result<ServerLease> = withContext(Dispatchers.IO) {
         try {
-            logger?.i("[*] Preparing X11 environment...")
+            val liveBefore = getLiveServerPids()
+            if (hasX0Socket() && liveBefore.isNotEmpty()) {
+                val pid = liveBefore.first()
+                logger?.i("[+] Reusing integrated X11 server ${Constants.X11_DISPLAY} (PID=$pid)")
+                return@withContext Result.success(ServerLease(pid = pid, reused = true))
+            }
 
-            val socketExists = hasX0Socket()
-            val livePids = getLiveLoaderPids()
-            if (socketExists && livePids.isNotEmpty()) {
-                val existingPid = livePids.first()
-                logger?.i("[+] Reusing X11 loader for :0 (PID=$existingPid)")
-                return@withContext Result.success(
-                    LoaderLease(pid = existingPid, ownedPids = emptyList(), reused = true)
+            if (liveBefore.isNotEmpty()) {
+                logger?.w("[!] Stale SaaS X11 process found without X0 socket; restarting it")
+                killPids(liveBefore)
+            }
+            if (hasX0Socket()) {
+                logger?.w("[!] Stale integrated X0 socket found; replacing it")
+            }
+            clearX11SocketFiles()
+
+            if (!prepareRuntimeDirectory()) {
+                return@withContext Result.failure(
+                    IllegalStateException("Could not prepare integrated X11 runtime directory")
                 )
             }
 
-            if (socketExists) {
-                logger?.w("[!] Stale X0 socket found without a live termux-x11 process")
-                clearX11SocketFiles()
+            val apkPath = X11Application.instance.applicationInfo.sourceDir
+            if (apkPath.isNullOrBlank()) {
+                return@withContext Result.failure(
+                    IllegalStateException("Could not resolve SaaS X11 Manager APK path")
+                )
             }
 
-            val existingProcessPids = getLiveLoaderPids()
-            val staleOwnedPids = aliveOwnedLoaderPids(existingProcessPids)
-            if (staleOwnedPids.isNotEmpty()) {
-                killPids(staleOwnedPids)
-                logger?.i("[+] Stopped stale app-owned X11 loader PIDs=${staleOwnedPids.joinToString(",")}")
-            }
-            ownedLoaderPids = emptySet()
-
-            clearX11SocketFiles()
-            Shell.cmd("mkdir -p '${Constants.X11_SOCK_DIR}' 2>/dev/null").exec()
-
-            pidsBeforeLaunch = getLiveLoaderPids().toSet()
-            logger?.i("[*] Starting X11 loader...")
-
-            val launch = Shell.cmd(
-                "CLASSPATH=${Constants.LOADER_APK} /system/bin/app_process " +
-                    "-Xnoimage-dex2oat / " +
-                    "--nice-name=termux-x11 com.termux.x11.Loader :0 " +
-                    ">/dev/null 2>&1 & echo ${'$'}!"
-            ).exec()
-            launchAttempted = true
-            capturedPid = launch.out.asReversed()
+            logger?.i("[*] Starting integrated X11 server ${Constants.X11_DISPLAY}...")
+            val launch = Shell.cmd(buildIntegratedServerCommand(apkPath)).exec()
+            val capturedPid = launch.out.asReversed()
                 .firstNotNullOfOrNull { it.trim().toIntOrNull() }
 
-            logger?.i("[*] Waiting for live Loader + X0 socket (10s)...")
-            var wait = 0
-            var loaderReady = false
-            while (wait < 10) {
-                delay(1000)
-                wait++
-                if (hasX0Socket() && getLiveLoaderPids().isNotEmpty()) {
-                    loaderReady = true
-                    break
+            val deadline = System.nanoTime() + 10_000_000_000L
+            while (System.nanoTime() < deadline) {
+                val live = getLiveServerPids()
+                if (hasX0Socket() && live.isNotEmpty()) {
+                    val pid = when {
+                        capturedPid != null && capturedPid in live -> capturedPid
+                        else -> live.first()
+                    }
+                    logger?.i("[+] Integrated X11 server ready (PID=$pid)")
+                    logger?.i("[+] X11 socket: ${Constants.X11_SOCK_FILE}")
+                    return@withContext Result.success(ServerLease(pid = pid, reused = false))
                 }
+                delay(250)
             }
 
-            val currentPids = getLiveLoaderPids()
-            val ownedPids = currentPids.filter { it !in pidsBeforeLaunch }.toMutableList()
-            if (capturedPid != null && isPidAlive(capturedPid) && capturedPid !in ownedPids) {
-                ownedPids.add(capturedPid)
-            }
-
-            if (loaderReady) {
-                val distinctOwnedPids = ownedPids.distinct()
-                if (distinctOwnedPids.isEmpty()) {
-                    val reusedPid = currentPids.first()
-                    logger?.i("[+] Reusing X11 loader for :0 (PID=$reusedPid)")
-                    return@withContext Result.success(
-                        LoaderLease(pid = reusedPid, ownedPids = emptyList(), reused = true)
-                    )
-                }
-
-                val pid = when {
-                    capturedPid != null && isPidAlive(capturedPid) -> capturedPid
-                    else -> distinctOwnedPids.first()
-                }
-
-                ownedLoaderPids = distinctOwnedPids.toSet()
-                logger?.i("[+] X11 loader active for :0 (PID=$pid)")
-                Result.success(
-                    LoaderLease(
-                        pid = pid,
-                        ownedPids = distinctOwnedPids,
-                        reused = false
-                    )
+            val liveAfter = getLiveServerPids()
+            killPids(liveAfter)
+            clearX11SocketFiles()
+            Result.failure(
+                IllegalStateException(
+                    "Integrated X11 server did not create ${Constants.X11_SOCK_FILE}"
                 )
-            } else {
-                killPids(ownedPids)
-                ownedLoaderPids = emptySet()
-                clearX11SocketFiles()
-                logger?.e("[-] Live Loader + X0 socket not ready")
-                Result.failure(Exception("Live Loader + X0 socket not ready"))
-            }
+            )
         } catch (e: Exception) {
-            if (launchAttempted) {
-                val currentPids = getLiveLoaderPids()
-                val ownedPids = currentPids.filter { it !in pidsBeforeLaunch }.toMutableList()
-                if (capturedPid != null && isPidAlive(capturedPid) && capturedPid !in ownedPids) {
-                    ownedPids.add(capturedPid)
-                }
-                killPids(ownedPids)
-                ownedLoaderPids = emptySet()
-                clearX11SocketFiles()
-            }
-            logger?.e("[-] Loader error: ${e.message}")
+            logger?.e("[-] Integrated X11 server error: ${e.message}")
             Result.failure(e)
         }
     }
 
-    suspend fun startLoader(logger: ContainerLogger? = null): Result<Int> {
-        return startLoaderTracked(logger).map { it.pid ?: 0 }
-    }
+    suspend fun startIntegratedServer(logger: ContainerLogger? = null): Result<Int> =
+        startIntegratedServerTracked(logger).map { it.pid }
 
-    private suspend fun rollbackLoader(lease: LoaderLease, logger: ContainerLogger? = null) {
+    // Compatibility name used by the current HomeViewModel.
+    suspend fun startLoader(logger: ContainerLogger? = null): Result<Int> =
+        startIntegratedServer(logger)
+
+    private suspend fun rollbackServer(lease: ServerLease, logger: ContainerLogger? = null) {
         if (lease.reused) return
-
-        killPids(lease.ownedPids)
-        ownedLoaderPids = ownedLoaderPids - lease.ownedPids.toSet()
+        killPids(listOf(lease.pid))
         clearX11SocketFiles()
-        logger?.i("[+] Rolled back X11 loader from failed session start")
+        logger?.i("[+] Rolled back integrated X11 server after failed session start")
     }
 
-    suspend fun stopLoader(logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val livePids = getLiveLoaderPids()
-            val rememberedPids = aliveOwnedLoaderPids(livePids)
-            val targets = if (hasX0Socket()) livePids else rememberedPids
-
-            if (targets.isNotEmpty()) {
-                killPids(targets)
-                logger?.i("[+] Stopped X11 loader (PIDs=${targets.joinToString(",")})")
-            } else if (hasX0Socket()) {
-                logger?.w("[!] X0 socket exists without a live termux-x11 process")
+    suspend fun stopIntegratedServer(logger: ContainerLogger? = null): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                val livePids = getLiveServerPids()
+                if (livePids.isNotEmpty()) {
+                    killPids(livePids)
+                    logger?.i("[+] Stopped integrated X11 server (PIDs=${livePids.joinToString(",")})")
+                }
+                clearX11SocketFiles()
+                true
+            } catch (e: Exception) {
+                logger?.e("[-] Could not stop integrated X11 server: ${e.message}")
+                false
             }
+        }
 
-            ownedLoaderPids = emptySet()
-            clearX11SocketFiles()
-            true
-        } catch (_: Exception) { false }
-    }
+    // Compatibility name used by the current HomeViewModel.
+    suspend fun stopLoader(logger: ContainerLogger? = null): Boolean =
+        stopIntegratedServer(logger)
 
-    suspend fun openTermuxX11(): Boolean = withContext(Dispatchers.IO) {
-        try {
-            Shell.cmd("am start -n ${Constants.TERMUX_X11_PACKAGE}/.MainActivity 2>/dev/null").exec().isSuccess
-        } catch (_: Exception) { false }
-    }
+    suspend fun openIntegratedDisplay(logger: ContainerLogger? = null): Boolean =
+        withContext(Dispatchers.Main) {
+            try {
+                val intent = Intent(X11Application.instance, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                }
+                X11Application.instance.startActivity(intent)
+                logger?.i("[+] Opened integrated X11 display")
+                true
+            } catch (e: Exception) {
+                logger?.e("[-] Could not open integrated X11 display: ${e.message}")
+                false
+            }
+        }
 
     private suspend fun waitForContainerRuntime(
         containerName: String,
@@ -299,12 +287,11 @@ object X11SessionManager {
         containerName: String,
         logger: ContainerLogger? = null
     ) = withContext(Dispatchers.IO) {
-        var loaderLease: LoaderLease? = null
+        var serverLease: ServerLease? = null
         var containerStartAccepted = false
-        var preserveLoaderOnUncertainState = false
 
         try {
-            logger?.i("--- Starting Session ---")
+            logger?.i("--- Starting Integrated X11 Session ---")
             logger?.i("")
 
             logger?.i("[*] Preparing container X11 config...")
@@ -313,15 +300,15 @@ object X11SessionManager {
                 logger?.e("[-] Container X11 config is not ready")
                 return@withContext
             }
-            logger?.i("")
 
-            val loaderResult = startLoaderTracked(logger)
-            if (loaderResult.isFailure) {
-                logger?.e("[-] Loader failed: ${loaderResult.exceptionOrNull()?.message}")
+            logger?.i("")
+            val serverResult = startIntegratedServerTracked(logger)
+            if (serverResult.isFailure) {
+                logger?.e("[-] Integrated X11 failed: ${serverResult.exceptionOrNull()?.message}")
                 return@withContext
             }
-            val activeLoaderLease = loaderResult.getOrThrow()
-            loaderLease = activeLoaderLease
+            val activeServer = serverResult.getOrThrow()
+            serverLease = activeServer
 
             logger?.i("")
             logger?.i("[*] Starting container...")
@@ -331,47 +318,25 @@ object X11SessionManager {
             } else {
                 val (statusAfterFailure, _) =
                     ContainerManager.getContainerRuntimeStatePublic(containerName)
-
-                when (statusAfterFailure) {
-                    ContainerStatus.RUNNING -> {
-                        containerStartAccepted = true
-                        logger?.w("[!] Start command reported failure, but container is running")
-                    }
-                    ContainerStatus.STOPPED -> {
-                        logger?.e("[-] Container start failed and runtime is stopped")
-                        rollbackLoader(activeLoaderLease, logger)
-                        return@withContext
-                    }
-                    ContainerStatus.UNKNOWN -> {
-                        preserveLoaderOnUncertainState = true
-                        logger?.w(
-                            "[!] Start command reported failure and runtime status is unknown; " +
-                                "preserving X0 while rechecking"
-                        )
-                    }
+                if (statusAfterFailure == ContainerStatus.RUNNING) {
+                    containerStartAccepted = true
+                    logger?.w("[!] Start command reported failure, but container is running")
+                } else if (statusAfterFailure == ContainerStatus.STOPPED) {
+                    logger?.e("[-] Container start failed and runtime is stopped")
+                    rollbackServer(activeServer, logger)
+                    return@withContext
                 }
             }
 
             logger?.i("[*] Confirming container runtime...")
             val (runtimeStatus, pid) = waitForContainerRuntime(containerName)
             when (runtimeStatus) {
-                ContainerStatus.RUNNING -> {
-                    containerStartAccepted = true
-                    preserveLoaderOnUncertainState = false
+                ContainerStatus.RUNNING ->
                     logger?.i("[+] Container runtime active${if (pid != null) " (PID=$pid)" else ""}")
-                }
-                ContainerStatus.STOPPED -> {
-                    if (!started && !containerStartAccepted) {
-                        logger?.e("[-] Container runtime confirmed stopped")
-                        rollbackLoader(activeLoaderLease, logger)
-                        return@withContext
-                    }
-                    logger?.w("[!] Start command was accepted but runtime is currently stopped")
-                }
-                ContainerStatus.UNKNOWN -> {
-                    preserveLoaderOnUncertainState = true
-                    logger?.w("[!] Container runtime status remains unknown")
-                }
+                ContainerStatus.STOPPED ->
+                    logger?.w("[!] Container runtime is currently stopped")
+                ContainerStatus.UNKNOWN ->
+                    logger?.w("[!] Container runtime status is still unknown")
             }
 
             logger?.i("[*] Waiting for container command readiness (15s)...")
@@ -379,25 +344,23 @@ object X11SessionManager {
             if (commandReady) {
                 logger?.i("[+] Container command channel ready")
             } else {
-                logger?.w("[!] Container is not accepting commands yet; X11 init may still be booting")
+                logger?.w("[!] Container command channel is still becoming ready")
             }
 
-            logger?.i("[*] Opening Termux:X11...")
-            if (!openTermuxX11()) {
-                logger?.w("[!] Could not open Termux:X11 activity")
+            logger?.i("[*] Opening integrated display...")
+            if (!openIntegratedDisplay(logger)) {
+                logger?.w("[!] Integrated server is running, but its display Activity could not be opened")
             }
 
             logger?.i("")
             if (runtimeStatus == ContainerStatus.RUNNING && commandReady) {
-                logger?.i("[+] Session started")
-            } else if (runtimeStatus == ContainerStatus.RUNNING) {
-                logger?.w("[!] X11 opened while container init is still becoming ready")
+                logger?.i("[+] Integrated X11 session started")
             } else {
-                logger?.w("[!] Session start requested; runtime confirmation is incomplete")
+                logger?.w("[!] Integrated display opened while container startup is still settling")
             }
         } catch (e: Exception) {
-            if (!containerStartAccepted && !preserveLoaderOnUncertainState) {
-                loaderLease?.let { rollbackLoader(it, logger) }
+            if (!containerStartAccepted) {
+                serverLease?.let { rollbackServer(it, logger) }
             }
             logger?.e("[-] Error: ${e.message}")
         }
@@ -406,10 +369,10 @@ object X11SessionManager {
     suspend fun stopAll(logger: ContainerLogger? = null) = withContext(Dispatchers.IO) {
         try {
             logger?.i("--- Stopping All ---")
-            stopLoader(logger)
+            stopIntegratedServer(logger)
             val containers = ContainerManager.listContainers()
-            for (c in containers) {
-                if (c.isRunning) ContainerManager.stopContainer(c.name, logger)
+            for (container in containers) {
+                if (container.isRunning) ContainerManager.stopContainer(container.name, logger)
             }
             logger?.i("[+] All stopped")
         } catch (e: Exception) {

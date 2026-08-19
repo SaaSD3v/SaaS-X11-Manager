@@ -2,7 +2,7 @@ name: X11 Manager CI
 
 on:
   push:
-    branches: [ "main", "master", "agent/structural-fixes" ]
+    branches: [ "main", "master", "agent/structural-fixes", "agent/integrated-x11-spike" ]
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
@@ -30,6 +30,9 @@ jobs:
       statuses: write
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 1
 
     - name: Mark branch CI pending
       if: ${{ github.event_name == 'push' }}
@@ -52,6 +55,13 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
         cache: gradle
+
+    - name: Validate integrated X11 source
+      if: ${{ github.ref == 'refs/heads/agent/integrated-x11-spike' }}
+      run: |
+        test -f third_party/termux-x11/lorie/src/main/cpp/CMakeLists.txt
+        test -f third_party/termux-x11/lorie/src/main/java/com/termux/x11/CmdEntryPoint.java
+        test -f third_party/termux-x11/LICENSE
 
     - name: Decode Keystore
       env:
@@ -133,6 +143,7 @@ jobs:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0
+        submodules: recursive
 
     - name: Download Artifacts
       uses: actions/download-artifact@v4

@@ -12,13 +12,11 @@ import androidx.compose.material.icons.filled.DisplaySettings
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -28,38 +26,22 @@ import com.saas.x11manager.util.Constants
 import com.saas.x11manager.util.DroidspacesRequirementState
 import com.saas.x11manager.util.LoaderStatus
 import com.saas.x11manager.util.RootStatus
-import com.saas.x11manager.util.TermuxChecker
-import com.saas.x11manager.util.TermuxStatus
-import com.saas.x11manager.util.X11ApkStatus
 
 @Composable
 fun RequirementsScreen(
     viewModel: HomeViewModel
 ) {
     val rootStatus by viewModel.rootStatus.collectAsState()
-    val termuxStatus by viewModel.termuxStatus.collectAsState()
-    val x11ApkStatus by viewModel.x11ApkStatus.collectAsState()
     val dsStatus by viewModel.dsStatus.collectAsState()
     val dsRequirements by viewModel.dsRequirements.collectAsState()
-    val loaderStatus by viewModel.loaderStatus.collectAsState()
-    val loaderPid by viewModel.loaderPid.collectAsState()
+    val serverStatus by viewModel.loaderStatus.collectAsState()
+    val serverPid by viewModel.loaderPid.collectAsState()
     val rootProvider by viewModel.rootProvider.collectAsState()
     val kernelVersion by viewModel.kernelVersion.collectAsState()
     val arch by viewModel.arch.collectAsState()
     val androidVersion by viewModel.androidVersion.collectAsState()
     val androidSdk by viewModel.androidSdk.collectAsState()
     val deviceName by viewModel.deviceName.collectAsState()
-
-    val loaderAssetAvailable by produceState<Boolean?>(
-        initialValue = null,
-        key1 = x11ApkStatus
-    ) {
-        value = if (x11ApkStatus == X11ApkStatus.Installed) {
-            TermuxChecker.checkTermuxX11Loader()
-        } else {
-            false
-        }
-    }
 
     val dsRequirementsBlocking =
         dsRequirements?.state == DroidspacesRequirementState.MISSING_REQUIRED
@@ -68,9 +50,6 @@ fun RequirementsScreen(
 
     val requiredReady =
         rootStatus == RootStatus.Granted &&
-            termuxStatus == TermuxStatus.Installed &&
-            x11ApkStatus == X11ApkStatus.Installed &&
-            loaderAssetAvailable == true &&
             dsStatus &&
             !dsRequirementsBlocking
 
@@ -109,7 +88,7 @@ fun RequirementsScreen(
                         title = "Required environment",
                         subtitle = when {
                             requiredReady && dsRequirementsWarning -> "Ready with a DroidSpaces diagnostic warning"
-                            requiredReady -> "Ready"
+                            requiredReady -> "Ready for integrated X11"
                             else -> "Check the items below"
                         }
                     )
@@ -165,51 +144,11 @@ fun RequirementsScreen(
                     }
 
                     RequirementRow(
-                        icon = Icons.Default.Terminal,
-                        label = "Termux",
-                        value = when (termuxStatus) {
-                            TermuxStatus.Installed -> "Installed"
-                            TermuxStatus.NotInstalled -> "Not installed"
-                            TermuxStatus.Checking -> "Checking..."
-                        },
-                        detail = Constants.TERMUX_PACKAGE,
-                        state = when (termuxStatus) {
-                            TermuxStatus.Installed -> RowState.OK
-                            TermuxStatus.NotInstalled -> RowState.ERROR
-                            TermuxStatus.Checking -> RowState.INFO
-                        }
-                    )
-
-                    RequirementRow(
                         icon = Icons.Default.DisplaySettings,
-                        label = "Termux:X11",
-                        value = when (x11ApkStatus) {
-                            X11ApkStatus.Installed -> "Installed"
-                            X11ApkStatus.NotInstalled -> "Not installed"
-                            X11ApkStatus.Checking -> "Checking..."
-                        },
-                        detail = Constants.TERMUX_X11_PACKAGE,
-                        state = when (x11ApkStatus) {
-                            X11ApkStatus.Installed -> RowState.OK
-                            X11ApkStatus.NotInstalled -> RowState.ERROR
-                            X11ApkStatus.Checking -> RowState.INFO
-                        }
-                    )
-
-                    RequirementRow(
-                        icon = Icons.Default.DisplaySettings,
-                        label = "Termux:X11 Loader",
-                        value = when (loaderAssetAvailable) {
-                            true -> "Available"
-                            false -> if (x11ApkStatus == X11ApkStatus.Checking) "Checking..." else "Missing"
-                            null -> "Checking..."
-                        },
-                        detail = Constants.LOADER_APK,
-                        state = when (loaderAssetAvailable) {
-                            true -> RowState.OK
-                            false -> if (x11ApkStatus == X11ApkStatus.Checking) RowState.INFO else RowState.ERROR
-                            null -> RowState.INFO
-                        }
+                        label = "Integrated X11 Engine",
+                        value = "Bundled",
+                        detail = "Termux:X11/Lorie is compiled into SaaS X11 Manager in this experimental branch",
+                        state = RowState.OK
                     )
                 }
             }
@@ -228,21 +167,25 @@ fun RequirementsScreen(
                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
                     SectionHeader(
                         icon = Icons.Default.DisplaySettings,
-                        title = "X11 runtime",
-                        subtitle = "Current host-side Termux:X11 state"
+                        title = "Integrated X11 runtime",
+                        subtitle = "Current SaaS-owned host display state"
                     )
                     Spacer(Modifier.height(12.dp))
                     HorizontalDivider()
 
                     RequirementRow(
                         icon = Icons.Default.DisplaySettings,
-                        label = "Loader",
-                        value = when (loaderStatus) {
+                        label = "X11 Server",
+                        value = when (serverStatus) {
                             LoaderStatus.Running -> "Running"
                             LoaderStatus.Stopped -> "Stopped"
                         },
-                        detail = if (loaderPid != null) "PID $loaderPid" else "Starts when X11 is launched",
-                        state = when (loaderStatus) {
+                        detail = if (serverPid != null) {
+                            "${Constants.X11_SERVER_PROCESS} · PID $serverPid"
+                        } else {
+                            "Starts from Home, Display, or the post-install Start X11 action"
+                        },
+                        state = when (serverStatus) {
                             LoaderStatus.Running -> RowState.OK
                             LoaderStatus.Stopped -> RowState.WARNING
                         }
@@ -251,12 +194,21 @@ fun RequirementsScreen(
                     RequirementRow(
                         icon = Icons.Default.Info,
                         label = "X11 Socket",
-                        value = Constants.X11_SOCK_FILE,
-                        detail = "Termux:X11 display :0 socket",
+                        value = Constants.X11_DISPLAY,
+                        detail = Constants.X11_SOCK_FILE,
                         state = RowState.INFO
                     )
                 }
             }
+        }
+
+        item {
+            Text(
+                "The external Termux:X11 APK and its loader are not requirements in this spike. " +
+                    "The integrated engine is started from the SaaS X11 Manager APK itself.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

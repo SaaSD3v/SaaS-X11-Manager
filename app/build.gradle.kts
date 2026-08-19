@@ -79,6 +79,9 @@ android {
 }
 
 dependencies {
+    // Embedded Termux:X11/Lorie engine for the isolated integrated-X11 spike.
+    implementation(project(":lorie"))
+
     // Compose BOM
     implementation(platform("androidx.compose:compose-bom:2024.02.00"))
     implementation("androidx.compose.ui:ui")

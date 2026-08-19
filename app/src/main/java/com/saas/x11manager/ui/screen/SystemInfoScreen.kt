@@ -20,11 +20,9 @@ fun SystemInfoScreen(
     viewModel: HomeViewModel
 ) {
     val rootStatus by viewModel.rootStatus.collectAsState()
-    val termuxStatus by viewModel.termuxStatus.collectAsState()
-    val x11ApkStatus by viewModel.x11ApkStatus.collectAsState()
     val dsStatus by viewModel.dsStatus.collectAsState()
-    val loaderStatus by viewModel.loaderStatus.collectAsState()
-    val loaderPid by viewModel.loaderPid.collectAsState()
+    val serverStatus by viewModel.loaderStatus.collectAsState()
+    val serverPid by viewModel.loaderPid.collectAsState()
     val rootProvider by viewModel.rootProvider.collectAsState()
     val kernelVersion by viewModel.kernelVersion.collectAsState()
     val arch by viewModel.arch.collectAsState()
@@ -61,40 +59,28 @@ fun SystemInfoScreen(
 
         item {
             InfoCard(
-                icon = Icons.Default.Terminal,
-                title = "Termux",
-                status = when (termuxStatus) {
-                    TermuxStatus.Installed -> "Installed"
-                    TermuxStatus.NotInstalled -> "Not Installed"
-                    TermuxStatus.Checking -> "Checking..."
-                },
-                isOk = termuxStatus == TermuxStatus.Installed
-            )
-        }
-
-        item {
-            InfoCard(
                 icon = Icons.Default.DisplaySettings,
-                title = "Termux:X11 APK",
-                status = when (x11ApkStatus) {
-                    X11ApkStatus.Installed -> "Installed"
-                    X11ApkStatus.NotInstalled -> "Not Installed"
-                    X11ApkStatus.Checking -> "Checking..."
-                },
-                isOk = x11ApkStatus == X11ApkStatus.Installed
+                title = "Integrated X11 Engine",
+                status = "Bundled",
+                isOk = true,
+                subtitle = "Termux:X11/Lorie module inside this APK"
             )
         }
 
         item {
             InfoCard(
                 icon = Icons.Default.PlayCircle,
-                title = "X11 Loader",
-                status = when (loaderStatus) {
+                title = "Integrated X11 Server",
+                status = when (serverStatus) {
                     LoaderStatus.Running -> "Running"
                     LoaderStatus.Stopped -> "Stopped"
                 },
-                isOk = loaderStatus == LoaderStatus.Running,
-                subtitle = if (loaderPid != null) "PID: $loaderPid" else null
+                isOk = serverStatus == LoaderStatus.Running,
+                subtitle = if (serverPid != null) {
+                    "${Constants.X11_DISPLAY} · PID: $serverPid"
+                } else {
+                    Constants.X11_SOCK_FILE
+                }
             )
         }
 
@@ -127,7 +113,6 @@ fun SystemInfoScreen(
                     }
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-
                     InfoRow("Android", androidVersion.ifEmpty { "Unknown" })
                     InfoRow("Android SDK", androidSdk.ifEmpty { "Unknown" })
                     InfoRow("Arch", arch.ifEmpty { "Unknown" })
@@ -170,7 +155,7 @@ private fun InfoCard(
                         contentDescription = null,
                         modifier = Modifier.size(24.dp),
                         tint = if (isOk) MaterialTheme.colorScheme.primary
-                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                     )
                     Text(
                         title,
@@ -182,7 +167,7 @@ private fun InfoCard(
                 StatusPill(
                     label = status,
                     color = if (isOk) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                 )
             }
 
