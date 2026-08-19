@@ -807,6 +807,8 @@ object GraphicSessionInstaller {
         step: GraphicSessionInstallStep,
         logger: ContainerLogger?
     ): Boolean {
+        if (AdditionalGraphicSessionRuntime.isRedundantStandalonePackageAvailabilityStep(step)) return true
+
         logger?.i("[+] ${step.title}")
         logger?.i("root@$containerName: ${step.command}")
 

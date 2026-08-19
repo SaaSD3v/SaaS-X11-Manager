@@ -129,7 +129,12 @@ internal object AdditionalGraphicSessionRuntime {
         step: GraphicSessionInstallStep
     ): Boolean {
         val command = step.command.trimStart()
-        return command.startsWith("apk search -e ") ||
+        return step.title == "Validating Alpine package manager" ||
+            step.title == "Validating Debian package manager" ||
+            step.title == "Checking required apt repository" ||
+            step.title == "Checking APT transaction safety" ||
+            step.title == "Checking apk transaction safety" ||
+            command.startsWith("apk search -e ") ||
             (command.startsWith("LC_ALL=C apt-cache policy ") && command.contains("Candidate:"))
     }
 
@@ -138,11 +143,11 @@ internal object AdditionalGraphicSessionRuntime {
         step: GraphicSessionInstallStep,
         logger: ContainerLogger?
     ): Boolean {
-        // Install plans already resolve the full APT package set in the repository
-        // step and simulate the exact APT/APK transaction before installation. The
-        // old one-command-per-package checks repeated that work and made large
-        // sessions unnecessarily slow. Verification uses different package checks
-        // and is intentionally not skipped here.
+        // Package-family detection already happens before the install plan is selected.
+        // Runtime installation now lets apk/apt resolve repositories and dependencies
+        // directly instead of repeating package-manager probes, repository availability
+        // checks or transaction simulations before the real install command. The CI
+        // compatibility matrix remains responsible for catalog-level safety research.
         if (isRedundantStandalonePackageAvailabilityStep(step)) return true
 
         logger?.i("[+] ${step.title}")

@@ -31,7 +31,7 @@ class AdditionalGraphicSessionRuntimeAvailabilityTest {
     }
 
     @Test
-    fun transactionSafetyIsNeverClassifiedAsRedundantAvailability() {
+    fun transactionSafetyIsSkippedDuringRuntimeInstall() {
         val plan = requireNotNull(
             GraphicSessionInstallPlans.forSelection(
                 ContainerPlatform.UBUNTU,
@@ -40,7 +40,7 @@ class AdditionalGraphicSessionRuntimeAvailabilityTest {
         )
         val step = requireNotNull(AptTransactionSafety.stepFor(plan))
 
-        assertFalse(
+        assertTrue(
             AdditionalGraphicSessionRuntime.isRedundantStandalonePackageAvailabilityStep(step)
         )
     }
