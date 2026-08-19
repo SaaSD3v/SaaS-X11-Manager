@@ -24,6 +24,7 @@ import com.saas.x11manager.ui.screen.DisplayScreen
 import com.saas.x11manager.ui.screen.EditContainerScreen
 import com.saas.x11manager.ui.screen.HomeScreen
 import com.saas.x11manager.ui.screen.HomeViewModel
+import com.saas.x11manager.ui.screen.ManagedDisplayScreen
 import com.saas.x11manager.ui.screen.ManagedFullscreenDisplayScreen
 import com.saas.x11manager.ui.screen.RequirementsScreen
 import kotlinx.coroutines.launch
@@ -41,6 +42,7 @@ fun AppNavigation(viewModel: HomeViewModel) {
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { tabs.size })
     val selectedTab = tabs[pagerState.currentPage]
     val scope = rememberCoroutineScope()
+    var displayScreenOpen by remember { mutableStateOf(false) }
     var displayFullscreen by remember { mutableStateOf(false) }
 
     val navigateToEdit = viewModel.navigateToEdit
@@ -60,6 +62,14 @@ fun AppNavigation(viewModel: HomeViewModel) {
             ManagedFullscreenDisplayScreen(
                 viewModel = viewModel,
                 onExitFullscreen = { displayFullscreen = false }
+            )
+        }
+
+        displayScreenOpen -> {
+            ManagedDisplayScreen(
+                viewModel = viewModel,
+                onClose = { displayScreenOpen = false },
+                onFullscreen = { displayFullscreen = true }
             )
         }
 
@@ -111,7 +121,7 @@ fun AppNavigation(viewModel: HomeViewModel) {
                         TabItem.Home -> HomeScreen(viewModel = viewModel)
                         TabItem.Display -> DisplayScreen(
                             viewModel = viewModel,
-                            onFullscreenChanged = { displayFullscreen = it }
+                            onOpenScreen = { displayScreenOpen = true }
                         )
                         TabItem.Requirements -> RequirementsScreen(viewModel = viewModel)
                     }

@@ -24,23 +24,37 @@ import com.termux.x11.EmbeddedDisplayHost
 @Composable
 fun DisplayScreen(
     viewModel: HomeViewModel,
-    onFullscreenChanged: (Boolean) -> Unit = {}
+    onOpenScreen: () -> Unit
 ) {
     val serverStatus by viewModel.loaderStatus.collectAsState()
     val serverPid by viewModel.loaderPid.collectAsState()
-    val containers by viewModel.containers.collectAsState()
     val context = LocalContext.current
     val prefs = remember(context) { EmbeddedDisplayHost.getPrefs(context) }
     val store = remember(prefs) { prefs.get() }
 
     var showConfig by remember { mutableStateOf(false) }
-    var showScreen by remember { mutableStateOf(false) }
-    var additionalKeysEnabled by remember { mutableStateOf(store.getBoolean("showAdditionalKbd", true)) }
+    var additionalKeysEnabled by remember {
+        mutableStateOf(store.getBoolean(PREF_SHOW_ADDITIONAL_KEYS, false))
+    }
+    var imeEnabled by remember {
+        mutableStateOf(store.getBoolean(PREF_SHOW_IME_WITH_EXTERNAL_KEYBOARD, false))
+    }
+
+    LaunchedEffect(store) {
+        ensureManagedX11Defaults(context, store)
+        additionalKeysEnabled = store.getBoolean(PREF_SHOW_ADDITIONAL_KEYS, false)
+        imeEnabled = store.getBoolean(PREF_SHOW_IME_WITH_EXTERNAL_KEYBOARD, false)
+    }
 
     DisposableEffect(store) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == "showAdditionalKbd") {
-                additionalKeysEnabled = store.getBoolean("showAdditionalKbd", true)
+            when (key) {
+                PREF_SHOW_ADDITIONAL_KEYS -> {
+                    additionalKeysEnabled = store.getBoolean(PREF_SHOW_ADDITIONAL_KEYS, false)
+                }
+                PREF_SHOW_IME_WITH_EXTERNAL_KEYBOARD -> {
+                    imeEnabled = store.getBoolean(PREF_SHOW_IME_WITH_EXTERNAL_KEYBOARD, false)
+                }
             }
         }
         store.registerOnSharedPreferenceChangeListener(listener)
@@ -60,7 +74,7 @@ fun DisplayScreen(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "Configure the embedded X11 engine or open its screen. Runtime controls stay inside the screen panel.",
+                "Configuration stays here. Screen opens as its own workspace and uses the whole Manager area without entering immersive fullscreen.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -71,7 +85,7 @@ fun DisplayScreen(
                 index = "01",
                 icon = Icons.Default.Tune,
                 title = "Configuration",
-                subtitle = "Display, input, keyboard and X11 behavior",
+                subtitle = "Display, input, keyboard and embedded X11 behavior",
                 onClick = { showConfig = true }
             )
         }
@@ -83,9 +97,9 @@ fun DisplayScreen(
                 title = "Screen",
                 subtitle = when (serverStatus) {
                     LoaderStatus.Running -> "${Constants.X11_DISPLAY} running${serverPid?.let { " · PID $it" } ?: ""}"
-                    else -> "Open the X11 screen and runtime controls"
+                    else -> "Open the full-size X11 workspace"
                 },
-                onClick = { showScreen = true }
+                onClick = onOpenScreen
             )
         }
 
@@ -107,7 +121,11 @@ fun DisplayScreen(
                     )
                     DisplaySummaryRow(
                         "Additional keys",
-                        if (additionalKeysEnabled) "Enabled in X11 config" else "Disabled in X11 config"
+                        if (additionalKeysEnabled) "Enabled" else "Disabled"
+                    )
+                    DisplaySummaryRow(
+                        "Android IME with external keyboard",
+                        if (imeEnabled) "Enabled" else "Disabled"
                     )
                 }
             }
@@ -118,24 +136,6 @@ fun DisplayScreen(
         X11ConfigurationDialog(
             store = store,
             onDismiss = { showConfig = false }
-        )
-    }
-
-    if (showScreen) {
-        X11ScreenDialog(
-            viewModel = viewModel,
-            serverStatus = serverStatus,
-            containers = containers,
-            additionalKeysEnabled = additionalKeysEnabled,
-            onDismiss = { showScreen = false },
-            onOpenConfiguration = {
-                showScreen = false
-                showConfig = true
-            },
-            onFullscreen = {
-                showScreen = false
-                onFullscreenChanged(true)
-            }
         )
     }
 }
