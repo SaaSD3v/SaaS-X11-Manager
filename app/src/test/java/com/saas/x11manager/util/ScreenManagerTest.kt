@@ -1,6 +1,7 @@
 package com.saas.x11manager.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class ScreenManagerTest {
@@ -38,6 +39,14 @@ class ScreenManagerTest {
         assertEquals("3", payload["touchMode"])
         assertEquals("never", payload["screenIdleTimeout"])
         assertEquals("false", payload["showAdditionalKbd"])
+    }
+
+    @Test
+    fun redesignedImeToolbarStartsDisabled() {
+        val defaults = ScreenConfig()
+
+        assertFalse(defaults.showAdditionalKeyboard)
+        assertEquals("false", ScreenManager.buildPreferencePayload(defaults)["showAdditionalKbd"])
     }
 
     @Test
