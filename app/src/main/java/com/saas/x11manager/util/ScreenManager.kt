@@ -118,6 +118,29 @@ object ScreenManager {
         context.sendBroadcast(intent)
     }
 
+    /**
+     * Starts only the embedded X11 server. Rendering is attached by the
+     * EmbeddedX11View that lives in the Screen tab; no secondary Activity is opened.
+     */
+    suspend fun startServer(
+        context: Context,
+        xkbContainerName: String?,
+        config: ScreenConfig,
+        logger: ContainerLogger? = null
+    ): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            apply(context, config)
+            X11SessionManager.startIntegratedServer(
+                containerName = xkbContainerName,
+                logger = logger
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // Legacy detached-Activity path kept temporarily while the existing ScreenScreen
+    // is migrated to the embedded surface.
     suspend fun start(
         context: Context,
         xkbContainerName: String?,
