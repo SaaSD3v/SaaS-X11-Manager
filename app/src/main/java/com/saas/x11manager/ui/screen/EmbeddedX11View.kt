@@ -160,6 +160,20 @@ class EmbeddedX11View(context: Context) : LorieView(context) {
         super.onDetachedFromWindow()
     }
 
+    /**
+     * Upstream performs the normal SurfaceView/clipboard focus work first and
+     * then calls TouchInputHandler.refreshInputDevices(), whose final step
+     * assumes com.termux.x11.MainActivity exists. It intentionally does not in
+     * embedded mode, so swallow only that known terminal NullPointerException.
+     */
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        try {
+            super.onWindowFocusChanged(hasWindowFocus)
+        } catch (_: NullPointerException) {
+            // The upstream standalone Activity is deliberately absent.
+        }
+    }
+
     override fun onCheckIsTextEditor(): Boolean = true
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
