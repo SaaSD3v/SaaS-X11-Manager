@@ -23,8 +23,8 @@ import androidx.compose.ui.unit.sp
 import com.saas.x11manager.ui.screen.EditContainerScreen
 import com.saas.x11manager.ui.screen.HomeScreen
 import com.saas.x11manager.ui.screen.HomeViewModel
+import com.saas.x11manager.ui.screen.IntegratedScreenScreen
 import com.saas.x11manager.ui.screen.RequirementsScreen
-import com.saas.x11manager.ui.screen.ScreenScreen
 import kotlinx.coroutines.launch
 
 enum class TabItem(val title: String, val icon: ImageVector) {
@@ -99,7 +99,7 @@ fun AppNavigation(viewModel: HomeViewModel) {
             ) { page ->
                 when (tabs[page]) {
                     TabItem.Home -> HomeScreen(viewModel = viewModel)
-                    TabItem.Screen -> ScreenScreen(viewModel = viewModel)
+                    TabItem.Screen -> IntegratedScreenScreen(viewModel = viewModel)
                     TabItem.Requirements -> RequirementsScreen(viewModel = viewModel)
                 }
             }
