@@ -28,6 +28,18 @@ class IntegratedX11RuntimeTest {
     }
 
     @Test
+    fun integratedRuntimeUsesServerTerminologyInsteadOfLegacyLoaderApi() {
+        val methodNames = X11SessionManager::class.java.declaredMethods.map { it.name }
+        assertTrue(methodNames.contains("getServerStatus"))
+        assertTrue(methodNames.contains("getServerPid"))
+        assertFalse(methodNames.contains("getLoaderStatus"))
+        assertFalse(methodNames.contains("getLoaderPid"))
+        assertFalse(methodNames.contains("startLoader"))
+        assertFalse(methodNames.contains("stopLoader"))
+        assertTrue(X11ServerStatus.entries.containsAll(listOf(X11ServerStatus.Running, X11ServerStatus.Stopped)))
+    }
+
+    @Test
     fun x11SocketAndXkbCacheAreOwnedByManagerRuntime() {
         assertTrue(Constants.X11_SOCK_DIR.startsWith(Constants.INTEGRATED_X11_RUNTIME_DIR))
         assertTrue(Constants.X11_SOCK_FILE.endsWith("/.X11-unix/X0"))

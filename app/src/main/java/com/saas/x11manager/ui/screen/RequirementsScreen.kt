@@ -24,8 +24,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.util.Constants
 import com.saas.x11manager.util.DroidspacesRequirementState
-import com.saas.x11manager.util.LoaderStatus
 import com.saas.x11manager.util.RootStatus
+import com.saas.x11manager.util.X11ServerStatus
 
 @Composable
 fun RequirementsScreen(
@@ -34,8 +34,8 @@ fun RequirementsScreen(
     val rootStatus by viewModel.rootStatus.collectAsState()
     val dsStatus by viewModel.dsStatus.collectAsState()
     val dsRequirements by viewModel.dsRequirements.collectAsState()
-    val serverStatus by viewModel.loaderStatus.collectAsState()
-    val serverPid by viewModel.loaderPid.collectAsState()
+    val serverStatus by viewModel.x11ServerStatus.collectAsState()
+    val serverPid by viewModel.x11ServerPid.collectAsState()
     val rootProvider by viewModel.rootProvider.collectAsState()
     val kernelVersion by viewModel.kernelVersion.collectAsState()
     val arch by viewModel.arch.collectAsState()
@@ -147,7 +147,7 @@ fun RequirementsScreen(
                         icon = Icons.Default.DisplaySettings,
                         label = "Integrated X11 Engine",
                         value = "Bundled",
-                        detail = "Termux:X11/Lorie is compiled into SaaS X11 Manager in this experimental branch",
+                        detail = "Termux:X11/Lorie is compiled into SaaS X11 Manager",
                         state = RowState.OK
                     )
                 }
@@ -177,8 +177,8 @@ fun RequirementsScreen(
                         icon = Icons.Default.DisplaySettings,
                         label = "X11 Server",
                         value = when (serverStatus) {
-                            LoaderStatus.Running -> "Running"
-                            LoaderStatus.Stopped -> "Stopped"
+                            X11ServerStatus.Running -> "Running"
+                            X11ServerStatus.Stopped -> "Stopped"
                         },
                         detail = if (serverPid != null) {
                             "${Constants.X11_SERVER_PROCESS} · PID $serverPid"
@@ -186,8 +186,8 @@ fun RequirementsScreen(
                             "Starts from Home, Display, or the post-install Start X11 action"
                         },
                         state = when (serverStatus) {
-                            LoaderStatus.Running -> RowState.OK
-                            LoaderStatus.Stopped -> RowState.WARNING
+                            X11ServerStatus.Running -> RowState.OK
+                            X11ServerStatus.Stopped -> RowState.WARNING
                         }
                     )
 
@@ -204,7 +204,7 @@ fun RequirementsScreen(
 
         item {
             Text(
-                "The external Termux:X11 APK and its loader are not requirements in this spike. " +
+                "The external Termux:X11 APK and its loader are not runtime requirements. " +
                     "The integrated engine is started from the SaaS X11 Manager APK itself.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant

@@ -17,7 +17,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.util.Constants
-import com.saas.x11manager.util.LoaderStatus
+import com.saas.x11manager.util.X11ServerStatus
 import com.termux.x11.EmbeddedDisplayHost
 
 @Composable
@@ -25,8 +25,8 @@ fun DisplayScreen(
     viewModel: HomeViewModel,
     onOpenScreen: () -> Unit
 ) {
-    val serverStatus by viewModel.loaderStatus.collectAsState()
-    val serverPid by viewModel.loaderPid.collectAsState()
+    val serverStatus by viewModel.x11ServerStatus.collectAsState()
+    val serverPid by viewModel.x11ServerPid.collectAsState()
     val context = LocalContext.current
     val prefs = remember(context) { EmbeddedDisplayHost.getPrefs(context) }
     val store = remember(prefs) { prefs.get() }
@@ -73,9 +73,9 @@ fun DisplayScreen(
                 icon = Icons.Default.DesktopWindows,
                 title = "Screen",
                 subtitle = when (serverStatus) {
-                    LoaderStatus.Running ->
+                    X11ServerStatus.Running ->
                         "${Constants.X11_DISPLAY} running${serverPid?.let { " · PID $it" } ?: ""}"
-                    LoaderStatus.Stopped -> "Open the full-size X11 workspace"
+                    X11ServerStatus.Stopped -> "Open the full-size X11 workspace"
                 },
                 onClick = onOpenScreen
             )

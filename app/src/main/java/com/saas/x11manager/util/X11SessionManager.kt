@@ -6,15 +6,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-enum class LoaderStatus { Running, Stopped }
+enum class X11ServerStatus { Running, Stopped }
 
 /**
- * Experimental integrated X11 runtime.
+ * Owns the lifecycle of the Manager-integrated X11 server and graphical sessions.
  *
- * The public LoaderStatus/getLoader* names are intentionally kept for this first
- * spike so the existing ViewModels do not need an unrelated state-model refactor.
- * They now describe the SaaS-owned embedded Lorie server, not an external
- * Termux:X11 loader process.
+ * The X11 server runs from the Manager APK through app_process, while DroidSpaces
+ * containers consume the Manager-owned X11 socket and XKB runtime data.
  */
 object X11SessionManager {
 
@@ -177,15 +175,15 @@ object X11SessionManager {
             "com.termux.x11.CmdEntryPoint ${Constants.X11_DISPLAY} " +
             ">${shellQuote(Constants.X11_LOG_FILE)} 2>&1 & echo ${'$'}!"
 
-    suspend fun getLoaderStatus(): LoaderStatus = withContext(Dispatchers.IO) {
+    suspend fun getServerStatus(): X11ServerStatus = withContext(Dispatchers.IO) {
         if (hasX0Socket() && getLiveServerPids().isNotEmpty()) {
-            LoaderStatus.Running
+            X11ServerStatus.Running
         } else {
-            LoaderStatus.Stopped
+            X11ServerStatus.Stopped
         }
     }
 
-    suspend fun getLoaderPid(): Int? = withContext(Dispatchers.IO) {
+    suspend fun getServerPid(): Int? = withContext(Dispatchers.IO) {
         getLiveServerPids().firstOrNull()
     }
 
@@ -278,10 +276,6 @@ object X11SessionManager {
         logger: ContainerLogger? = null
     ): Result<Int> = startIntegratedServerTracked(containerName, logger).map { it.pid }
 
-    // Compatibility name used by older code paths in this spike.
-    suspend fun startLoader(logger: ContainerLogger? = null): Result<Int> =
-        startIntegratedServer(logger = logger)
-
     private suspend fun rollbackServer(lease: ServerLease, logger: ContainerLogger? = null) {
         if (lease.reused) return
         killPids(listOf(lease.pid))
@@ -304,10 +298,6 @@ object X11SessionManager {
                 false
             }
         }
-
-    // Compatibility name used by the current HomeViewModel.
-    suspend fun stopLoader(logger: ContainerLogger? = null): Boolean =
-        stopIntegratedServer(logger)
 
     private suspend fun waitForContainerRuntime(
         containerName: String,

@@ -29,7 +29,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.saas.x11manager.util.Constants
 import com.saas.x11manager.util.ContainerInfo
-import com.saas.x11manager.util.LoaderStatus
+import com.saas.x11manager.util.X11ServerStatus
 import com.saas.x11manager.util.X11SessionManager
 import com.termux.x11.EmbeddedDisplayHost
 import kotlinx.coroutines.launch
@@ -39,8 +39,8 @@ fun ManagedDisplayScreen(
     viewModel: HomeViewModel,
     onClose: () -> Unit
 ) {
-    val serverStatus by viewModel.loaderStatus.collectAsState()
-    val serverPid by viewModel.loaderPid.collectAsState()
+    val serverStatus by viewModel.x11ServerStatus.collectAsState()
+    val serverPid by viewModel.x11ServerPid.collectAsState()
     val containers by viewModel.containers.collectAsState()
     val context = LocalContext.current
     val activity = remember(context) { context.findManagedDisplayActivity() }
@@ -73,7 +73,7 @@ fun ManagedDisplayScreen(
     }
 
     fun setFullscreen(value: Boolean) {
-        if (value && serverStatus != LoaderStatus.Running) return
+        if (value && serverStatus != X11ServerStatus.Running) return
         fullscreen = value
         store.edit()
             .putBoolean(PREF_FULLSCREEN, value)
@@ -93,7 +93,7 @@ fun ManagedDisplayScreen(
             busy = true
             message = null
             try {
-                if (serverStatus == LoaderStatus.Running) {
+                if (serverStatus == X11ServerStatus.Running) {
                     if (!X11SessionManager.stopIntegratedServer()) {
                         message = "Integrated X11 server could not be stopped"
                     }
@@ -141,7 +141,7 @@ fun ManagedDisplayScreen(
                 }
                 PREF_FULLSCREEN -> {
                     val requested = store.getBoolean(PREF_FULLSCREEN, false)
-                    fullscreen = requested && serverStatus == LoaderStatus.Running
+                    fullscreen = requested && serverStatus == X11ServerStatus.Running
                 }
                 "extra_keys_config" -> {
                     extraKeysConfig = store.getString("extra_keys_config", null)
@@ -160,7 +160,7 @@ fun ManagedDisplayScreen(
     )
 
     LaunchedEffect(serverStatus, fullscreen) {
-        if (fullscreen && serverStatus != LoaderStatus.Running) {
+        if (fullscreen && serverStatus != X11ServerStatus.Running) {
             setFullscreen(false)
         }
     }
@@ -252,7 +252,7 @@ fun ManagedDisplayScreen(
             if (fullscreen) {
                 FullscreenDisplayControls(
                     busy = busy,
-                    running = serverStatus == LoaderStatus.Running,
+                    running = serverStatus == X11ServerStatus.Running,
                     additionalKeysEnabled = additionalKeysEnabled,
                     additionalKeysVisible = additionalKeysVisible,
                     onToggleServer = ::toggleServer,
@@ -275,7 +275,7 @@ fun ManagedDisplayScreen(
 
 @Composable
 private fun ManagedDisplayToolbar(
-    serverStatus: LoaderStatus,
+    serverStatus: X11ServerStatus,
     serverPid: Int?,
     connected: Boolean,
     busy: Boolean,
@@ -334,9 +334,9 @@ private fun ManagedDisplayToolbar(
 
             DisplayControlButton(
                 busy = busy,
-                running = serverStatus == LoaderStatus.Running,
+                running = serverStatus == X11ServerStatus.Running,
                 enabled = !busy && (
-                    serverStatus == LoaderStatus.Running || xkbSeedContainer != null
+                    serverStatus == X11ServerStatus.Running || xkbSeedContainer != null
                 ),
                 onClick = onToggleServer
             )
@@ -344,7 +344,7 @@ private fun ManagedDisplayToolbar(
             if (additionalKeysEnabled) {
                 IconButton(
                     onClick = onToggleAdditionalKeys,
-                    enabled = serverStatus == LoaderStatus.Running
+                    enabled = serverStatus == X11ServerStatus.Running
                 ) {
                     Icon(
                         Icons.Default.Keyboard,
@@ -360,12 +360,12 @@ private fun ManagedDisplayToolbar(
 
             IconButton(
                 onClick = onFullscreen,
-                enabled = serverStatus == LoaderStatus.Running
+                enabled = serverStatus == X11ServerStatus.Running
             ) {
                 Icon(
                     Icons.Default.Fullscreen,
                     contentDescription = "Fullscreen",
-                    tint = if (serverStatus == LoaderStatus.Running) {
+                    tint = if (serverStatus == X11ServerStatus.Running) {
                         Color.White
                     } else {
                         Color.White.copy(alpha = 0.3f)
@@ -385,18 +385,18 @@ private fun ManagedDisplayToolbar(
 }
 
 @Composable
-private fun DisplayStatusPill(serverStatus: LoaderStatus, connected: Boolean) {
+private fun DisplayStatusPill(serverStatus: X11ServerStatus, connected: Boolean) {
     Surface(
         shape = RoundedCornerShape(50),
         color = when {
-            serverStatus != LoaderStatus.Running -> Color(0xFF2B2F36)
+            serverStatus != X11ServerStatus.Running -> Color(0xFF2B2F36)
             connected -> Color(0xFF163B2C)
             else -> Color(0xFF3A3217)
         }
     ) {
         Text(
             when {
-                serverStatus != LoaderStatus.Running -> "Stopped"
+                serverStatus != X11ServerStatus.Running -> "Stopped"
                 connected -> "Connected"
                 else -> "Connecting"
             },
@@ -409,13 +409,13 @@ private fun DisplayStatusPill(serverStatus: LoaderStatus, connected: Boolean) {
 
 @Composable
 private fun ManagedDisplayViewport(
-    serverStatus: LoaderStatus,
+    serverStatus: X11ServerStatus,
     connected: Boolean,
     hasSeedContainer: Boolean,
     onConnectionChanged: (Boolean) -> Unit
 ) {
     Box(Modifier.fillMaxSize()) {
-        if (serverStatus == LoaderStatus.Running) {
+        if (serverStatus == X11ServerStatus.Running) {
             key("managed-display-lorie-surface") {
                 EmbeddedX11Surface(
                     modifier = Modifier.fillMaxSize(),

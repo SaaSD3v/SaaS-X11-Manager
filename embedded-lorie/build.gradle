@@ -15,7 +15,7 @@ android {
     defaultConfig {
         minSdkVersion 24
         targetSdkVersion 34
-        buildConfigField 'String', 'VERSION_NAME', '"embedded-spike"'
+        buildConfigField 'String', 'VERSION_NAME', '"manager-embedded"'
         buildConfigField 'String', 'COMMIT', '"' + upstreamCommit + '"'
         buildConfigField 'String', 'APPLICATION_ID', '"com.saas.x11manager"'
         consumerProguardFiles new File(upstream, 'proguard-rules.pro')
@@ -55,7 +55,7 @@ android {
 
 dependencies {
     // Keep this wrapper on the Kotlin/lifecycle generation already used by the
-    // Manager instead of forcing the spike to upgrade the whole Android build.
+    // Manager instead of forcing an unrelated whole-project Android upgrade.
     implementation 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.22'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0'
     // LoriePreferences/Prefs are part of the embedded module's public API and

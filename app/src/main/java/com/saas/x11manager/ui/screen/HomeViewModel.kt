@@ -37,13 +37,11 @@ class HomeViewModel : ViewModel() {
     private val _dsRequirements = MutableStateFlow<DroidspacesRequirementsResult?>(null)
     val dsRequirements: StateFlow<DroidspacesRequirementsResult?> = _dsRequirements
 
-    // Compatibility names kept for the spike. These now represent the embedded
-    // SaaS X11 server, not an external Termux:X11 loader.
-    private val _loaderStatus = MutableStateFlow<LoaderStatus>(LoaderStatus.Stopped)
-    val loaderStatus: StateFlow<LoaderStatus> = _loaderStatus
+    private val _x11ServerStatus = MutableStateFlow<X11ServerStatus>(X11ServerStatus.Stopped)
+    val x11ServerStatus: StateFlow<X11ServerStatus> = _x11ServerStatus
 
-    private val _loaderPid = MutableStateFlow<Int?>(null)
-    val loaderPid: StateFlow<Int?> = _loaderPid
+    private val _x11ServerPid = MutableStateFlow<Int?>(null)
+    val x11ServerPid: StateFlow<Int?> = _x11ServerPid
 
     var runningOperationContainer by mutableStateOf<String?>(null)
         private set
@@ -110,8 +108,8 @@ class HomeViewModel : ViewModel() {
                     }
                     val containersDef = async(Dispatchers.IO) { ContainerManager.listContainers() }
                     val serverDef = async(Dispatchers.IO) {
-                        val status = X11SessionManager.getLoaderStatus()
-                        val pid = if (status == LoaderStatus.Running) X11SessionManager.getLoaderPid() else null
+                        val status = X11SessionManager.getServerStatus()
+                        val pid = if (status == X11ServerStatus.Running) X11SessionManager.getServerPid() else null
                         status to pid
                     }
                     val systemDef = async(Dispatchers.IO) { readDeviceSnapshot() }
@@ -143,8 +141,8 @@ class HomeViewModel : ViewModel() {
                     runningOperationContainer == null
                 ) {
                     _containers.value = snapshot.containers
-                    _loaderStatus.value = snapshot.server.first
-                    _loaderPid.value = snapshot.server.second
+                    _x11ServerStatus.value = snapshot.server.first
+                    _x11ServerPid.value = snapshot.server.second
                 }
 
                 initialized = true
@@ -170,8 +168,8 @@ class HomeViewModel : ViewModel() {
                 val snapshot = coroutineScope {
                     val containersDef = async(Dispatchers.IO) { ContainerManager.listContainers() }
                     val serverDef = async(Dispatchers.IO) {
-                        val status = X11SessionManager.getLoaderStatus()
-                        val pid = if (status == LoaderStatus.Running) X11SessionManager.getLoaderPid() else null
+                        val status = X11SessionManager.getServerStatus()
+                        val pid = if (status == X11ServerStatus.Running) X11SessionManager.getServerPid() else null
                         status to pid
                     }
                     RuntimeRefreshSnapshot(
@@ -186,8 +184,8 @@ class HomeViewModel : ViewModel() {
                 ) return@launch
 
                 _containers.value = snapshot.containers
-                _loaderStatus.value = snapshot.server.first
-                _loaderPid.value = snapshot.server.second
+                _x11ServerStatus.value = snapshot.server.first
+                _x11ServerPid.value = snapshot.server.second
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -247,9 +245,9 @@ class HomeViewModel : ViewModel() {
                     updateContainerState(container.name, ContainerStatus.RUNNING, pid)
                 }
 
-                _loaderStatus.value = X11SessionManager.getLoaderStatus()
-                _loaderPid.value = if (_loaderStatus.value == LoaderStatus.Running) {
-                    X11SessionManager.getLoaderPid()
+                _x11ServerStatus.value = X11SessionManager.getServerStatus()
+                _x11ServerPid.value = if (_x11ServerStatus.value == X11ServerStatus.Running) {
+                    X11SessionManager.getServerPid()
                 } else null
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "startX11 failed", e)
@@ -299,8 +297,8 @@ class HomeViewModel : ViewModel() {
                 Log.e("HomeViewModel", "stopAll failed", e)
             } finally {
                 runningOperationContainer = null
-                _loaderStatus.value = LoaderStatus.Stopped
-                _loaderPid.value = null
+                _x11ServerStatus.value = X11ServerStatus.Stopped
+                _x11ServerPid.value = null
                 refreshContainers()
             }
         }
@@ -397,13 +395,13 @@ class HomeViewModel : ViewModel() {
         val root: Pair<RootStatus, String>,
         val droidspaces: Pair<Boolean, DroidspacesRequirementsResult?>,
         val containers: List<ContainerInfo>,
-        val server: Pair<LoaderStatus, Int?>,
+        val server: Pair<X11ServerStatus, Int?>,
         val system: DeviceSnapshot
     )
 
     private data class RuntimeRefreshSnapshot(
         val containers: List<ContainerInfo>,
-        val server: Pair<LoaderStatus, Int?>
+        val server: Pair<X11ServerStatus, Int?>
     )
 
     private companion object {
