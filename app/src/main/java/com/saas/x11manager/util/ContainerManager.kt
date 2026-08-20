@@ -29,6 +29,15 @@ object ContainerManager {
 
     private const val CONFIG_MARKER = "@@SAAS_X11_CONTAINER@@"
 
+    private enum class RuntimeQueryMode {
+        MACHINE_SHOW,
+        PLAIN_SHOW,
+        PID_FALLBACK
+    }
+
+    @Volatile
+    private var runtimeQueryMode: RuntimeQueryMode? = null
+
     suspend fun listContainers(): List<ContainerInfo> = withContext(Dispatchers.IO) {
         try {
             val configs = loadConfigsBatch()
@@ -94,10 +103,40 @@ object ContainerManager {
         val names = containerNames.filter { it.isNotBlank() }.distinct()
         if (names.isEmpty()) return emptyMap()
 
-        tryMachineReadableShow(names)?.let { return it }
-        tryPlainShow(names)?.let { return it }
-        return queryPidsIndividually(names)
+        runtimeQueryMode?.let { cachedMode ->
+            queryRuntimeStates(cachedMode, names)?.let { return it }
+            runtimeQueryMode = null
+        }
+
+        tryMachineReadableShow(names)?.let {
+            runtimeQueryMode = RuntimeQueryMode.MACHINE_SHOW
+            return it
+        }
+        tryPlainShow(names)?.let {
+            runtimeQueryMode = RuntimeQueryMode.PLAIN_SHOW
+            return it
+        }
+
+        val pidStates = queryPidsIndividually(names)
+        if (hasRecognizedPidState(pidStates)) {
+            runtimeQueryMode = RuntimeQueryMode.PID_FALLBACK
+        }
+        return pidStates
     }
+
+    private fun queryRuntimeStates(
+        mode: RuntimeQueryMode,
+        containerNames: List<String>
+    ): Map<String, ContainerRuntimeState>? = when (mode) {
+        RuntimeQueryMode.MACHINE_SHOW -> tryMachineReadableShow(containerNames)
+        RuntimeQueryMode.PLAIN_SHOW -> tryPlainShow(containerNames)
+        RuntimeQueryMode.PID_FALLBACK -> queryPidsIndividually(containerNames)
+            .takeIf(::hasRecognizedPidState)
+    }
+
+    private fun hasRecognizedPidState(
+        states: Map<String, ContainerRuntimeState>
+    ): Boolean = states.values.any { it.status != ContainerStatus.UNKNOWN }
 
     private fun tryMachineReadableShow(
         containerNames: List<String>
