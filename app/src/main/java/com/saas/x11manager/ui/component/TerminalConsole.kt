@@ -1,13 +1,11 @@
 package com.saas.x11manager.ui.component
 
 import android.util.Log
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,8 +16,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontFamily
@@ -29,53 +25,33 @@ import com.saas.x11manager.ui.theme.JetBrainsMono
 import com.saas.x11manager.util.AnsiColorParser
 import com.saas.x11manager.util.Constants
 
+/**
+ * Compatibility wrapper kept for callers that already use the old shimmer API.
+ *
+ * A continuously animated gradient is intentionally avoided here. Package-manager
+ * output can update the terminal many times per second, so animating the entire
+ * console at the same time adds GPU/composition work without conveying additional
+ * progress information. The streamed output itself is the activity indicator.
+ */
+@Suppress("UNUSED_PARAMETER")
 @Composable
 fun ShimmerAnimation(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    if (!enabled) {
-        TerminalFrame(modifier = modifier, content = content)
-        return
-    }
-
-    val transition = rememberInfiniteTransition(label = "shimmer")
-    val translateAnim by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1000f,
-        animationSpec = infiniteRepeatable(
-            tween(durationMillis = 1200, easing = FastOutSlowInEasing),
-            RepeatMode.Reverse
-        ),
-        label = "shimmerTranslate"
-    )
-
-    val shades = listOf(
-        Color.Transparent,
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f),
-        Color.Transparent
-    )
-    val brush = Brush.linearGradient(
-        colors = shades,
-        start = Offset(10f, 10f),
-        end = Offset(translateAnim, translateAnim)
-    )
-
-    TerminalFrame(modifier = modifier, brush = brush, content = content)
+    TerminalFrame(modifier = modifier, content = content)
 }
 
 @Composable
 private fun TerminalFrame(
     modifier: Modifier,
-    brush: Brush? = null,
     content: @Composable () -> Unit
 ) {
     val shape = RoundedCornerShape(16.dp)
     val framedModifier = modifier
         .clip(shape)
         .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-        .let { base -> if (brush != null) base.background(brush) else base }
         .border(
             width = 1.dp,
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
@@ -125,16 +101,16 @@ fun TerminalConsole(
         }
     }
 
-    LaunchedEffect(logs.size, isProcessing, userScrolledUp) {
+    LaunchedEffect(logs.size, userScrolledUp) {
         if (logs.isEmpty() || userScrolledUp) return@LaunchedEffect
 
+        // Streaming package-manager output can append hundreds of lines quickly.
+        // An animated scroll per line queues unnecessary animation work and makes
+        // the terminal lag behind the producer. Jumping to the newest item keeps
+        // the same auto-follow behavior while making the cost effectively constant.
         isAutoScrolling = true
         try {
-            if (isProcessing) {
-                listState.animateScrollToItem(logs.lastIndex)
-            } else {
-                listState.scrollToItem(logs.lastIndex)
-            }
+            listState.scrollToItem(logs.lastIndex)
         } finally {
             isAutoScrolling = false
         }
