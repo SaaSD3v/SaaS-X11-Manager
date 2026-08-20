@@ -16,8 +16,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.saas.x11manager.util.Constants
 import com.saas.x11manager.util.X11ServerStatus
+import com.saas.x11manager.util.X11SessionManager
 import com.termux.x11.EmbeddedDisplayHost
 
 @Composable
@@ -31,9 +31,28 @@ fun DisplayScreen(
     val prefs = remember(context) { EmbeddedDisplayHost.getPrefs(context) }
     val store = remember(prefs) { prefs.get() }
     var showConfig by remember { mutableStateOf(false) }
+    var activeDisplays by remember { mutableStateOf<List<String>>(emptyList()) }
 
     LaunchedEffect(store) {
         ensureManagedX11Defaults(context, store)
+    }
+
+    LaunchedEffect(serverStatus, serverPid) {
+        activeDisplays = X11SessionManager.getMonitors()
+            .filter { it.status == X11ServerStatus.Running }
+            .sortedBy { it.slot.number }
+            .map { it.displayName }
+    }
+
+    val screenSubtitle = when {
+        activeDisplays.isEmpty() -> "Open the managed X11 monitor workspace"
+        activeDisplays.size == 1 -> "1 monitor active · ${activeDisplays.first()}"
+        else -> {
+            val visible = activeDisplays.take(3).joinToString(", ")
+            val remaining = activeDisplays.size - 3
+            "${activeDisplays.size} monitors active · $visible" +
+                if (remaining > 0) " +$remaining" else ""
+        }
     }
 
     LazyColumn(
@@ -51,7 +70,7 @@ fun DisplayScreen(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "Configure the embedded X11 engine or open its managed screen workspace.",
+                "Configure the embedded X11 engine or switch between managed monitors.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -72,11 +91,7 @@ fun DisplayScreen(
                 index = "02",
                 icon = Icons.Default.DesktopWindows,
                 title = "Screen",
-                subtitle = when (serverStatus) {
-                    X11ServerStatus.Running ->
-                        "${Constants.X11_DISPLAY} running${serverPid?.let { " · PID $it" } ?: ""}"
-                    X11ServerStatus.Stopped -> "Open the full-size X11 workspace"
-                },
+                subtitle = screenSubtitle,
                 onClick = onOpenScreen
             )
         }
