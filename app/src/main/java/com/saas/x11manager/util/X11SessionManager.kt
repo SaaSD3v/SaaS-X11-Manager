@@ -39,44 +39,31 @@ object X11SessionManager {
         .filter { it > 0 }
         .distinct()
 
-    private fun parsePsPids(lines: List<String>): List<Int> = lines
-        .mapNotNull { line ->
-            line.trim()
-                .split(Regex("\\s+"))
-                .getOrNull(1)
-                ?.toIntOrNull()
-        }
-        .filter { it > 0 }
-        .distinct()
-
     private fun getProcessPids(processName: String): List<Int> {
         return try {
             val pidof = Shell.cmd("pidof ${shellQuote(processName)} 2>/dev/null").exec()
             val pidofPids = parsePids(pidof.out)
             if (pidofPids.isNotEmpty()) return pidofPids
 
-            val ps = Shell.cmd(
-                "ps -ef 2>/dev/null | grep ${shellQuote(processName)} | grep -v grep"
+            val target = shellQuote(processName)
+            val proc = Shell.cmd(
+                "target=$target; " +
+                    "for comm in /proc/[0-9]*/comm; do " +
+                    "[ -r \"\$comm\" ] || continue; " +
+                    "IFS= read -r name < \"\$comm\" || continue; " +
+                    "[ \"\$name\" = \"\$target\" ] || continue; " +
+                    "pid=\${comm#/proc/}; pid=\${pid%/comm}; " +
+                    "printf '%s\\n' \"\$pid\"; " +
+                    "done"
             ).exec()
-            parsePsPids(ps.out)
+            parsePids(proc.out)
         } catch (_: Exception) {
             emptyList()
         }
     }
 
-    private fun isPidAlive(pid: Int): Boolean {
-        if (pid <= 0) return false
-        return try {
-            Shell.cmd("test -d /proc/$pid 2>/dev/null").exec().isSuccess
-        } catch (_: Exception) {
-            false
-        }
-    }
-
     private fun getLiveServerPids(displaySlot: X11DisplaySlot): List<Int> =
-        getProcessPids(displaySlot.processName)
-            .filter(::isPidAlive)
-            .distinct()
+        getProcessPids(displaySlot.processName).distinct()
 
     private fun hasSocket(displaySlot: X11DisplaySlot): Boolean {
         return try {
