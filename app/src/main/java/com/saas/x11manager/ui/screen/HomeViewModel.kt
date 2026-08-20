@@ -107,11 +107,7 @@ class HomeViewModel : ViewModel() {
                         available to requirements
                     }
                     val containersDef = async(Dispatchers.IO) { ContainerManager.listContainers() }
-                    val serverDef = async(Dispatchers.IO) {
-                        val status = X11SessionManager.getServerStatus()
-                        val pid = if (status == X11ServerStatus.Running) X11SessionManager.getServerPid() else null
-                        status to pid
-                    }
+                    val serverDef = async(Dispatchers.IO) { readServerSnapshot() }
                     val systemDef = async(Dispatchers.IO) { readDeviceSnapshot() }
 
                     FullRefreshSnapshot(
@@ -167,11 +163,7 @@ class HomeViewModel : ViewModel() {
             try {
                 val snapshot = coroutineScope {
                     val containersDef = async(Dispatchers.IO) { ContainerManager.listContainers() }
-                    val serverDef = async(Dispatchers.IO) {
-                        val status = X11SessionManager.getServerStatus()
-                        val pid = if (status == X11ServerStatus.Running) X11SessionManager.getServerPid() else null
-                        status to pid
-                    }
+                    val serverDef = async(Dispatchers.IO) { readServerSnapshot() }
                     RuntimeRefreshSnapshot(
                         containers = containersDef.await(),
                         server = serverDef.await()
@@ -245,10 +237,9 @@ class HomeViewModel : ViewModel() {
                     updateContainerState(container.name, ContainerStatus.RUNNING, pid)
                 }
 
-                _x11ServerStatus.value = X11SessionManager.getServerStatus()
-                _x11ServerPid.value = if (_x11ServerStatus.value == X11ServerStatus.Running) {
-                    X11SessionManager.getServerPid()
-                } else null
+                val server = readServerSnapshot()
+                _x11ServerStatus.value = server.first
+                _x11ServerPid.value = server.second
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "startX11 failed", e)
                 logger.e("Error: ${e.message}")
@@ -356,6 +347,16 @@ class HomeViewModel : ViewModel() {
             repeat(removeCount) {
                 logs.removeAt(0)
             }
+        }
+    }
+
+    private suspend fun readServerSnapshot(): Pair<X11ServerStatus, Int?> {
+        val running = X11SessionManager.getMonitors()
+            .firstOrNull { it.status == X11ServerStatus.Running }
+        return if (running != null) {
+            X11ServerStatus.Running to running.pid
+        } else {
+            X11ServerStatus.Stopped to null
         }
     }
 
