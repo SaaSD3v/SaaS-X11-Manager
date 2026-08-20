@@ -51,6 +51,21 @@ class ContainerSettingsSnapshotTest {
     }
 
     @Test
+    fun installedMarkerCompatibilityRemainsCaseInsensitive() {
+        val snapshot = ContainerSettingsManager.parseSnapshot(
+            listOf(
+                "installed_openbox=YES",
+                "installed_jwm=true",
+                "installed_icewm=1"
+            )
+        )
+
+        assertTrue(snapshot.isGraphicSessionInstalled(GraphicSession.OPENBOX))
+        assertTrue(snapshot.isGraphicSessionInstalled(GraphicSession.JWM))
+        assertTrue(snapshot.isGraphicSessionInstalled(GraphicSession.ICEWM))
+    }
+
+    @Test
     fun malformedOrUnknownValuesRemainUnconfigured() {
         val snapshot = ContainerSettingsManager.parseSnapshot(
             listOf(
