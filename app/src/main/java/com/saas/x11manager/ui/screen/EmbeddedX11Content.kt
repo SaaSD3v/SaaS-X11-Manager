@@ -285,7 +285,7 @@ internal fun EmbeddedExtraKeysBar(
                                 maxLines = 1
                             )
                         }
-                    )
+                    }
                 }
             }
         }
