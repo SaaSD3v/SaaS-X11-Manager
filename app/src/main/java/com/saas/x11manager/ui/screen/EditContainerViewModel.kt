@@ -352,8 +352,9 @@ class EditContainerViewModel : ViewModel() {
 
                     logger.i("")
                     logger.i("[+] ${session.label} installation completed successfully")
+                    logger.i("[+] Monitor: assigned dynamically on next Start X11 (lowest available)")
                     logger.i("[+] Use Start X11 below to launch this container now")
-                    installResult = "OK: ${session.label} installed"
+                    installResult = "OK: ${session.label} installed · monitor assigned on Start X11"
                     canStartX11FromInstall = true
                     quickStartCompleted = false
                 } else {
@@ -389,7 +390,16 @@ class EditContainerViewModel : ViewModel() {
                 val (runtimeStatus, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
                 status = runtimeStatus
                 if (runtimeStatus == ContainerStatus.RUNNING) {
-                    installResult = "OK: X11 started with ${graphicSession.label}"
+                    val displaySlot = X11SessionManager.getDisplayForContainer(containerName)
+                    if (displaySlot != null) {
+                        logger.i("[+] Active monitor: ${displaySlot.describe()}")
+                        installResult =
+                            "OK: X11 started with ${graphicSession.label} · " +
+                                "Monitor ${displaySlot.monitorNumber} (${displaySlot.displayName})"
+                    } else {
+                        logger.w("[!] X11 started, but the active monitor could not be resolved")
+                        installResult = "OK: X11 started with ${graphicSession.label}"
+                    }
                     canStartX11FromInstall = false
                     quickStartCompleted = true
                 } else {
