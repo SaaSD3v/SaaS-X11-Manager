@@ -26,7 +26,6 @@ import com.saas.x11manager.util.DroidspacesRequirementState
 import com.saas.x11manager.util.RootStatus
 import com.saas.x11manager.util.X11MonitorInfo
 import com.saas.x11manager.util.X11ServerStatus
-import com.saas.x11manager.util.X11SessionManager
 
 @Composable
 fun RequirementsScreen(
@@ -35,8 +34,6 @@ fun RequirementsScreen(
     val rootStatus by viewModel.rootStatus.collectAsState()
     val dsStatus by viewModel.dsStatus.collectAsState()
     val dsRequirements by viewModel.dsRequirements.collectAsState()
-    val serverStatus by viewModel.x11ServerStatus.collectAsState()
-    val serverPid by viewModel.x11ServerPid.collectAsState()
     val rootProvider by viewModel.rootProvider.collectAsState()
     val kernelVersion by viewModel.kernelVersion.collectAsState()
     val arch by viewModel.arch.collectAsState()
@@ -44,12 +41,7 @@ fun RequirementsScreen(
     val androidSdk by viewModel.androidSdk.collectAsState()
     val deviceName by viewModel.deviceName.collectAsState()
     val containers by viewModel.containers.collectAsState()
-
-    var monitors by remember { mutableStateOf<List<X11MonitorInfo>>(emptyList()) }
-
-    LaunchedEffect(serverStatus, serverPid, containers) {
-        monitors = X11SessionManager.getMonitors()
-    }
+    val monitors by viewModel.monitors.collectAsState()
 
     val hostCheckValue = when (dsRequirements?.state) {
         DroidspacesRequirementState.READY -> "Ready"
