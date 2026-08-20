@@ -120,6 +120,28 @@ tasks.register('prepareEmbeddedLorieJava') {
         if (!receiverSource.contains(oldReceiver))
             throw new GradleException('Pinned LorieBroadcastReceiver host patch no longer matches upstream source')
         receiver.setText(receiverSource.replace(oldReceiver, newReceiver), 'UTF-8')
+
+        // Upstream CmdEntryPoint assumes that only one server instance exists.
+        // The Manager can run several displays, so make each Binder broadcast
+        // identify the exact X11 display passed on the app_process command line.
+        def cmdEntryPoint = new File(output, 'com/termux/x11/CmdEntryPoint.java')
+        def cmdSource = cmdEntryPoint.getText('UTF-8')
+        def cmdReplacements = [
+            ['private final Intent intent = createIntent();',
+             'private final Intent intent;'],
+            ['CmdEntryPoint(String[] args) {\n        if (!start(args))',
+             'CmdEntryPoint(String[] args) {\n        intent = createIntent(args.length > 0 ? args[0] : ":0");\n        if (!start(args))'],
+            ['private Intent createIntent() {',
+             'private Intent createIntent(String displayName) {'],
+            ['intent.setPackage(BuildConfig.APPLICATION_ID);',
+             'intent.setPackage(BuildConfig.APPLICATION_ID);\n        intent.putExtra(EmbeddedDisplayHost.EXTRA_X11_DISPLAY, displayName);']
+        ]
+        cmdReplacements.each { pair ->
+            if (!cmdSource.contains(pair[0]))
+                throw new GradleException('Pinned CmdEntryPoint multi-display patch no longer matches upstream source: ' + pair[0])
+            cmdSource = cmdSource.replace(pair[0], pair[1])
+        }
+        cmdEntryPoint.setText(cmdSource, 'UTF-8')
     }
 }
 
