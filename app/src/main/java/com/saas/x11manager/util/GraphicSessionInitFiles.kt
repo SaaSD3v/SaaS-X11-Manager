@@ -3,6 +3,26 @@ package com.saas.x11manager.util
 /** Pure templates for init-owned X11 session files. */
 internal object GraphicSessionInitFiles {
 
+    private fun dynamicDisplayEnvironment(): String =
+        "X11_SOCKET=\n" +
+            "for candidate in /tmp/.X11-unix/X*; do\n" +
+            "    [ -S \"\$candidate\" ] || continue\n" +
+            "    if [ -n \"\$X11_SOCKET\" ]; then\n" +
+            "        echo \"Multiple X11 sockets are mounted; refusing ambiguous display selection\" >&2\n" +
+            "        exit 1\n" +
+            "    fi\n" +
+            "    X11_SOCKET=\$candidate\n" +
+            "done\n" +
+            "if [ -z \"\$X11_SOCKET\" ]; then\n" +
+            "    echo \"No X11 socket is mounted in /tmp/.X11-unix\" >&2\n" +
+            "    exit 1\n" +
+            "fi\n" +
+            "X11_DISPLAY_NUMBER=\${X11_SOCKET##*/X}\n" +
+            "case \"\$X11_DISPLAY_NUMBER\" in\n" +
+            "    ''|*[!0-9]*) echo \"Invalid X11 socket name: \$X11_SOCKET\" >&2; exit 1 ;;\n" +
+            "esac\n" +
+            "export DISPLAY=:\$X11_DISPLAY_NUMBER\n"
+
     fun sessionScript(session: GraphicSession, shell: String): String {
         val launch = if (session == GraphicSession.NONE) {
             "exit 0\n"
@@ -11,7 +31,7 @@ internal object GraphicSessionInitFiles {
         }
 
         return "#!$shell\n" +
-            "export DISPLAY=:0\n" +
+            dynamicDisplayEnvironment() +
             "export HOME=/root\n" +
             "export USER=root\n" +
             "export SHELL=$shell\n" +
@@ -23,7 +43,7 @@ internal object GraphicSessionInitFiles {
 
     fun openRcSetupService(): String =
         "#!/sbin/openrc-run\n\n" +
-            "description=\"Setup X11 socket directory and bind mount\"\n\n" +
+            "description=\"Setup Manager X11 socket directory and bind mount\"\n\n" +
             "depend() {\n" +
             "    before x11-session\n" +
             "}\n\n" +
@@ -58,7 +78,7 @@ internal object GraphicSessionInitFiles {
 
     fun openRcSessionService(session: GraphicSession): String =
         "#!/sbin/openrc-run\n\n" +
-            "description=\"X11 ${session.label} Session on Termux:X11\"\n" +
+            "description=\"X11 ${session.label} Session on SaaS X11\"\n" +
             "command=\"/usr/local/bin/x11-session.sh\"\n" +
             "command_background=\"yes\"\n" +
             "pidfile=\"/run/x11-session.pid\"\n" +
@@ -69,7 +89,7 @@ internal object GraphicSessionInitFiles {
 
     fun systemdSocketService(): String =
         "[Unit]\n" +
-            "Description=Setup X11 socket directory\n" +
+            "Description=Setup Manager X11 socket directory\n" +
             "Before=x11-session.service\n\n" +
             "[Service]\n" +
             "Type=oneshot\n" +
@@ -86,12 +106,11 @@ internal object GraphicSessionInitFiles {
 
     fun systemdSessionService(session: GraphicSession): String =
         "[Unit]\n" +
-            "Description=X11 ${session.label} Session on Termux:X11\n" +
+            "Description=X11 ${session.label} Session on SaaS X11\n" +
             "After=network.target setup-x11-socket.service\n" +
             "Requires=setup-x11-socket.service\n\n" +
             "[Service]\n" +
             "Type=simple\n" +
-            "Environment=DISPLAY=:0\n" +
             "Environment=HOME=/root\n" +
             "Environment=USER=root\n" +
             "Environment=SHELL=/bin/bash\n" +

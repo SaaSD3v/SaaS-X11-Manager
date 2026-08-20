@@ -9,17 +9,23 @@ import kotlinx.coroutines.withContext
  * integrated SaaS X11 backend.
  *
  * Existing bind mounts are preserved, while any mount targeting
- * /usr/.X11-unix is replaced by the host socket directory owned by this app.
+ * /usr/.X11-unix is replaced by the host socket directory for the active
+ * Manager display slot.
  */
 object ContainerConfigManager {
 
     private const val X11_CONTAINER_SOCKET_DIR = "/usr/.X11-unix"
-    private val x11Bind: String
-        get() = "${Constants.X11_SOCK_DIR}:$X11_CONTAINER_SOCKET_DIR"
+    private val displaySocketDirPattern = Regex(
+        "^${Regex.escape(Constants.INTEGRATED_X11_RUNTIME_DIR)}/display-(\\d+)/\\.X11-unix$"
+    )
+
+    private fun x11Bind(displaySlot: X11DisplaySlot): String =
+        "${displaySlot.socketDir}:$X11_CONTAINER_SOCKET_DIR"
 
     suspend fun ensureManualX11Config(
         containerName: String,
-        logger: ContainerLogger? = null
+        logger: ContainerLogger? = null,
+        displaySlot: X11DisplaySlot = X11DisplaySlot(0)
     ): Boolean = withContext(Dispatchers.IO) {
         val configPath = "${Constants.CONTAINERS_DIR}/$containerName/${Constants.CONFIG_FILE}"
 
@@ -31,12 +37,12 @@ object ContainerConfigManager {
             }
 
             val original = read.out.toList()
-            val updated = buildManualX11Config(original)
+            val updated = buildManualX11Config(original, displaySlot)
 
             val originalText = original.joinToString("\n") + "\n"
             val updatedText = updated.joinToString("\n") + "\n"
             if (updatedText == originalText) {
-                logger?.i("[+] Integrated X11 container config already ready")
+                logger?.i("[+] Integrated X11 container config already ready for ${displaySlot.describe()}")
                 return@withContext true
             }
 
@@ -53,7 +59,7 @@ object ContainerConfigManager {
                 return@withContext false
             }
 
-            logger?.i("[+] Integrated X11 container config ready")
+            logger?.i("[+] Integrated X11 container config ready for ${displaySlot.describe()}")
             true
         } catch (e: Exception) {
             logger?.e("[-] X11 config error: ${e.message}")
@@ -61,8 +67,12 @@ object ContainerConfigManager {
         }
     }
 
-    internal fun buildManualX11Config(original: List<String>): List<String> {
+    internal fun buildManualX11Config(
+        original: List<String>,
+        displaySlot: X11DisplaySlot = X11DisplaySlot(0)
+    ): List<String> {
         val updated = original.toMutableList()
+        val requiredBind = x11Bind(displaySlot)
         var x11FlagFound = false
         var bindMountsFound = false
 
@@ -88,16 +98,44 @@ object ContainerConfigManager {
                         .filterNot { bindDestination(it) == X11_CONTAINER_SOCKET_DIR }
                         .toMutableList()
 
-                    if (x11Bind !in entries) entries.add(x11Bind)
+                    if (requiredBind !in entries) entries.add(requiredBind)
                     updated[index] = "bind_mounts=${entries.distinct().joinToString(",")}"
                 }
             }
         }
 
         if (!x11FlagFound) updated.add("enable_termux_x11=0")
-        if (!bindMountsFound) updated.add("bind_mounts=$x11Bind")
+        if (!bindMountsFound) updated.add("bind_mounts=$requiredBind")
 
         return updated
+    }
+
+    /**
+     * Resolves a Manager display slot from the X11 bind currently stored in a
+     * container config. This is runtime lease discovery, not a reservation:
+     * callers should only treat it as occupied while the container is active.
+     */
+    internal fun displaySlotFromBindMounts(bindMounts: String): X11DisplaySlot? {
+        return bindMounts
+            .split(',')
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .firstNotNullOfOrNull { entry ->
+                if (bindDestination(entry) != X11_CONTAINER_SOCKET_DIR) {
+                    return@firstNotNullOfOrNull null
+                }
+
+                val source = entry.substringBefore(':').trim()
+                val displayNumber = displaySocketDirPattern
+                    .matchEntire(source)
+                    ?.groupValues
+                    ?.getOrNull(1)
+                    ?.toIntOrNull()
+                    ?: return@firstNotNullOfOrNull null
+
+                X11DisplaySlot(displayNumber)
+            }
     }
 
     private fun bindDestination(entry: String): String? {
