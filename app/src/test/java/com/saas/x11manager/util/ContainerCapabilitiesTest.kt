@@ -50,4 +50,41 @@ class ContainerCapabilitiesTest {
         assertEquals(ContainerPlatform.UBUNTU, capabilities.platform)
         assertEquals(setOf(InitSystem.SYSTEMD), capabilities.availableInitSystems)
     }
+
+    @Test
+    fun batchedRuntimeProbePreservesAllCapabilityFacts() {
+        val probe = ContainerCapabilitiesDetector.parseRuntimeProbe(
+            listOf(
+                "@@SAAS_PACKAGE=deb@@",
+                "@@SAAS_OPENRC=0@@",
+                "@@SAAS_SYSTEMD=1@@",
+                "@@SAAS_OS_RELEASE_BEGIN@@",
+                "NAME=Debian GNU/Linux",
+                "ID=debian",
+                "ID_LIKE=debian",
+                "@@SAAS_OS_RELEASE_END@@"
+            )
+        )
+
+        assertEquals(ContainerPlatform.UBUNTU, probe.platform)
+        assertFalse(probe.hasOpenRc)
+        assertTrue(probe.hasSystemd)
+        assertEquals(
+            listOf("NAME=Debian GNU/Linux", "ID=debian", "ID_LIKE=debian"),
+            probe.osReleaseLines
+        )
+    }
+
+    @Test
+    fun runtimeProbeCommandChecksCapabilitiesInsteadOfDistroVersion() {
+        val command = ContainerCapabilitiesDetector.runtimeProbeCommand()
+
+        assertTrue(command.contains("command -v apk"))
+        assertTrue(command.contains("command -v apt-get"))
+        assertTrue(command.contains("command -v dpkg"))
+        assertTrue(command.contains("command -v openrc-run"))
+        assertTrue(command.contains("command -v systemctl"))
+        assertTrue(command.contains("cat /etc/os-release"))
+        assertFalse(command.contains("VERSION_ID="))
+    }
 }
