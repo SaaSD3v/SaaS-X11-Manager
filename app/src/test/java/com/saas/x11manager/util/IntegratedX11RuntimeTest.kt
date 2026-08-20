@@ -20,7 +20,7 @@ class IntegratedX11RuntimeTest {
         assertTrue(command.contains("XKB_CONFIG_ROOT='${Constants.INTEGRATED_X11_XKB_DIR}'"))
         assertTrue(command.contains("--nice-name=${slot.processName}"))
         assertTrue(command.contains("com.termux.x11.CmdEntryPoint ${slot.displayName}"))
-        assertTrue(command.contains(">${slot.logFile}"))
+        assertTrue(command.contains(">'${slot.logFile}'"))
         assertFalse(command.contains("loader.apk"))
         assertFalse(command.contains("am start -n com.termux.x11"))
     }
