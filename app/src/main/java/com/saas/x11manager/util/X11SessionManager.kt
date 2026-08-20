@@ -258,19 +258,22 @@ object X11SessionManager {
             "com.termux.x11.CmdEntryPoint ${displaySlot.displayName} " +
             ">${shellQuote(displaySlot.logFile)} 2>&1 & echo ${'$'}!"
 
-    suspend fun getMonitors(): List<X11MonitorInfo> = withContext(Dispatchers.IO) {
-        val containers = ContainerManager.listContainers()
-        val assignments = runningAssignments(containers)
-        val slotNumbers = buildSet {
-            addAll(assignments.keys)
-            addAll(discoverRuntimeSlots().map { it.number })
-        }
+    suspend fun getMonitors(): List<X11MonitorInfo> =
+        getMonitors(ContainerManager.listContainers())
 
-        slotNumbers
-            .sorted()
-            .map { number -> serverInfo(X11DisplaySlot(number), assignments[number]) }
-            .filter { it.containerName != null || it.status == X11ServerStatus.Running }
-    }
+    suspend fun getMonitors(containers: List<ContainerInfo>): List<X11MonitorInfo> =
+        withContext(Dispatchers.IO) {
+            val assignments = runningAssignments(containers)
+            val slotNumbers = buildSet {
+                addAll(assignments.keys)
+                addAll(discoverRuntimeSlots().map { it.number })
+            }
+
+            slotNumbers
+                .sorted()
+                .map { number -> serverInfo(X11DisplaySlot(number), assignments[number]) }
+                .filter { it.containerName != null || it.status == X11ServerStatus.Running }
+        }
 
     suspend fun getServerStatus(): X11ServerStatus = withContext(Dispatchers.IO) {
         if (getMonitors().any { it.status == X11ServerStatus.Running }) {
