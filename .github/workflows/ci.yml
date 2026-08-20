@@ -2,7 +2,7 @@ name: X11 Manager CI
 
 on:
   push:
-    branches: [ "main", "master", "agent/structural-fixes", "agent/integrated-x11" ]
+    branches: [ "main", "master", "agent/structural-fixes", "agent/integrated-x11", "agent/multi-display" ]
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
@@ -57,7 +57,7 @@ jobs:
         cache: gradle
 
     - name: Validate integrated X11 source
-      if: ${{ github.ref == 'refs/heads/agent/integrated-x11' }}
+      if: ${{ github.ref == 'refs/heads/agent/integrated-x11' || github.ref == 'refs/heads/agent/multi-display' }}
       run: |
         test -f third_party/termux-x11/lorie/src/main/cpp/CMakeLists.txt
         test -f third_party/termux-x11/lorie/src/main/java/com/termux/x11/CmdEntryPoint.java
