@@ -25,6 +25,9 @@ class HomeViewModel : ViewModel() {
     private val _containers = MutableStateFlow<List<ContainerInfo>>(emptyList())
     val containers: StateFlow<List<ContainerInfo>> = _containers
 
+    private val _monitors = MutableStateFlow<List<X11MonitorInfo>>(emptyList())
+    val monitors: StateFlow<List<X11MonitorInfo>> = _monitors
+
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
 
@@ -106,15 +109,13 @@ class HomeViewModel : ViewModel() {
                         }
                         available to requirements
                     }
-                    val containersDef = async(Dispatchers.IO) { ContainerManager.listContainers() }
-                    val serverDef = async(Dispatchers.IO) { readServerSnapshot() }
+                    val runtimeDef = async(Dispatchers.IO) { readRuntimeSnapshot() }
                     val systemDef = async(Dispatchers.IO) { readDeviceSnapshot() }
 
                     FullRefreshSnapshot(
                         root = rootDef.await(),
                         droidspaces = dsDef.await(),
-                        containers = containersDef.await(),
-                        server = serverDef.await(),
+                        runtime = runtimeDef.await(),
                         system = systemDef.await()
                     )
                 }
@@ -136,9 +137,7 @@ class HomeViewModel : ViewModel() {
                     runtimeGenerationAtStart == runtimeStateGeneration &&
                     runningOperationContainer == null
                 ) {
-                    _containers.value = snapshot.containers
-                    _x11ServerStatus.value = snapshot.server.first
-                    _x11ServerPid.value = snapshot.server.second
+                    applyRuntimeSnapshot(snapshot.runtime)
                 }
 
                 initialized = true
@@ -161,23 +160,14 @@ class HomeViewModel : ViewModel() {
         runtimeRefreshJob?.cancel()
         runtimeRefreshJob = viewModelScope.launch {
             try {
-                val snapshot = coroutineScope {
-                    val containersDef = async(Dispatchers.IO) { ContainerManager.listContainers() }
-                    val serverDef = async(Dispatchers.IO) { readServerSnapshot() }
-                    RuntimeRefreshSnapshot(
-                        containers = containersDef.await(),
-                        server = serverDef.await()
-                    )
-                }
+                val snapshot = readRuntimeSnapshot()
 
                 if (
                     generation != runtimeStateGeneration ||
                     runningOperationContainer != null
                 ) return@launch
 
-                _containers.value = snapshot.containers
-                _x11ServerStatus.value = snapshot.server.first
-                _x11ServerPid.value = snapshot.server.second
+                applyRuntimeSnapshot(snapshot)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -186,20 +176,34 @@ class HomeViewModel : ViewModel() {
         }
     }
 
-    private suspend fun refreshContainers() {
+    private suspend fun refreshRuntimeAfterOperation() {
         val generation = ++runtimeStateGeneration
         runtimeRefreshJob?.cancel()
 
         try {
-            val containers = ContainerManager.listContainers()
+            val snapshot = readRuntimeSnapshot()
             if (generation == runtimeStateGeneration) {
-                _containers.value = containers
+                applyRuntimeSnapshot(snapshot)
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.e("HomeViewModel", "refreshContainers() failed", e)
+            Log.e("HomeViewModel", "refreshRuntimeAfterOperation() failed", e)
         }
+    }
+
+    private fun applyRuntimeSnapshot(snapshot: RuntimeRefreshSnapshot) {
+        _containers.value = snapshot.containers
+        _monitors.value = snapshot.monitors
+        val running = snapshot.monitors.firstOrNull { it.status == X11ServerStatus.Running }
+        _x11ServerStatus.value = if (running != null) X11ServerStatus.Running else X11ServerStatus.Stopped
+        _x11ServerPid.value = running?.pid
+    }
+
+    private suspend fun readRuntimeSnapshot(): RuntimeRefreshSnapshot = withContext(Dispatchers.IO) {
+        val containers = ContainerManager.listContainers()
+        val monitors = X11SessionManager.getMonitors(containers)
+        RuntimeRefreshSnapshot(containers = containers, monitors = monitors)
     }
 
     private fun updateContainerState(name: String, status: ContainerStatus, pid: Int? = null) {
@@ -236,16 +240,12 @@ class HomeViewModel : ViewModel() {
                 if (running) {
                     updateContainerState(container.name, ContainerStatus.RUNNING, pid)
                 }
-
-                val server = readServerSnapshot()
-                _x11ServerStatus.value = server.first
-                _x11ServerPid.value = server.second
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "startX11 failed", e)
                 logger.e("Error: ${e.message}")
             } finally {
                 runningOperationContainer = null
-                refreshContainers()
+                refreshRuntimeAfterOperation()
             }
         }
     }
@@ -269,7 +269,7 @@ class HomeViewModel : ViewModel() {
                 logger.e("Error: ${e.message}")
             } finally {
                 runningOperationContainer = null
-                refreshContainers()
+                refreshRuntimeAfterOperation()
             }
         }
     }
@@ -288,9 +288,7 @@ class HomeViewModel : ViewModel() {
                 Log.e("HomeViewModel", "stopAll failed", e)
             } finally {
                 runningOperationContainer = null
-                _x11ServerStatus.value = X11ServerStatus.Stopped
-                _x11ServerPid.value = null
-                refreshContainers()
+                refreshRuntimeAfterOperation()
             }
         }
     }
@@ -350,16 +348,6 @@ class HomeViewModel : ViewModel() {
         }
     }
 
-    private suspend fun readServerSnapshot(): Pair<X11ServerStatus, Int?> {
-        val running = X11SessionManager.getMonitors()
-            .firstOrNull { it.status == X11ServerStatus.Running }
-        return if (running != null) {
-            X11ServerStatus.Running to running.pid
-        } else {
-            X11ServerStatus.Stopped to null
-        }
-    }
-
     private suspend fun getKernelVersion(): String = withContext(Dispatchers.IO) {
         try {
             val result = Shell.cmd("uname -r 2>/dev/null").exec()
@@ -395,14 +383,13 @@ class HomeViewModel : ViewModel() {
     private data class FullRefreshSnapshot(
         val root: Pair<RootStatus, String>,
         val droidspaces: Pair<Boolean, DroidspacesRequirementsResult?>,
-        val containers: List<ContainerInfo>,
-        val server: Pair<X11ServerStatus, Int?>,
+        val runtime: RuntimeRefreshSnapshot,
         val system: DeviceSnapshot
     )
 
     private data class RuntimeRefreshSnapshot(
         val containers: List<ContainerInfo>,
-        val server: Pair<X11ServerStatus, Int?>
+        val monitors: List<X11MonitorInfo>
     )
 
     private companion object {
