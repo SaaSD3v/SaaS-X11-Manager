@@ -1,31 +1,32 @@
 package com.saas.x11manager.ui.screen
 
+import android.os.Build
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Cancel
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.DisplaySettings
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.util.Constants
 import com.saas.x11manager.util.DroidspacesRequirementState
 import com.saas.x11manager.util.RootStatus
+import com.saas.x11manager.util.X11MonitorInfo
 import com.saas.x11manager.util.X11ServerStatus
+import com.saas.x11manager.util.X11SessionManager
 
 @Composable
 fun RequirementsScreen(
@@ -42,285 +43,374 @@ fun RequirementsScreen(
     val androidVersion by viewModel.androidVersion.collectAsState()
     val androidSdk by viewModel.androidSdk.collectAsState()
     val deviceName by viewModel.deviceName.collectAsState()
+    val containers by viewModel.containers.collectAsState()
 
-    val dsRequirementsBlocking =
-        dsRequirements?.state == DroidspacesRequirementState.MISSING_REQUIRED
-    val dsRequirementsWarning =
-        dsRequirements?.state == DroidspacesRequirementState.INCONCLUSIVE
+    var monitors by remember { mutableStateOf<List<X11MonitorInfo>>(emptyList()) }
 
-    val requiredReady =
-        rootStatus == RootStatus.Granted &&
-            dsStatus &&
-            !dsRequirementsBlocking
+    LaunchedEffect(serverStatus, serverPid, containers) {
+        monitors = X11SessionManager.getMonitors()
+    }
+
+    val hostCheckValue = when (dsRequirements?.state) {
+        DroidspacesRequirementState.READY -> "Ready"
+        DroidspacesRequirementState.MISSING_REQUIRED -> "Missing required host capabilities"
+        DroidspacesRequirementState.INCONCLUSIVE -> "Inconclusive"
+        null -> "Not available"
+    }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            DeviceOverviewCard(
-                deviceName = deviceName.ifEmpty { "Android device" },
-                androidVersion = androidVersion.ifEmpty { "Unknown" },
-                androidSdk = androidSdk.ifEmpty { "?" },
-                arch = arch.ifEmpty { "Unknown" },
-                kernel = kernelVersion.ifEmpty { "Unknown" }
-            )
-        }
-
-        item {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                border = BorderStroke(
-                    1.dp,
-                    if (requiredReady) {
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
-                    } else {
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                    }
-                )
-            ) {
-                Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                    SectionHeader(
-                        icon = Icons.Default.Security,
-                        title = "Required environment",
-                        subtitle = when {
-                            requiredReady && dsRequirementsWarning -> "Ready with a DroidSpaces diagnostic warning"
-                            requiredReady -> "Ready for integrated X11"
-                            else -> "Check the items below"
-                        }
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    HorizontalDivider()
-
-                    RequirementRow(
-                        icon = Icons.Default.Security,
-                        label = "Root Access",
-                        value = when (rootStatus) {
-                            RootStatus.Granted -> rootProvider.ifEmpty { "Granted" }
-                            RootStatus.Denied -> "Denied"
-                            RootStatus.Checking -> "Checking..."
-                        },
-                        detail = when (rootStatus) {
-                            RootStatus.Granted -> "Root permission granted"
-                            RootStatus.Denied -> "Grant root access to continue"
-                            RootStatus.Checking -> null
-                        },
-                        state = when (rootStatus) {
-                            RootStatus.Granted -> RowState.OK
-                            RootStatus.Denied -> RowState.ERROR
-                            RootStatus.Checking -> RowState.INFO
-                        }
-                    )
-
-                    RequirementRow(
-                        icon = Icons.Default.Computer,
-                        label = "DroidSpaces",
-                        value = if (dsStatus) "Available" else "Not found",
-                        detail = Constants.DS_BINARY_PATH,
-                        state = if (dsStatus) RowState.OK else RowState.ERROR
-                    )
-
-                    if (dsStatus && dsRequirements != null) {
-                        RequirementRow(
-                            icon = Icons.Default.Security,
-                            label = "DroidSpaces Host Check",
-                            value = when (dsRequirements?.state) {
-                                DroidspacesRequirementState.READY -> "Ready"
-                                DroidspacesRequirementState.MISSING_REQUIRED -> "Missing requirements"
-                                DroidspacesRequirementState.INCONCLUSIVE -> "Inconclusive"
-                                null -> "Not checked"
-                            },
-                            detail = dsRequirements?.summary,
-                            state = when (dsRequirements?.state) {
-                                DroidspacesRequirementState.READY -> RowState.OK
-                                DroidspacesRequirementState.MISSING_REQUIRED -> RowState.ERROR
-                                DroidspacesRequirementState.INCONCLUSIVE -> RowState.WARNING
-                                null -> RowState.INFO
-                            }
-                        )
-                    }
-
-                    RequirementRow(
-                        icon = Icons.Default.DisplaySettings,
-                        label = "Integrated X11 Engine",
-                        value = "Bundled",
-                        detail = "Termux:X11/Lorie is compiled into SaaS X11 Manager",
-                        state = RowState.OK
-                    )
-                }
-            }
-        }
-
-        item {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                border = BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
-            ) {
-                Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                    SectionHeader(
-                        icon = Icons.Default.DisplaySettings,
-                        title = "Integrated X11 runtime",
-                        subtitle = "Current SaaS-owned host display state"
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    HorizontalDivider()
-
-                    RequirementRow(
-                        icon = Icons.Default.DisplaySettings,
-                        label = "X11 Server",
-                        value = when (serverStatus) {
-                            X11ServerStatus.Running -> "Running"
-                            X11ServerStatus.Stopped -> "Stopped"
-                        },
-                        detail = if (serverPid != null) {
-                            "${Constants.X11_SERVER_PROCESS} · PID $serverPid"
-                        } else {
-                            "Starts from Home, Display, or the post-install Start X11 action"
-                        },
-                        state = when (serverStatus) {
-                            X11ServerStatus.Running -> RowState.OK
-                            X11ServerStatus.Stopped -> RowState.WARNING
-                        }
-                    )
-
-                    RequirementRow(
-                        icon = Icons.Default.Info,
-                        label = "X11 Socket",
-                        value = Constants.X11_DISPLAY,
-                        detail = Constants.X11_SOCK_FILE,
-                        state = RowState.INFO
-                    )
-                }
-            }
-        }
-
-        item {
-            Text(
-                "The external Termux:X11 APK and its loader are not runtime requirements. " +
-                    "The integrated engine is started from the SaaS X11 Manager APK itself.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
-private fun DeviceOverviewCard(
-    deviceName: String,
-    androidVersion: String,
-    androidSdk: String,
-    arch: String,
-    kernel: String
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    Icons.Default.PhoneAndroid,
-                    contentDescription = null,
-                    modifier = Modifier.size(30.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        deviceName,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
+                        "Runtime diagnostics",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        "Android $androidVersion · SDK $androidSdk",
-                        style = MaterialTheme.typography.bodyMedium,
+                        "Host, DroidSpaces and integrated X11 technical state",
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                TextButton(onClick = { viewModel.refresh() }) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("Refresh")
+                }
             }
+        }
 
-            HorizontalDivider(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
-            DeviceInfoRow("Architecture", arch)
-            DeviceInfoRow("Kernel", kernel)
+        item {
+            TechnicalSection(
+                icon = Icons.Default.PhoneAndroid,
+                title = "Android host"
+            ) {
+                TechnicalRow("Device", deviceName.ifEmpty { "Unknown" })
+                TechnicalDivider()
+                TechnicalRow(
+                    "Android",
+                    if (androidVersion.isEmpty()) "Unknown" else androidVersion,
+                    detail = "SDK ${androidSdk.ifEmpty { "?" }}"
+                )
+                TechnicalDivider()
+                TechnicalRow(
+                    "Primary ABI",
+                    arch.ifEmpty { "Unknown" },
+                    detail = Build.SUPPORTED_ABIS.joinToString(", ").ifEmpty { "No ABI reported" }
+                )
+                TechnicalDivider()
+                TechnicalRow("Kernel", kernelVersion.ifEmpty { "Unknown" })
+            }
+        }
+
+        item {
+            TechnicalSection(
+                icon = Icons.Default.Security,
+                title = "Privileged host interface"
+            ) {
+                TechnicalRow(
+                    label = "Root access",
+                    value = when (rootStatus) {
+                        RootStatus.Granted -> "Granted"
+                        RootStatus.Denied -> "Denied"
+                        RootStatus.Checking -> "Checking"
+                    },
+                    detail = rootProvider.ifEmpty { null },
+                    isError = rootStatus == RootStatus.Denied
+                )
+                TechnicalDivider()
+                TechnicalRow(
+                    label = "DroidSpaces backend",
+                    value = if (dsStatus) "Available" else "Unavailable",
+                    detail = Constants.DS_BINARY_PATH,
+                    isError = !dsStatus
+                )
+                TechnicalDivider()
+                TechnicalRow(
+                    label = "DroidSpaces base",
+                    value = Constants.DS_BASE_DIR
+                )
+                TechnicalDivider()
+                TechnicalRow(
+                    label = "Host capability check",
+                    value = hostCheckValue,
+                    detail = dsRequirements?.summary,
+                    isError = dsRequirements?.state == DroidspacesRequirementState.MISSING_REQUIRED
+                )
+            }
+        }
+
+        item {
+            TechnicalSection(
+                icon = Icons.Default.DisplaySettings,
+                title = "Integrated X11 engine"
+            ) {
+                TechnicalRow(
+                    "Renderer",
+                    "Embedded Termux:X11 / Lorie",
+                    detail = "Runs inside the SaaS X11 Manager APK"
+                )
+                TechnicalDivider()
+                TechnicalRow(
+                    "Server entry point",
+                    "com.termux.x11.CmdEntryPoint",
+                    detail = "Launched through Android app_process"
+                )
+                TechnicalDivider()
+                TechnicalRow(
+                    "Runtime root",
+                    Constants.INTEGRATED_X11_RUNTIME_DIR
+                )
+                TechnicalDivider()
+                TechnicalRow(
+                    "Shared XKB root",
+                    Constants.INTEGRATED_X11_XKB_DIR
+                )
+                TechnicalDivider()
+                TechnicalRow(
+                    "Display allocation",
+                    "Lowest free X11 display",
+                    detail = "Monitor 1 = :0; additional monitors use :1, :2, ..."
+                )
+                TechnicalDivider()
+                TechnicalRow(
+                    "Socket isolation",
+                    "Per-display runtime",
+                    detail = "display-N/.X11-unix/XN with a matching per-display process and log"
+                )
+            }
+        }
+
+        item {
+            TechnicalSection(
+                icon = Icons.Default.Computer,
+                title = "Container integration"
+            ) {
+                TechnicalRow(
+                    "Containers",
+                    "${containers.count { it.isRunning }} running / ${containers.size} total"
+                )
+                TechnicalDivider()
+                TechnicalRow(
+                    "DroidSpaces X11 flag",
+                    "enable_termux_x11=0",
+                    detail = "The Manager owns the X11 server lifecycle"
+                )
+                TechnicalDivider()
+                TechnicalRow(
+                    "Host socket bind",
+                    "display-N/.X11-unix → /usr/.X11-unix"
+                )
+                TechnicalDivider()
+                TechnicalRow(
+                    "Container socket bridge",
+                    "/usr/.X11-unix → /tmp/.X11-unix"
+                )
+                TechnicalDivider()
+                TechnicalRow(
+                    "Session launcher",
+                    "/usr/local/bin/x11-session.sh",
+                    detail = "DISPLAY is resolved from the mounted XN socket at runtime"
+                )
+            }
+        }
+
+        item {
+            TechnicalSection(
+                icon = Icons.Default.Storage,
+                title = "X11 monitor runtime",
+                trailing = {
+                    Text(
+                        "${monitors.count { it.status == X11ServerStatus.Running }} active",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            ) {
+                if (monitors.isEmpty()) {
+                    TechnicalRow(
+                        "Displays",
+                        "No active or assigned monitor",
+                        detail = "Monitor 1 (:0) remains the primary UI slot even while stopped"
+                    )
+                } else {
+                    monitors.sortedBy { it.slot.number }.forEachIndexed { index, monitor ->
+                        if (index > 0) TechnicalDivider()
+                        MonitorRuntimeBlock(monitor)
+                    }
+                }
+            }
+        }
+
+        item {
+            TechnicalSection(
+                icon = Icons.Default.Info,
+                title = "Runtime ownership"
+            ) {
+                TechnicalRow(
+                    "Renderer Binder",
+                    "One service per X11 display",
+                    detail = "The visible LorieView binds only to the currently selected display"
+                )
+                TechnicalDivider()
+                TechnicalRow(
+                    "Input routing",
+                    "Selected display only",
+                    detail = "Mouse, touch, stylus and keyboard are routed to the focused embedded surface"
+                )
+                TechnicalDivider()
+                TechnicalRow(
+                    "External Termux:X11 APK",
+                    "Not used at runtime",
+                    detail = "No upstream MainActivity or external loader is required"
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun SectionHeader(
-    icon: ImageVector,
-    title: String,
-    subtitle: String
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+private fun MonitorRuntimeBlock(monitor: X11MonitorInfo) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            modifier = Modifier.size(24.dp),
-            tint = MaterialTheme.colorScheme.primary
-        )
-        Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text(
-                title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
+                "Monitor ${monitor.monitorNumber}",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f)
             )
             Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
+                monitor.displayName,
+                style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+
+        TechnicalCompactRow(
+            "State",
+            if (monitor.status == X11ServerStatus.Running) "Running" else "Stopped"
+        )
+        TechnicalCompactRow("Container", monitor.containerName ?: "Unassigned")
+        TechnicalCompactRow("PID", monitor.pid?.toString() ?: "—")
+        TechnicalCompactRow("Process", monitor.slot.processName)
+        TechnicalCompactRow("Runtime", monitor.slot.runtimeDir)
+        TechnicalCompactRow("Socket", monitor.slot.socketFile)
+        TechnicalCompactRow("Log", monitor.slot.logFile)
     }
 }
 
-private enum class RowState { OK, ERROR, WARNING, INFO }
+@Composable
+private fun TechnicalSection(
+    icon: ImageVector,
+    title: String,
+    trailing: (@Composable () -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+        )
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 15.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(21.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                trailing?.invoke()
+            }
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 5.dp),
+                content = content
+            )
+        }
+    }
+}
 
 @Composable
-private fun RequirementRow(
-    icon: ImageVector,
+private fun TechnicalRow(
     label: String,
     value: String,
-    detail: String?,
-    state: RowState
+    detail: String? = null,
+    isError: Boolean = false
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 11.dp),
+        verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Column(Modifier.weight(1f)) {
+        Column(modifier = Modifier.weight(0.42f)) {
             Text(
                 label,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium
             )
-            if (!detail.isNullOrEmpty()) {
+        }
+        Column(
+            modifier = Modifier.weight(0.58f),
+            horizontalAlignment = Alignment.End
+        ) {
+            Text(
+                value,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = if (isError) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (!detail.isNullOrBlank()) {
+                Spacer(Modifier.height(2.dp))
                 Text(
                     detail,
                     style = MaterialTheme.typography.bodySmall,
@@ -328,49 +418,34 @@ private fun RequirementRow(
                 )
             }
         }
-        Column(horizontalAlignment = Alignment.End) {
-            Icon(
-                imageVector = when (state) {
-                    RowState.OK -> Icons.Default.CheckCircle
-                    RowState.ERROR -> Icons.Default.Cancel
-                    RowState.WARNING -> Icons.Default.Warning
-                    RowState.INFO -> Icons.Default.Info
-                },
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = when (state) {
-                    RowState.OK -> MaterialTheme.colorScheme.primary
-                    RowState.ERROR -> MaterialTheme.colorScheme.error
-                    RowState.WARNING -> MaterialTheme.colorScheme.tertiary
-                    RowState.INFO -> MaterialTheme.colorScheme.onSurfaceVariant
-                }
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                value,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
     }
 }
 
 @Composable
-private fun DeviceInfoRow(label: String, value: String) {
+private fun TechnicalCompactRow(label: String, value: String) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top
     ) {
         Text(
             label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(72.dp)
         )
         Text(
             value,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
         )
     }
+}
+
+@Composable
+private fun TechnicalDivider() {
+    HorizontalDivider(
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
+    )
 }
