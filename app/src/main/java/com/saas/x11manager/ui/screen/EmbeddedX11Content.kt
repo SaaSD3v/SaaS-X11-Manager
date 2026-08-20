@@ -43,6 +43,7 @@ internal fun publishLoriePreferenceChange(context: Context, key: String) {
 
 @Composable
 internal fun EmbeddedX11Surface(
+    displayName: String = ":0",
     modifier: Modifier = Modifier,
     onConnectionChanged: (Boolean) -> Unit
 ) {
@@ -93,10 +94,17 @@ internal fun EmbeddedX11Surface(
                     connected() && EmbeddedDisplayHost.handleKey(this, event)
                 }
                 requestFocus()
+                EmbeddedDisplayHost.selectDisplay(displayName)
                 EmbeddedDisplayHost.tryConnect()
             }
         },
         update = { view ->
+            val selectedChanged = EmbeddedDisplayHost.getSelectedDisplay() != displayName
+            if (selectedChanged) {
+                onConnectionChanged(false)
+                EmbeddedDisplayHost.selectDisplay(displayName)
+            }
+
             val connected = view.connected()
             onConnectionChanged(connected)
             if (!connected) EmbeddedDisplayHost.tryConnect()
@@ -277,7 +285,7 @@ internal fun EmbeddedExtraKeysBar(
                                 maxLines = 1
                             )
                         }
-                    }
+                    )
                 }
             }
         }
