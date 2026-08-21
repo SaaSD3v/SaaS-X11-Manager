@@ -25,8 +25,15 @@ internal object GraphicSessionRuntimeController {
             "if command -v systemctl >/dev/null 2>&1 && " +
             "test -f /etc/systemd/system/x11-session.service; then " +
             "printf '%s\\n' '${INIT_MARKER}systemd'; " +
-            "systemctl start setup-x11-socket.service && " +
-            "test -S \"\$expected\" && " +
+            // setup-x11-socket is a prerequisite diagnostic, not a reason to
+            // short-circuit before we inspect the session service itself. A
+            // healthy session may already be active when the Manager arrives.
+            "setup_exit=0; " +
+            "systemctl start setup-x11-socket.service >/dev/null 2>&1 || setup_exit=\$?; " +
+            "printf '%s\\n' \"${ACTION_MARKER}socket-setup-exit=\$setup_exit\"; " +
+            "if test -S \"\$expected\"; then " +
+            "printf '%s\\n' '${ACTION_MARKER}socket-visible'; " +
+            "else printf '%s\\n' '${ACTION_MARKER}socket-not-visible'; fi; " +
             "{ " +
             // The init system may already have launched the configured session
             // while the container was booting. Restarting an already-running WM
@@ -50,6 +57,9 @@ internal object GraphicSessionRuntimeController {
             "if [ \"\$ready\" -eq 1 ]; then " +
             "printf '%s\\n' '${ACTION_MARKER}active'; true; else " +
             "printf '%s\\n' '${DIAG_MARKER}systemd session did not stabilize' >&2; " +
+            "printf '%s\\n' \"${DIAG_MARKER}expected socket: \$expected\" >&2; " +
+            "printf '%s\\n' \"${DIAG_MARKER}socket visible: \$(test -S \"\$expected\" && echo yes || echo no)\" >&2; " +
+            "printf '%s\\n' \"${DIAG_MARKER}setup-x11-socket active: \$(systemctl is-active setup-x11-socket.service 2>/dev/null || true)\" >&2; " +
             "systemctl --no-pager --full status x11-session.service >&2 || true; " +
             "if command -v journalctl >/dev/null 2>&1; then " +
             "journalctl -u x11-session.service -n 24 --no-pager >&2 || true; fi; " +
@@ -58,8 +68,12 @@ internal object GraphicSessionRuntimeController {
             "elif command -v rc-service >/dev/null 2>&1 && " +
             "test -x /etc/init.d/x11-session; then " +
             "printf '%s\\n' '${INIT_MARKER}openrc'; " +
-            "rc-service x11-setup start && " +
-            "test -S \"\$expected\" && " +
+            "setup_exit=0; " +
+            "rc-service x11-setup start >/dev/null 2>&1 || setup_exit=\$?; " +
+            "printf '%s\\n' \"${ACTION_MARKER}socket-setup-exit=\$setup_exit\"; " +
+            "if test -S \"\$expected\"; then " +
+            "printf '%s\\n' '${ACTION_MARKER}socket-visible'; " +
+            "else printf '%s\\n' '${ACTION_MARKER}socket-not-visible'; fi; " +
             "{ " +
             "ready=0; " +
             "if rc-service x11-session status >/dev/null 2>&1; then " +
@@ -76,6 +90,8 @@ internal object GraphicSessionRuntimeController {
             "if [ \"\$ready\" -eq 1 ]; then " +
             "printf '%s\\n' '${ACTION_MARKER}active'; true; else " +
             "printf '%s\\n' '${DIAG_MARKER}openrc session did not stabilize' >&2; " +
+            "printf '%s\\n' \"${DIAG_MARKER}expected socket: \$expected\" >&2; " +
+            "printf '%s\\n' \"${DIAG_MARKER}socket visible: \$(test -S \"\$expected\" && echo yes || echo no)\" >&2; " +
             "rc-service x11-session status >&2 || true; false; fi; " +
             "}; " +
             "else echo 'No Manager x11-session service is provisioned' >&2; exit 127; fi"
@@ -204,7 +220,21 @@ internal object GraphicSessionRuntimeController {
             .distinct()
             .toList()
         for (action in actions) {
-            logger?.i("[CTX] Graphic session action: $action")
+            when {
+                action == "socket-not-visible" ->
+                    logger?.w("[!] Container X11 socket was not visible during the prerequisite check")
+                action.startsWith("socket-setup-exit=") && action != "socket-setup-exit=0" ->
+                    logger?.w("[!] X11 socket setup service returned ${action.substringAfter('=')}")
+                action == "socket-visible" ->
+                    logger?.i("[+] Expected container X11 socket is visible")
+                action == "already-active" ->
+                    logger?.i("[+] Graphic session service was already active; preserving it")
+                action == "start-requested" ->
+                    logger?.i("[*] Graphic session service was inactive; start requested")
+                action == "active" ->
+                    logger?.i("[+] Graphic session service confirmed active")
+                else -> logger?.i("[CTX] Graphic session action: $action")
+            }
         }
     }
 
