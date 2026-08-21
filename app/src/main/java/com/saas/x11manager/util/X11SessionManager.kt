@@ -165,6 +165,24 @@ object X11SessionManager {
     private fun shellQuote(value: String): String =
         "'" + value.replace("'", "'\\''") + "'"
 
+    private fun formatPids(pids: Collection<Int>): String =
+        pids.filter { it > 0 }.distinct().joinToString(",").ifEmpty { "none" }
+
+    private suspend fun logServerContext(
+        displaySlot: X11DisplaySlot,
+        containerName: String?,
+        logger: ContainerLogger?
+    ) {
+        logger?.i("[CTX] Monitor: ${displaySlot.monitorNumber}")
+        logger?.i("[CTX] Display: ${displaySlot.displayName}")
+        logger?.i("[CTX] Process: ${displaySlot.processName}")
+        logger?.i("[CTX] Runtime: ${displaySlot.runtimeDir}")
+        logger?.i("[CTX] Socket: ${displaySlot.socketFile}")
+        logger?.i("[CTX] Lock: ${displaySlot.lockFile}")
+        logger?.i("[CTX] Server log: ${displaySlot.logFile}")
+        logger?.i("[CTX] Container owner: ${containerName ?: "none (raw monitor)"}")
+    }
+
     private fun discoverRuntimeSlots(): List<X11DisplaySlot> {
         val base = shellQuote(Constants.INTEGRATED_X11_RUNTIME_DIR)
         return try {
@@ -309,11 +327,23 @@ object X11SessionManager {
         containerName: String? = null,
         logger: ContainerLogger? = null
     ): Result<ServerLease> = withContext(Dispatchers.IO) {
+        val operationStartedAt = System.nanoTime()
         try {
+            logger?.i("--- Integrated X11 Server Start ---")
+            logServerContext(displaySlot, containerName, logger)
+            logger?.i("[CTX] XKB root: ${Constants.INTEGRATED_X11_XKB_DIR}")
+            logger?.i("[*] Inspecting existing server state...")
+
             val liveBefore = getLiveServerPids(displaySlot)
-            if (hasSocket(displaySlot) && liveBefore.isNotEmpty()) {
+            val socketBefore = hasSocket(displaySlot)
+            logger?.i("[CTX] Existing server PIDs: ${formatPids(liveBefore)}")
+            logger?.i("[CTX] Existing socket: ${if (socketBefore) "present" else "absent"}")
+
+            if (socketBefore && liveBefore.isNotEmpty()) {
                 val pid = liveBefore.first()
                 logger?.i("[+] Reusing ${displaySlot.describe()} (PID=$pid)")
+                logger?.i("[CTX] Server lease: reused")
+                logger?.i("[CTX] Start duration: ${(System.nanoTime() - operationStartedAt) / 1_000_000L}ms")
                 return@withContext Result.success(
                     ServerLease(slot = displaySlot, pid = pid, reused = true)
                 )
@@ -323,22 +353,31 @@ object X11SessionManager {
                 logger?.w(
                     "[!] Stale ${displaySlot.processName} process found without ${displaySlot.socketFile}; restarting it"
                 )
+                logger?.i("[*] Killing stale server PIDs: ${formatPids(liveBefore)}")
                 killPids(liveBefore)
             }
-            if (hasSocket(displaySlot)) {
+            if (socketBefore) {
                 logger?.w("[!] Stale ${displaySlot.displayName} socket found; replacing it")
             }
+            logger?.i("[*] Cleaning stale socket/lock artifacts...")
             clearX11SocketFiles(displaySlot)
+            logger?.i("[+] Stale runtime artifacts cleared")
 
+            logger?.i("[*] Preparing isolated runtime directory...")
             if (!prepareRuntimeDirectory(displaySlot)) {
+                logger?.e("[-] Runtime directory preparation failed: ${displaySlot.runtimeDir}")
                 return@withContext Result.failure(
                     IllegalStateException(
                         "Could not prepare runtime directory for ${displaySlot.describe()}"
                     )
                 )
             }
+            logger?.i("[+] Runtime directory ready: ${displaySlot.runtimeDir}")
 
-            if (!hasCachedXkbConfig()) {
+            if (hasCachedXkbConfig()) {
+                logger?.i("[+] Shared XKB cache ready")
+            } else {
+                logger?.i("[*] Shared XKB cache is missing; staging configuration...")
                 if (containerName.isNullOrBlank()) {
                     return@withContext Result.failure(
                         IllegalStateException(
@@ -359,11 +398,18 @@ object X11SessionManager {
                     IllegalStateException("Could not resolve SaaS X11 Manager APK path")
                 )
             }
+            logger?.i("[CTX] Manager APK: $apkPath")
+            logger?.i("[CTX] Entrypoint: com.termux.x11.CmdEntryPoint ${displaySlot.displayName}")
+            logger?.i("[CTX] Process nice-name: ${displaySlot.processName}")
+            logger?.i("[*] Launching integrated X11 app_process...")
 
-            logger?.i("[*] Starting ${displaySlot.describe()}...")
+            val launchStartedAt = System.nanoTime()
             val launch = Shell.cmd(buildIntegratedServerCommand(apkPath, displaySlot)).exec()
             val capturedPid = launch.out.asReversed()
                 .firstNotNullOfOrNull { it.trim().toIntOrNull() }
+            logger?.i("[CTX] Launcher exit code: ${launch.code}")
+            logger?.i("[CTX] Captured launcher PID: ${capturedPid ?: "none"}")
+            logger?.i("[*] Waiting up to 10s for X11 process and socket...")
 
             val deadline = System.nanoTime() + 10_000_000_000L
             while (System.nanoTime() < deadline) {
@@ -373,8 +419,13 @@ object X11SessionManager {
                         capturedPid != null && capturedPid in live -> capturedPid
                         else -> live.first()
                     }
+                    val readyMs = (System.nanoTime() - launchStartedAt) / 1_000_000L
                     logger?.i("[+] ${displaySlot.describe()} ready (PID=$pid)")
                     logger?.i("[+] X11 socket: ${displaySlot.socketFile}")
+                    logger?.i("[CTX] Live server PIDs: ${formatPids(live)}")
+                    logger?.i("[CTX] Server readiness: ${readyMs}ms")
+                    logger?.i("[CTX] Server lease: new")
+                    logger?.i("[CTX] Total start duration: ${(System.nanoTime() - operationStartedAt) / 1_000_000L}ms")
                     return@withContext Result.success(
                         ServerLease(slot = displaySlot, pid = pid, reused = false)
                     )
@@ -383,8 +434,17 @@ object X11SessionManager {
             }
 
             val liveAfter = getLiveServerPids(displaySlot)
+            val socketAfter = hasSocket(displaySlot)
+            logger?.e("[-] X11 server readiness timed out")
+            logger?.e("[-] Final live PIDs: ${formatPids(liveAfter)}")
+            logger?.e("[-] Final socket state: ${if (socketAfter) "present" else "absent"}")
+            logger?.e("[-] Server log: ${displaySlot.logFile}")
+            if (liveAfter.isNotEmpty()) {
+                logger?.i("[*] Cleaning timed-out server PIDs: ${formatPids(liveAfter)}")
+            }
             killPids(liveAfter)
             clearX11SocketFiles(displaySlot)
+            logger?.i("[+] Timed-out X11 runtime cleaned")
             Result.failure(
                 IllegalStateException(
                     "${displaySlot.describe()} did not create ${displaySlot.socketFile}; " +
@@ -393,6 +453,7 @@ object X11SessionManager {
             )
         } catch (e: Exception) {
             logger?.e("[-] Integrated X11 error on ${displaySlot.describe()}: ${e.message}")
+            logger?.e("[-] Operation duration: ${(System.nanoTime() - operationStartedAt) / 1_000_000L}ms")
             Result.failure(e)
         }
     }
@@ -417,7 +478,15 @@ object X11SessionManager {
     ).map { it.pid }
 
     private suspend fun rollbackServer(lease: ServerLease, logger: ContainerLogger? = null) {
-        if (lease.reused) return
+        if (lease.reused) {
+            logger?.i("[CTX] Rollback skipped: ${lease.slot.describe()} was reused, not created by this operation")
+            return
+        }
+        logger?.i("--- Integrated X11 Server Rollback ---")
+        logger?.i("[CTX] Monitor: ${lease.slot.monitorNumber}")
+        logger?.i("[CTX] Display: ${lease.slot.displayName}")
+        logger?.i("[CTX] PID: ${lease.pid}")
+        logger?.i("[*] Killing newly-created X11 server after failed session start...")
         killPids(listOf(lease.pid))
         clearX11SocketFiles(lease.slot)
         logger?.i("[+] Rolled back ${lease.slot.describe()} after failed session start")
@@ -430,18 +499,54 @@ object X11SessionManager {
         displaySlot: X11DisplaySlot,
         logger: ContainerLogger? = null
     ): Boolean = withContext(Dispatchers.IO) {
+        val operationStartedAt = System.nanoTime()
         try {
+            logger?.i("--- Integrated X11 Server Stop ---")
+            logServerContext(displaySlot, null, logger)
+            logger?.i("[*] Inspecting server state before stop...")
             val livePids = getLiveServerPids(displaySlot)
+            val socketBefore = hasSocket(displaySlot)
+            logger?.i("[CTX] Live PIDs before stop: ${formatPids(livePids)}")
+            logger?.i("[CTX] Socket before stop: ${if (socketBefore) "present" else "absent"}")
+
             if (livePids.isNotEmpty()) {
+                logger?.i("[*] Sending SIGKILL to server PIDs: ${formatPids(livePids)}")
                 killPids(livePids)
-                logger?.i(
-                    "[+] Stopped ${displaySlot.describe()} (PIDs=${livePids.joinToString(",")})"
-                )
+            } else {
+                logger?.i("[+] No live ${displaySlot.processName} process found")
             }
+
+            logger?.i("[*] Removing X11 socket and lock files...")
             clearX11SocketFiles(displaySlot)
-            true
+            delay(50)
+
+            val remainingPids = getLiveServerPids(displaySlot)
+            val socketAfter = hasSocket(displaySlot)
+            logger?.i("[CTX] Live PIDs after stop: ${formatPids(remainingPids)}")
+            logger?.i("[CTX] Socket after stop: ${if (socketAfter) "present" else "absent"}")
+            logger?.i("[CTX] Stop duration: ${(System.nanoTime() - operationStartedAt) / 1_000_000L}ms")
+
+            if (remainingPids.isNotEmpty() || socketAfter) {
+                logger?.e("[-] Could not fully stop ${displaySlot.describe()}")
+                if (remainingPids.isNotEmpty()) {
+                    logger?.e("[-] Remaining PIDs: ${formatPids(remainingPids)}")
+                }
+                if (socketAfter) {
+                    logger?.e("[-] Socket still present: ${displaySlot.socketFile}")
+                }
+                false
+            } else {
+                if (livePids.isNotEmpty()) {
+                    logger?.i("[+] Stopped ${displaySlot.describe()} (PIDs=${livePids.joinToString(",")})")
+                } else {
+                    logger?.i("[+] ${displaySlot.describe()} was already stopped")
+                }
+                logger?.i("[+] X11 runtime cleanup verified")
+                true
+            }
         } catch (e: Exception) {
             logger?.e("[-] Could not stop ${displaySlot.describe()}: ${e.message}")
+            logger?.e("[-] Stop duration: ${(System.nanoTime() - operationStartedAt) / 1_000_000L}ms")
             false
         }
     }
@@ -494,6 +599,7 @@ object X11SessionManager {
     ): X11DisplaySlot? = withContext(Dispatchers.IO) {
         var serverLease: ServerLease? = null
         var containerStartAccepted = false
+        val operationStartedAt = System.nanoTime()
 
         try {
             logger?.i("--- Starting Integrated X11 Session ---")
@@ -504,7 +610,17 @@ object X11SessionManager {
                 return@withContext null
             }
             val wasRunning = before.isRunning
+            logger?.i("[CTX] Container: $containerName")
+            logger?.i("[CTX] Initial container status: ${before.status}")
+            logger?.i("[CTX] Initial container PID: ${before.pid ?: "none"}")
+            logger?.i("[CTX] Configured init: ${before.initSystem}")
+
             val displaySlot = selectDisplaySlotForContainer(containerName)
+            logger?.i("[CTX] Selected monitor: ${displaySlot.monitorNumber}")
+            logger?.i("[CTX] Selected display: ${displaySlot.displayName}")
+            logger?.i("[CTX] Selected process: ${displaySlot.processName}")
+            logger?.i("[CTX] Selected runtime: ${displaySlot.runtimeDir}")
+            logger?.i("[CTX] Selected socket: ${displaySlot.socketFile}")
 
             if (wasRunning) {
                 logger?.i("[+] Keeping ${displaySlot.describe()} for running container $containerName")
@@ -520,6 +636,7 @@ object X11SessionManager {
                     logger?.e("[-] Container X11 config is not ready")
                     return@withContext null
                 }
+                logger?.i("[+] Container X11 configuration confirmed")
             }
 
             logger?.i("")
@@ -530,6 +647,8 @@ object X11SessionManager {
             }
             val activeServer = serverResult.getOrThrow()
             serverLease = activeServer
+            logger?.i("[CTX] X11 server PID: ${activeServer.pid}")
+            logger?.i("[CTX] X11 server lease: ${if (activeServer.reused) "reused" else "new"}")
 
             logger?.i("")
             if (wasRunning) {
@@ -554,8 +673,10 @@ object X11SessionManager {
                 }
             }
 
-            logger?.i("[*] Confirming container runtime...")
+            logger?.i("[*] Confirming container runtime (timeout 5s)...")
+            val runtimeWaitStartedAt = System.nanoTime()
             val (runtimeStatus, pid) = waitForContainerRuntime(containerName)
+            logger?.i("[CTX] Runtime confirmation duration: ${(System.nanoTime() - runtimeWaitStartedAt) / 1_000_000L}ms")
             when (runtimeStatus) {
                 ContainerStatus.RUNNING ->
                     logger?.i("[+] Container runtime active${if (pid != null) " (PID=$pid)" else ""}")
@@ -566,7 +687,9 @@ object X11SessionManager {
             }
 
             logger?.i("[*] Waiting for container command readiness (15s)...")
+            val commandWaitStartedAt = System.nanoTime()
             val commandReady = waitForContainerCommandReady(containerName)
+            logger?.i("[CTX] Command readiness duration: ${(System.nanoTime() - commandWaitStartedAt) / 1_000_000L}ms")
             if (commandReady) {
                 logger?.i("[+] Container command channel ready")
             } else {
@@ -581,6 +704,16 @@ object X11SessionManager {
             }
 
             logger?.i("")
+            logger?.i("--- Integrated X11 Session Result ---")
+            logger?.i("[CTX] Container runtime: $runtimeStatus")
+            logger?.i("[CTX] Container PID: ${pid ?: "none"}")
+            logger?.i("[CTX] Command channel ready: ${if (commandReady) "yes" else "no"}")
+            logger?.i("[CTX] Graphic session confirmed: ${if (graphicSessionReady) "yes" else "no"}")
+            logger?.i("[CTX] Monitor: ${displaySlot.monitorNumber}")
+            logger?.i("[CTX] Display: ${displaySlot.displayName}")
+            logger?.i("[CTX] X11 PID: ${activeServer.pid}")
+            logger?.i("[CTX] Total session start duration: ${(System.nanoTime() - operationStartedAt) / 1_000_000L}ms")
+
             if (
                 runtimeStatus == ContainerStatus.RUNNING &&
                 commandReady &&
@@ -604,6 +737,7 @@ object X11SessionManager {
                 serverLease?.let { rollbackServer(it, logger) }
             }
             logger?.e("[-] Error: ${e.message}")
+            logger?.e("[-] Session operation duration: ${(System.nanoTime() - operationStartedAt) / 1_000_000L}ms")
             null
         }
     }
@@ -612,13 +746,23 @@ object X11SessionManager {
         containerName: String,
         logger: ContainerLogger? = null
     ): Boolean = withContext(Dispatchers.IO) {
+        logger?.i("--- Stopping Container X11 Session ---")
+        logger?.i("[CTX] Container: $containerName")
+        logger?.i("[CTX] Policy: stop container, then release its X11 monitor if unused")
         val before = ContainerManager.getContainerInfo(containerName)
+        logger?.i("[CTX] Container status before stop: ${before?.status ?: ContainerStatus.UNKNOWN}")
+        logger?.i("[CTX] Container PID before stop: ${before?.pid ?: "none"}")
         val displaySlot = before
             ?.takeIf { it.isRunning }
             ?.let { ContainerConfigManager.displaySlotFromBindMounts(it.bindMounts) }
+        logger?.i("[CTX] Assigned display before stop: ${displaySlot?.displayName ?: "none"}")
 
         val stopped = ContainerManager.stopContainer(containerName, logger)
-        if (!stopped) return@withContext false
+        if (!stopped) {
+            logger?.e("[-] Container stop was not confirmed; X11 lease will not be released")
+            return@withContext false
+        }
+        logger?.i("[+] Container stop confirmed")
 
         if (displaySlot != null) {
             val stillUsed = ContainerManager.listContainers()
@@ -627,12 +771,19 @@ object X11SessionManager {
                 .mapNotNull { ContainerConfigManager.displaySlotFromBindMounts(it.bindMounts) }
                 .any { it.number == displaySlot.number }
 
+            logger?.i("[CTX] Display still owned by another running container: ${if (stillUsed) "yes" else "no"}")
             if (!stillUsed) {
-                stopIntegratedServer(displaySlot, logger)
-                logger?.i("[+] Released ${displaySlot.describe()}")
+                val serverStopped = stopIntegratedServer(displaySlot, logger)
+                if (serverStopped) {
+                    logger?.i("[+] Released ${displaySlot.describe()}")
+                } else {
+                    logger?.w("[!] Container stopped, but ${displaySlot.describe()} cleanup was not fully confirmed")
+                }
             } else {
                 logger?.w("[!] ${displaySlot.describe()} is still used by another running container")
             }
+        } else {
+            logger?.i("[+] No Manager X11 display lease was attached to the running container")
         }
 
         true
@@ -642,8 +793,12 @@ object X11SessionManager {
         try {
             logger?.i("--- Stopping All ---")
             val containers = ContainerManager.listContainers()
-            for (container in containers) {
-                if (container.isRunning) ContainerManager.stopContainer(container.name, logger)
+            val runningContainers = containers.filter { it.isRunning }
+            logger?.i("[CTX] Running containers discovered: ${runningContainers.size}")
+            logger?.i("[CTX] Running container names: ${runningContainers.joinToString(",") { it.name }.ifEmpty { "none" }}")
+            for (container in runningContainers) {
+                logger?.i("[*] Stopping container: ${container.name}")
+                ContainerManager.stopContainer(container.name, logger)
             }
 
             val slots = buildSet {
@@ -653,6 +808,7 @@ object X11SessionManager {
                         ?.let { add(it.number) }
                 }
             }
+            logger?.i("[CTX] X11 monitor slots to clean: ${slots.sorted().joinToString(",").ifEmpty { "none" }}")
             for (number in slots.sorted()) {
                 stopIntegratedServer(X11DisplaySlot(number), logger)
             }
