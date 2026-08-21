@@ -3,6 +3,16 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val releaseVersionName = providers.gradleProperty("VERSION_NAME")
+    .orElse("1.0.0")
+    .get()
+val releaseVersionCode = providers.gradleProperty("VERSION_CODE")
+    .orElse("1")
+    .get()
+    .toIntOrNull()
+    ?.takeIf { it > 0 }
+    ?: 1
+
 android {
     namespace = "com.saas.x11manager"
     compileSdk = 34
@@ -11,12 +21,25 @@ android {
         applicationId = "com.saas.x11manager"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = releaseVersionCode
+        versionName = releaseVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
+        }
+    }
+
+    // Keep the universal APK for maximum compatibility while also producing
+    // lightweight per-ABI APKs. libXlorie is by far the largest part of the
+    // application, so ABI-specific artifacts cut download/install size without
+    // dropping support for any architecture.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            isUniversalApk = true
         }
     }
 
@@ -44,6 +67,9 @@ android {
             if (keystoreFile.exists()) {
                 signingConfig = signingConfigs.getByName("release")
             } else {
+                // Branch CI intentionally remains installable without exposing a
+                // production key. The release workflow separately requires the
+                // real signing material before it is allowed to publish assets.
                 signingConfig = signingConfigs.getByName("debug")
             }
         }
@@ -98,19 +124,13 @@ dependencies {
     implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
-    implementation("androidx.lifecycle:lifecycle-process:2.7.0")
     implementation("androidx.activity:activity-compose:1.8.2")
-
-    // Navigation
-    implementation("androidx.navigation:navigation-compose:2.7.7")
 
     // ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
 
-    // Root execution - libsu
+    // Root execution - libsu core owns Shell/CallbackList used by the Manager.
     implementation("com.github.topjohnwu.libsu:core:5.2.1")
-    implementation("com.github.topjohnwu.libsu:service:5.2.1")
-    implementation("com.github.topjohnwu.libsu:io:5.2.1")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
