@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,7 +17,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ReceiptLong
@@ -29,8 +27,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.PointerEventType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,11 +39,9 @@ import com.saas.x11manager.util.X11MonitorInfo
 import com.saas.x11manager.util.X11ServerStatus
 import com.saas.x11manager.util.X11SessionManager
 import com.termux.x11.EmbeddedDisplayHost
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private const val PREF_KNOWN_MONITOR_SLOTS = "saas_known_monitor_slots"
-private const val FULLSCREEN_CONTROL_HIDE_DELAY_MS = 1_600L
 
 @Composable
 fun ManagedDisplayScreen(
@@ -74,8 +68,7 @@ fun ManagedDisplayScreen(
     var connected by remember { mutableStateOf(false) }
     var showConfiguration by remember { mutableStateOf(false) }
     var fullscreen by remember { mutableStateOf(false) }
-    var fullscreenControlVisible by remember { mutableStateOf(false) }
-    var fullscreenPointerPulse by remember { mutableLongStateOf(0L) }
+    var showFullscreenExitConfirmation by remember { mutableStateOf(false) }
     var additionalKeysEnabled by remember {
         mutableStateOf(store.getBoolean(PREF_SHOW_ADDITIONAL_KEYS, false))
     }
@@ -145,7 +138,7 @@ fun ManagedDisplayScreen(
     fun setFullscreen(value: Boolean) {
         if (value && selectedStatus != X11ServerStatus.Running) return
         fullscreen = value
-        if (value) fullscreenPointerPulse++ else fullscreenControlVisible = false
+        if (!value) showFullscreenExitConfirmation = false
         store.edit()
             .putBoolean(PREF_FULLSCREEN, value)
             .putBoolean(PREF_ADDITIONAL_KEYS_VISIBLE, additionalKeysVisible)
@@ -320,16 +313,6 @@ fun ManagedDisplayScreen(
         refreshMonitors()
     }
 
-    LaunchedEffect(fullscreen, fullscreenPointerPulse) {
-        if (!fullscreen) {
-            fullscreenControlVisible = false
-            return@LaunchedEffect
-        }
-        fullscreenControlVisible = true
-        delay(FULLSCREEN_CONTROL_HIDE_DELAY_MS)
-        fullscreenControlVisible = false
-    }
-
     DisposableEffect(store) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             when (key) {
@@ -346,6 +329,7 @@ fun ManagedDisplayScreen(
                 PREF_FULLSCREEN -> {
                     val requested = store.getBoolean(PREF_FULLSCREEN, false)
                     fullscreen = requested && selectedStatus == X11ServerStatus.Running
+                    if (!fullscreen) showFullscreenExitConfirmation = false
                 }
                 "extra_keys_config" -> {
                     extraKeysConfig = store.getString("extra_keys_config", null)
@@ -370,7 +354,36 @@ fun ManagedDisplayScreen(
     }
 
     BackHandler {
-        if (fullscreen) setFullscreen(false) else onClose()
+        if (fullscreen) {
+            showFullscreenExitConfirmation = true
+        } else {
+            onClose()
+        }
+    }
+
+    if (showFullscreenExitConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showFullscreenExitConfirmation = false },
+            title = { Text("Exit fullscreen?") },
+            text = {
+                Text("Return to the X11 monitor controls while keeping the monitor running?")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showFullscreenExitConfirmation = false
+                        setFullscreen(false)
+                    }
+                ) {
+                    Text("Exit fullscreen")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFullscreenExitConfirmation = false }) {
+                    Text("Stay fullscreen")
+                }
+            }
+        )
     }
 
     if (showMonitorLogs) {
@@ -387,29 +400,7 @@ fun ManagedDisplayScreen(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .then(
-                    if (fullscreen) {
-                        Modifier.pointerInput(Unit) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    if (
-                                        event.type == PointerEventType.Move ||
-                                        event.type == PointerEventType.Enter
-                                    ) {
-                                        fullscreenPointerPulse++
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        Modifier
-                    }
-                )
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -487,32 +478,6 @@ fun ManagedDisplayScreen(
                         onOpenSettings = { showConfiguration = true },
                         onExitDisplay = ::closeScreen
                     )
-                }
-            }
-
-            AnimatedVisibility(
-                visible = fullscreen && fullscreenControlVisible,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .statusBarsPadding()
-                    .padding(8.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color.Black.copy(alpha = 0.58f),
-                    tonalElevation = 0.dp
-                ) {
-                    IconButton(
-                        onClick = { setFullscreen(false) },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.FullscreenExit,
-                            contentDescription = "Exit fullscreen",
-                            tint = Color.White,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
                 }
             }
         }
