@@ -258,7 +258,6 @@ fun ManagedDisplayScreen(
                     logger.i("")
 
                     val seed = monitor.containerName ?: xkbSeedContainer?.name
-                    seed?.let { logger.i("[*] XKB seed container: $it") }
                     val started = X11SessionManager.startIntegratedServer(
                         displaySlot = monitor.slot,
                         containerName = seed,
