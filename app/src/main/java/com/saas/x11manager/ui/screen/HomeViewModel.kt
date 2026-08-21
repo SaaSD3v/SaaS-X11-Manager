@@ -76,6 +76,7 @@ class HomeViewModel : ViewModel() {
 
     private var initialized = false
     private var refreshJob: Job? = null
+    private var diagnosticsJob: Job? = null
     private var runtimeRefreshJob: Job? = null
     private var refreshGeneration = 0L
     private var runtimeStateGeneration = 0L
@@ -89,58 +90,60 @@ class HomeViewModel : ViewModel() {
         runtimeRefreshJob?.cancel()
         val runtimeGenerationAtStart = ++runtimeStateGeneration
         refreshJob?.cancel()
+        diagnosticsJob?.cancel()
 
         refreshJob = viewModelScope.launch {
             if (!initialized) _isLoading.value = true
 
             try {
-                val snapshot = coroutineScope {
+                // The Home screen only waits for state needed to operate the app.
+                // Technical diagnostics (provider identity, full DroidSpaces check,
+                // device/kernel details) run immediately afterwards without keeping
+                // the initial UI behind potentially expensive privileged commands.
+                val operational = coroutineScope {
                     val rootDef = async(Dispatchers.IO) {
-                        val status = RootChecker.checkRootAccess()
-                        val provider = RootChecker.getRootProvider()
-                        status to provider
+                        RootChecker.checkRootAccess()
                     }
                     val dsDef = async(Dispatchers.IO) {
-                        val available = DroidspacesChecker.checkBackend()
-                        val requirements = if (available) {
-                            DroidspacesChecker.checkRequirements()
-                        } else {
-                            null
-                        }
-                        available to requirements
+                        DroidspacesChecker.checkBackend()
                     }
-                    val runtimeDef = async(Dispatchers.IO) { readRuntimeSnapshot() }
-                    val systemDef = async(Dispatchers.IO) { readDeviceSnapshot() }
+                    val runtimeDef = async(Dispatchers.IO) {
+                        readRuntimeSnapshot()
+                    }
 
-                    FullRefreshSnapshot(
-                        root = rootDef.await(),
-                        droidspaces = dsDef.await(),
-                        runtime = runtimeDef.await(),
-                        system = systemDef.await()
+                    OperationalRefreshSnapshot(
+                        rootStatus = rootDef.await(),
+                        droidspacesAvailable = dsDef.await(),
+                        runtime = runtimeDef.await()
                     )
                 }
 
                 if (generation != refreshGeneration) return@launch
 
-                _rootStatus.value = snapshot.root.first
-                _rootProvider.value = snapshot.root.second
-                _dsStatus.value = snapshot.droidspaces.first
-                _dsRequirements.value = snapshot.droidspaces.second
+                _rootStatus.value = operational.rootStatus
+                if (operational.rootStatus != RootStatus.Granted) {
+                    _rootProvider.value = ""
+                }
 
-                _kernelVersion.value = snapshot.system.kernel
-                _arch.value = snapshot.system.arch
-                _androidVersion.value = snapshot.system.androidVersion
-                _androidSdk.value = snapshot.system.androidSdk
-                _deviceName.value = snapshot.system.deviceName
+                _dsStatus.value = operational.droidspacesAvailable
+                if (!operational.droidspacesAvailable) {
+                    _dsRequirements.value = null
+                }
 
                 if (
                     runtimeGenerationAtStart == runtimeStateGeneration &&
                     runningOperationContainer == null
                 ) {
-                    applyRuntimeSnapshot(snapshot.runtime)
+                    applyRuntimeSnapshot(operational.runtime)
                 }
 
                 initialized = true
+                _isLoading.value = false
+                refreshDiagnostics(
+                    generation = generation,
+                    rootStatus = operational.rootStatus,
+                    droidspacesAvailable = operational.droidspacesAvailable
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -149,6 +152,57 @@ class HomeViewModel : ViewModel() {
                 if (generation == refreshGeneration) {
                     _isLoading.value = false
                 }
+            }
+        }
+    }
+
+    private fun refreshDiagnostics(
+        generation: Long,
+        rootStatus: RootStatus,
+        droidspacesAvailable: Boolean
+    ) {
+        diagnosticsJob?.cancel()
+        diagnosticsJob = viewModelScope.launch {
+            try {
+                val diagnostics = coroutineScope {
+                    val providerDef = async(Dispatchers.IO) {
+                        if (rootStatus == RootStatus.Granted) {
+                            RootChecker.getRootProvider()
+                        } else {
+                            ""
+                        }
+                    }
+                    val requirementsDef = async(Dispatchers.IO) {
+                        if (droidspacesAvailable) {
+                            DroidspacesChecker.checkRequirements()
+                        } else {
+                            null
+                        }
+                    }
+                    val systemDef = async(Dispatchers.IO) {
+                        readDeviceSnapshot()
+                    }
+
+                    DiagnosticSnapshot(
+                        rootProvider = providerDef.await(),
+                        droidspacesRequirements = requirementsDef.await(),
+                        system = systemDef.await()
+                    )
+                }
+
+                if (generation != refreshGeneration) return@launch
+
+                _rootProvider.value = diagnostics.rootProvider
+                _dsRequirements.value = diagnostics.droidspacesRequirements
+                _kernelVersion.value = diagnostics.system.kernel
+                _arch.value = diagnostics.system.arch
+                _androidVersion.value = diagnostics.system.androidVersion
+                _androidSdk.value = diagnostics.system.androidSdk
+                _deviceName.value = diagnostics.system.deviceName
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "refreshDiagnostics() failed", e)
             }
         }
     }
@@ -341,10 +395,11 @@ class HomeViewModel : ViewModel() {
     ) {
         logs.add(level to message)
         if (logs.size > MAX_LOG_ENTRIES) {
-            val removeCount = logs.size - LOG_ENTRIES_AFTER_TRIM
-            repeat(removeCount) {
-                logs.removeAt(0)
-            }
+            // Trim in one snapshot update instead of repeatedly shifting the
+            // backing list hundreds of times while a package manager is noisy.
+            val retained = logs.takeLast(LOG_ENTRIES_AFTER_TRIM)
+            logs.clear()
+            logs.addAll(retained)
         }
     }
 
@@ -380,10 +435,15 @@ class HomeViewModel : ViewModel() {
         val kernel: String
     )
 
-    private data class FullRefreshSnapshot(
-        val root: Pair<RootStatus, String>,
-        val droidspaces: Pair<Boolean, DroidspacesRequirementsResult?>,
-        val runtime: RuntimeRefreshSnapshot,
+    private data class OperationalRefreshSnapshot(
+        val rootStatus: RootStatus,
+        val droidspacesAvailable: Boolean,
+        val runtime: RuntimeRefreshSnapshot
+    )
+
+    private data class DiagnosticSnapshot(
+        val rootProvider: String,
+        val droidspacesRequirements: DroidspacesRequirementsResult?,
         val system: DeviceSnapshot
     )
 
