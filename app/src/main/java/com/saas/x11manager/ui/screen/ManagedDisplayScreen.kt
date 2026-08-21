@@ -219,6 +219,16 @@ fun ManagedDisplayScreen(
                     monitor.containerName?.let { logger.i("[*] Container remains running: $it") }
                     logger.i("")
 
+                    if (monitor.containerName != null) {
+                        val sessionStopped = X11SessionManager.stopContainerGraphicSession(
+                            monitor.containerName,
+                            logger
+                        )
+                        if (!sessionStopped) {
+                            logger.w("[!] Continuing with X11 server stop; container is still running")
+                        }
+                    }
+
                     // A monitor action owns only the Manager X11 server. Stopping
                     // the card must never stop the associated DroidSpaces container.
                     val stopped = X11SessionManager.stopIntegratedServer(monitor.slot, logger)
@@ -262,10 +272,22 @@ fun ManagedDisplayScreen(
                         logger = logger
                     )
                     if (started.isSuccess) {
+                        val graphicSessionReady = monitor.containerName?.let { containerName ->
+                            X11SessionManager.ensureContainerGraphicSession(
+                                containerName = containerName,
+                                displaySlot = monitor.slot,
+                                logger = logger
+                            )
+                        } ?: true
+
                         persistKnownDisplayNumbers(knownDisplayNumbers + monitor.slot.number)
                         logger.i("")
                         logger.i("[+] ${monitor.slot.describe()} is ready")
                         logger.i("[+] PID: ${started.getOrNull()}")
+                        if (!graphicSessionReady) {
+                            message =
+                                "${monitor.slot.describe()} is running, but its graphic session did not start"
+                        }
                     } else {
                         message = started.exceptionOrNull()?.message
                             ?: "${monitor.slot.describe()} could not start"
