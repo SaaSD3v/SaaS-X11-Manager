@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 internal object GraphicSessionRuntimeController {
 
     private const val INIT_MARKER = "__SAAS_X11_INIT__="
+    private const val ACTION_MARKER = "__SAAS_X11_ACTION__="
     private const val DIAG_MARKER = "__SAAS_X11_DIAG__="
 
     internal fun buildStartCommand(displaySlot: X11DisplaySlot): String {
@@ -33,8 +34,9 @@ internal object GraphicSessionRuntimeController {
             // Preserve a healthy session and only start it when it is not active.
             "ready=0; " +
             "if systemctl is-active --quiet x11-session.service; then " +
-            "ready=1; " +
+            "printf '%s\\n' '${ACTION_MARKER}already-active'; ready=1; " +
             "else " +
+            "printf '%s\\n' '${ACTION_MARKER}start-requested'; " +
             "{ systemctl reset-failed x11-session.service >/dev/null 2>&1 || true; }; " +
             "systemctl start x11-session.service >/dev/null 2>&1 || true; " +
             "fi; " +
@@ -45,7 +47,8 @@ internal object GraphicSessionRuntimeController {
             "if systemctl is-active --quiet x11-session.service; then ready=1; break; fi; " +
             "attempt=\$((attempt + 1)); sleep 1; " +
             "done; " +
-            "if [ \"\$ready\" -eq 1 ]; then true; else " +
+            "if [ \"\$ready\" -eq 1 ]; then " +
+            "printf '%s\\n' '${ACTION_MARKER}active'; true; else " +
             "printf '%s\\n' '${DIAG_MARKER}systemd session did not stabilize' >&2; " +
             "systemctl --no-pager --full status x11-session.service >&2 || true; " +
             "if command -v journalctl >/dev/null 2>&1; then " +
@@ -60,8 +63,9 @@ internal object GraphicSessionRuntimeController {
             "{ " +
             "ready=0; " +
             "if rc-service x11-session status >/dev/null 2>&1; then " +
-            "ready=1; " +
+            "printf '%s\\n' '${ACTION_MARKER}already-active'; ready=1; " +
             "else " +
+            "printf '%s\\n' '${ACTION_MARKER}start-requested'; " +
             "rc-service x11-session start >/dev/null 2>&1 || true; " +
             "fi; " +
             "attempt=0; " +
@@ -69,7 +73,8 @@ internal object GraphicSessionRuntimeController {
             "if rc-service x11-session status >/dev/null 2>&1; then ready=1; break; fi; " +
             "attempt=\$((attempt + 1)); sleep 1; " +
             "done; " +
-            "if [ \"\$ready\" -eq 1 ]; then true; else " +
+            "if [ \"\$ready\" -eq 1 ]; then " +
+            "printf '%s\\n' '${ACTION_MARKER}active'; true; else " +
             "printf '%s\\n' '${DIAG_MARKER}openrc session did not stabilize' >&2; " +
             "rc-service x11-session status >&2 || true; false; fi; " +
             "}; " +
@@ -97,15 +102,29 @@ internal object GraphicSessionRuntimeController {
             .readSnapshot(containerName)
             .graphicSession
 
+        logger?.i("--- Graphic Session Synchronization ---")
+        logger?.i("[CTX] Container: $containerName")
+        logger?.i("[CTX] Monitor: ${displaySlot.monitorNumber}")
+        logger?.i("[CTX] Display: ${displaySlot.displayName}")
+        logger?.i("[CTX] Expected container socket: /tmp/.X11-unix/X${displaySlot.number}")
+        logger?.i("[CTX] Container lifecycle: unchanged")
+
         if (configuredSession == null || configuredSession == GraphicSession.NONE) {
+            logger?.i("[CTX] Configured graphic session: none")
             logger?.i("[*] No managed graphic session is configured for $containerName")
             logger?.i("[+] Leaving ${displaySlot.describe()} available as a raw X11 server")
             return@withContext true
         }
 
+        logger?.i("[CTX] Configured graphic session: ${configuredSession.label}")
+        logger?.i("[CTX] Session command: ${configuredSession.startCommand}")
         logger?.i("[*] Ensuring ${configuredSession.label} session on ${displaySlot.describe()}...")
+        val startedAt = System.nanoTime()
         val result = runContainerCommand(containerName, buildStartCommand(displaySlot))
-        logDetectedBackend(result.out, logger)
+        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L
+        logRuntimeMarkers(result.out, logger)
+        logger?.i("[CTX] Controller exit code: ${result.code}")
+        logger?.i("[CTX] Synchronization duration: ${elapsedMs}ms")
 
         if (result.isSuccess) {
             logger?.i("[+] ${configuredSession.label} session active on ${displaySlot.describe()}")
@@ -128,13 +147,25 @@ internal object GraphicSessionRuntimeController {
             .readSnapshot(containerName)
             .graphicSession
 
+        logger?.i("--- Graphic Session Stop ---")
+        logger?.i("[CTX] Container: $containerName")
+        logger?.i("[CTX] Container lifecycle: remains RUNNING")
+
         if (configuredSession == null || configuredSession == GraphicSession.NONE) {
+            logger?.i("[CTX] Configured graphic session: none")
+            logger?.i("[+] No managed graphic session process needs to be stopped")
             return@withContext true
         }
 
+        logger?.i("[CTX] Configured graphic session: ${configuredSession.label}")
+        logger?.i("[CTX] Session command: ${configuredSession.startCommand}")
         logger?.i("[*] Stopping ${configuredSession.label} graphic session only...")
+        val startedAt = System.nanoTime()
         val result = runContainerCommand(containerName, buildStopCommand())
-        logDetectedBackend(result.out, logger)
+        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L
+        logRuntimeMarkers(result.out, logger)
+        logger?.i("[CTX] Controller exit code: ${result.code}")
+        logger?.i("[CTX] Stop duration: ${elapsedMs}ms")
 
         if (result.isSuccess) {
             logger?.i("[+] Graphic session stopped; container remains running")
@@ -154,17 +185,24 @@ internal object GraphicSessionRuntimeController {
             "sh -c ${shellQuote(command)}"
     ).exec()
 
-    private suspend fun logDetectedBackend(
+    private suspend fun logRuntimeMarkers(
         output: List<String>,
         logger: ContainerLogger?
     ) {
-        val backend = output
+        output
             .firstOrNull { it.startsWith(INIT_MARKER) }
             ?.removePrefix(INIT_MARKER)
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
-            ?: return
-        logger?.i("[+] Graphic session backend: $backend")
+            ?.let { backend -> logger?.i("[+] Graphic session backend: $backend") }
+
+        output
+            .asSequence()
+            .filter { it.startsWith(ACTION_MARKER) }
+            .map { it.removePrefix(ACTION_MARKER).trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .forEach { action -> logger?.i("[CTX] Graphic session action: $action") }
     }
 
     private suspend fun logFailureDiagnostics(
@@ -174,7 +212,11 @@ internal object GraphicSessionRuntimeController {
     ) {
         val lines = (stdout + stderr)
             .map(String::trim)
-            .filter { it.isNotEmpty() && !it.startsWith(INIT_MARKER) }
+            .filter {
+                it.isNotEmpty() &&
+                    !it.startsWith(INIT_MARKER) &&
+                    !it.startsWith(ACTION_MARKER)
+            }
             .map { it.removePrefix(DIAG_MARKER) }
             .takeLast(24)
 
