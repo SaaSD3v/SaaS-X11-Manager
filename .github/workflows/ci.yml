@@ -56,6 +56,12 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
+    - name: Cache integrated X11 native build
+      uses: actions/cache@v4
+      with:
+        path: embedded-lorie/build/.cxx
+        key: ${{ runner.os }}-x11-native-${{ hashFiles('embedded-lorie/build.gradle', 'build.gradle.kts', 'settings.gradle.kts', 'third_party/termux-x11/lorie/src/main/cpp/**') }}
+
     - name: Validate integrated X11 source
       if: ${{ github.ref == 'refs/heads/agent/integrated-x11' || github.ref == 'refs/heads/agent/multi-display' }}
       run: |
