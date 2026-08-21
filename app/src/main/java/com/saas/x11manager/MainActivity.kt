@@ -1,6 +1,5 @@
 package com.saas.x11manager
 
-import android.app.AlertDialog
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -11,10 +10,22 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.saas.x11manager.ui.navigation.AppNavigation
 import com.saas.x11manager.ui.screen.HomeViewModel
 import com.saas.x11manager.ui.screen.PREF_FULLSCREEN
@@ -27,7 +38,7 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var fallbackBackCallback: OnBackPressedCallback
     private var platformBackCallback: OnBackInvokedCallback? = null
-    private var fullscreenExitDialog: AlertDialog? = null
+    private var fullscreenExitDialogVisible by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,11 +62,52 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             X11ManagerTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    AppNavigation(viewModel = viewModel)
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        AppNavigation(viewModel = viewModel)
+                    }
+
+                    if (fullscreenExitDialogVisible) {
+                        AlertDialog(
+                            onDismissRequest = { fullscreenExitDialogVisible = false },
+                            icon = {
+                                Icon(
+                                    Icons.Default.FullscreenExit,
+                                    contentDescription = null
+                                )
+                            },
+                            title = { Text("Exit fullscreen?") },
+                            text = {
+                                Text(
+                                    "Return to the X11 monitor controls while keeping " +
+                                        "the monitor and container running?"
+                                )
+                            },
+                            confirmButton = {
+                                TextButton(
+                                    onClick = {
+                                        fullscreenExitDialogVisible = false
+                                        exitManagedX11Fullscreen()
+                                    }
+                                ) {
+                                    Text("Exit fullscreen")
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(
+                                    onClick = { fullscreenExitDialogVisible = false }
+                                ) {
+                                    Text("Stay fullscreen")
+                                }
+                            },
+                            shape = RoundedCornerShape(26.dp),
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            tonalElevation = 6.dp
+                        )
+                    }
                 }
             }
         }
@@ -97,20 +149,8 @@ class MainActivity : ComponentActivity() {
     }.getOrDefault(false)
 
     private fun showFullscreenExitConfirmation() {
-        if (fullscreenExitDialog?.isShowing == true || isFinishing || isDestroyed) return
-
-        fullscreenExitDialog = AlertDialog.Builder(this)
-            .setTitle("Exit fullscreen?")
-            .setMessage("Return to the X11 monitor controls while keeping the monitor and container running?")
-            .setPositiveButton("Exit fullscreen") { _, _ ->
-                exitManagedX11Fullscreen()
-            }
-            .setNegativeButton("Stay fullscreen", null)
-            .create()
-            .also { dialog ->
-                dialog.setOnDismissListener { fullscreenExitDialog = null }
-                dialog.show()
-            }
+        if (fullscreenExitDialogVisible || isFinishing || isDestroyed) return
+        fullscreenExitDialogVisible = true
     }
 
     private fun exitManagedX11Fullscreen() {
@@ -125,8 +165,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        fullscreenExitDialog?.dismiss()
-        fullscreenExitDialog = null
+        fullscreenExitDialogVisible = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             platformBackCallback?.let(onBackInvokedDispatcher::unregisterOnBackInvokedCallback)
         }
