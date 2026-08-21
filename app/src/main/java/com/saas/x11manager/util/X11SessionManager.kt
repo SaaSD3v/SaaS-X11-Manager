@@ -289,6 +289,21 @@ object X11SessionManager {
             ContainerConfigManager.displaySlotFromBindMounts(info.bindMounts)
         }
 
+    suspend fun ensureContainerGraphicSession(
+        containerName: String,
+        displaySlot: X11DisplaySlot,
+        logger: ContainerLogger? = null
+    ): Boolean = GraphicSessionRuntimeController.ensureRunning(
+        containerName = containerName,
+        displaySlot = displaySlot,
+        logger = logger
+    )
+
+    suspend fun stopContainerGraphicSession(
+        containerName: String,
+        logger: ContainerLogger? = null
+    ): Boolean = GraphicSessionRuntimeController.stop(containerName, logger)
+
     private suspend fun startIntegratedServerTracked(
         displaySlot: X11DisplaySlot,
         containerName: String? = null,
@@ -558,9 +573,24 @@ object X11SessionManager {
                 logger?.w("[!] Container command channel is still becoming ready")
             }
 
+            val graphicSessionReady = if (commandReady) {
+                logger?.i("[*] Synchronizing configured graphic session with ${displaySlot.displayName}...")
+                ensureContainerGraphicSession(containerName, displaySlot, logger)
+            } else {
+                false
+            }
+
             logger?.i("")
-            if (runtimeStatus == ContainerStatus.RUNNING && commandReady) {
+            if (
+                runtimeStatus == ContainerStatus.RUNNING &&
+                commandReady &&
+                graphicSessionReady
+            ) {
                 logger?.i("[+] Integrated X11 session started on ${displaySlot.describe()}")
+            } else if (runtimeStatus == ContainerStatus.RUNNING && commandReady) {
+                logger?.w(
+                    "[!] ${displaySlot.describe()} is ready, but the configured graphic session is not active"
+                )
             } else {
                 logger?.w(
                     "[!] ${displaySlot.describe()} is ready while container startup is still settling"
