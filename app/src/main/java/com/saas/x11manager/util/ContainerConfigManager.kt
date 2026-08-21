@@ -28,25 +28,62 @@ object ContainerConfigManager {
         displaySlot: X11DisplaySlot = X11DisplaySlot(0)
     ): Boolean = withContext(Dispatchers.IO) {
         val configPath = "${Constants.CONTAINERS_DIR}/$containerName/${Constants.CONFIG_FILE}"
+        val requiredBind = x11Bind(displaySlot)
+
+        logger?.i("--- X11 Container Configuration ---")
+        logger?.i("[CTX] Container: $containerName")
+        logger?.i("[CTX] Config: $configPath")
+        logger?.i("[CTX] Requested monitor: ${displaySlot.monitorNumber}")
+        logger?.i("[CTX] Requested display: ${displaySlot.displayName}")
+        logger?.i("[CTX] Host socket directory: ${displaySlot.socketDir}")
+        logger?.i("[CTX] Container socket directory: $X11_CONTAINER_SOCKET_DIR")
+        logger?.i("[CTX] Required bind: $requiredBind")
+        logger?.i("[CTX] DroidSpaces Termux:X11 integration: disabled (Manager owns X11)")
 
         try {
+            logger?.i("[*] Reading existing container configuration...")
             val read = Shell.cmd("cat ${shellQuote(configPath)} 2>/dev/null").exec()
             if (!read.isSuccess || read.out.isEmpty()) {
                 logger?.e("[-] Cannot read container config")
+                logger?.i("[CTX] Read exit code: ${read.code}")
                 return@withContext false
             }
 
             val original = read.out.toList()
-            val updated = buildManualX11Config(original, displaySlot)
+            val existingBindMounts = original
+                .asSequence()
+                .map(String::trim)
+                .filter { it.isNotEmpty() && !it.startsWith("#") && it.contains('=') }
+                .firstOrNull { it.substringBefore('=').trim() == "bind_mounts" }
+                ?.substringAfter('=', "")
+                .orEmpty()
+            val existingSlot = displaySlotFromBindMounts(existingBindMounts)
 
+            logger?.i("[+] Container config read (${original.size} lines)")
+            logger?.i(
+                "[CTX] Existing Manager X11 bind: " +
+                    (existingSlot?.describe() ?: "none")
+            )
+
+            val updated = buildManualX11Config(original, displaySlot)
             val originalText = original.joinToString("\n") + "\n"
             val updatedText = updated.joinToString("\n") + "\n"
             if (updatedText == originalText) {
+                logger?.i("[CTX] Configuration change required: no")
                 logger?.i("[+] Integrated X11 container config already ready for ${displaySlot.describe()}")
                 return@withContext true
             }
 
+            logger?.i("[CTX] Configuration change required: yes")
+            if (existingSlot != null && existingSlot.number != displaySlot.number) {
+                logger?.i(
+                    "[CTX] Rebinding Manager X11: ${existingSlot.displayName} -> ${displaySlot.displayName}"
+                )
+            }
+
             val tempPath = "$configPath.saas-x11.tmp.${System.nanoTime()}"
+            logger?.i("[*] Writing updated configuration atomically...")
+            logger?.i("[CTX] Temporary config: $tempPath")
             val write = Shell.cmd(
                 "printf '%s' ${shellQuote(updatedText)} > ${shellQuote(tempPath)} && " +
                     "chmod 644 ${shellQuote(tempPath)} && " +
@@ -56,13 +93,20 @@ object ContainerConfigManager {
             if (!write.isSuccess) {
                 Shell.cmd("rm -f ${shellQuote(tempPath)} 2>/dev/null").exec()
                 logger?.e("[-] Failed to update integrated X11 container config")
+                logger?.i("[CTX] Write exit code: ${write.code}")
+                logger?.i("[CTX] Temporary config cleanup requested")
                 return@withContext false
             }
 
+            logger?.i("[+] Atomic container config update complete")
+            logger?.i("[CTX] Active Manager bind: $requiredBind")
+            logger?.i("[CTX] enable_termux_x11: 0")
             logger?.i("[+] Integrated X11 container config ready for ${displaySlot.describe()}")
             true
         } catch (e: Exception) {
             logger?.e("[-] X11 config error: ${e.message}")
+            logger?.i("[CTX] Container: $containerName")
+            logger?.i("[CTX] Config: $configPath")
             false
         }
     }
