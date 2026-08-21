@@ -22,7 +22,7 @@ android {
 
     signingConfigs {
         create("release") {
-            val keystoreFile = file("../../x11manager.keystore")
+            val keystoreFile = rootProject.file("x11manager.keystore")
             if (keystoreFile.exists()) {
                 storeFile = keystoreFile
                 storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
@@ -40,7 +40,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            val keystoreFile = file("../../x11manager.keystore")
+            val keystoreFile = rootProject.file("x11manager.keystore")
             if (keystoreFile.exists()) {
                 signingConfig = signingConfigs.getByName("release")
             } else {
