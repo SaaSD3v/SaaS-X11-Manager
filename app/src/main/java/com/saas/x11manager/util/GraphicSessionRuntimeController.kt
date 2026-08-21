@@ -196,13 +196,16 @@ internal object GraphicSessionRuntimeController {
             ?.takeIf { it.isNotEmpty() }
             ?.let { backend -> logger?.i("[+] Graphic session backend: $backend") }
 
-        output
+        val actions = output
             .asSequence()
             .filter { it.startsWith(ACTION_MARKER) }
             .map { it.removePrefix(ACTION_MARKER).trim() }
             .filter { it.isNotEmpty() }
             .distinct()
-            .forEach { action -> logger?.i("[CTX] Graphic session action: $action") }
+            .toList()
+        for (action in actions) {
+            logger?.i("[CTX] Graphic session action: $action")
+        }
     }
 
     private suspend fun logFailureDiagnostics(
