@@ -26,14 +26,22 @@ internal object GraphicSessionRuntimeController {
             "printf '%s\\n' '${INIT_MARKER}systemd'; " +
             "systemctl start setup-x11-socket.service && " +
             "test -S \"\$expected\" && " +
-            "{ systemctl reset-failed x11-session.service >/dev/null 2>&1 || true; } && " +
             "{ " +
+            // The init system may already have launched the configured session
+            // while the container was booting. Restarting an already-running WM
+            // creates an avoidable race and can briefly report a false failure.
+            // Preserve a healthy session and only start it when it is not active.
+            "ready=0; " +
+            "if systemctl is-active --quiet x11-session.service; then " +
+            "ready=1; " +
+            "else " +
+            "{ systemctl reset-failed x11-session.service >/dev/null 2>&1 || true; }; " +
+            "systemctl start x11-session.service >/dev/null 2>&1 || true; " +
+            "fi; " +
             // A fast first launch can fail while systemd schedules the unit's
-            // configured Restart=on-failure retry. Do not turn that transient
-            // restart into a false X11 failure: wait for the unit to stabilize.
-            "systemctl restart x11-session.service >/dev/null 2>&1 || true; " +
-            "ready=0; attempt=0; " +
-            "while [ \"\$attempt\" -lt 10 ]; do " +
+            // configured Restart=on-failure retry. Wait for the unit to settle.
+            "attempt=0; " +
+            "while [ \"\$ready\" -eq 0 ] && [ \"\$attempt\" -lt 10 ]; do " +
             "if systemctl is-active --quiet x11-session.service; then ready=1; break; fi; " +
             "attempt=\$((attempt + 1)); sleep 1; " +
             "done; " +
@@ -50,11 +58,14 @@ internal object GraphicSessionRuntimeController {
             "rc-service x11-setup start && " +
             "test -S \"\$expected\" && " +
             "{ " +
+            "ready=0; " +
             "if rc-service x11-session status >/dev/null 2>&1; then " +
-            "rc-service x11-session restart >/dev/null 2>&1 || true; " +
-            "else rc-service x11-session start >/dev/null 2>&1 || true; fi; " +
-            "ready=0; attempt=0; " +
-            "while [ \"\$attempt\" -lt 10 ]; do " +
+            "ready=1; " +
+            "else " +
+            "rc-service x11-session start >/dev/null 2>&1 || true; " +
+            "fi; " +
+            "attempt=0; " +
+            "while [ \"\$ready\" -eq 0 ] && [ \"\$attempt\" -lt 10 ]; do " +
             "if rc-service x11-session status >/dev/null 2>&1; then ready=1; break; fi; " +
             "attempt=\$((attempt + 1)); sleep 1; " +
             "done; " +
