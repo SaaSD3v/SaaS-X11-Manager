@@ -1,11 +1,13 @@
 package com.termux.x11;
 
+import android.content.SharedPreferences;
 import android.graphics.Matrix;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.GestureDetector;
 import android.view.InputDevice;
 import android.view.MotionEvent;
+import android.view.View;
 import android.view.ViewConfiguration;
 
 import com.termux.x11.input.InputEventSender;
@@ -34,10 +36,14 @@ public final class EmbeddedTouchInputController {
     private final GestureDetector scroller;
     private final TapGestureDetector tapDetector;
     private final Handler gestureHandler = new Handler(Looper.getMainLooper());
+    private final SharedPreferences preferenceStore;
+    private final SharedPreferences.OnSharedPreferenceChangeListener preferenceListener;
+    private final View.OnAttachStateChangeListener attachStateListener;
 
     private InputStrategyInterface strategy;
     private String inputMode = "";
     private boolean dragging;
+    private boolean preferenceListenerRegistered;
 
     public EmbeddedTouchInputController(LorieView view) {
         if (view == null)
@@ -48,7 +54,24 @@ public final class EmbeddedTouchInputController {
         this.scroller = new GestureDetector(view.getContext(), gestureListener, null, false);
         this.scroller.setIsLongpressEnabled(false);
         this.tapDetector = new TapGestureDetector(view.getContext(), gestureListener);
-        reloadPreferences();
+        this.preferenceStore = EmbeddedDisplayHost.getPrefs(view.getContext()).get();
+        this.preferenceListener = (store, key) -> refreshPreferences();
+        this.attachStateListener = new View.OnAttachStateChangeListener() {
+            @Override
+            public void onViewAttachedToWindow(View attachedView) {
+                registerPreferenceListener();
+                refreshPreferences();
+            }
+
+            @Override
+            public void onViewDetachedFromWindow(View detachedView) {
+                unregisterPreferenceListener();
+                gestureHandler.removeCallbacksAndMessages(null);
+            }
+        };
+        view.addOnAttachStateChangeListener(attachStateListener);
+        registerPreferenceListener();
+        refreshPreferences();
     }
 
     public boolean handles(MotionEvent event) {
@@ -74,7 +97,6 @@ public final class EmbeddedTouchInputController {
         if (event == null || !view.connected())
             return false;
 
-        reloadPreferences();
         view.requestFocus();
         if (event.getActionMasked() == MotionEvent.ACTION_DOWN)
             view.requestUnbufferedDispatch(event);
@@ -116,10 +138,26 @@ public final class EmbeddedTouchInputController {
     }
 
     public void dispose() {
+        unregisterPreferenceListener();
+        view.removeOnAttachStateChangeListener(attachStateListener);
         gestureHandler.removeCallbacksAndMessages(null);
     }
 
-    private void reloadPreferences() {
+    private void registerPreferenceListener() {
+        if (preferenceListenerRegistered)
+            return;
+        preferenceStore.registerOnSharedPreferenceChangeListener(preferenceListener);
+        preferenceListenerRegistered = true;
+    }
+
+    private void unregisterPreferenceListener() {
+        if (!preferenceListenerRegistered)
+            return;
+        preferenceStore.unregisterOnSharedPreferenceChangeListener(preferenceListener);
+        preferenceListenerRegistered = false;
+    }
+
+    private void refreshPreferences() {
         Prefs prefs = EmbeddedDisplayHost.getPrefs(view.getContext());
         sender.tapToMove = prefs.tapToMove.get();
         sender.scaleTouchpad = prefs.scaleTouchpad.get()
