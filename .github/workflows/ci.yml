@@ -69,11 +69,33 @@ jobs:
         test -f third_party/termux-x11/lorie/src/main/java/com/termux/x11/CmdEntryPoint.java
         test -f third_party/termux-x11/LICENSE
 
+    - name: Require release signing material
+      if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' }}
+      env:
+        RELEASE_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE }}
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      run: |
+        missing=0
+        for name in RELEASE_KEYSTORE KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+          eval "value=\${$name:-}"
+          if [ -z "$value" ]; then
+            echo "::error::$name is required for a signed release"
+            missing=1
+          fi
+        done
+        [ "$missing" -eq 0 ] || exit 1
+        echo "Release signing material is present."
+
     - name: Decode Keystore
       env:
         RELEASE_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE }}
       if: "${{ env.RELEASE_KEYSTORE != '' }}"
-      run: echo "${{ env.RELEASE_KEYSTORE }}" | base64 -d > x11manager.keystore
+      run: |
+        printf '%s' "${RELEASE_KEYSTORE}" | base64 -d > x11manager.keystore
+        test -s x11manager.keystore
+        chmod 600 x11manager.keystore
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
@@ -91,6 +113,29 @@ jobs:
           -PKEY_PASSWORD="${{ secrets.KEY_PASSWORD }}" \
           2>&1 | tee gradle-ci.log
 
+    - name: Verify release APK signatures
+      if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' }}
+      run: |
+        set -euo pipefail
+        APKSIGNER=$(find "${ANDROID_HOME}/build-tools" -type f -name apksigner | sort -V | tail -n 1)
+        [ -n "$APKSIGNER" ] && [ -x "$APKSIGNER" ] || {
+          echo "::error::apksigner was not found in the Android SDK"
+          exit 1
+        }
+        mkdir -p signing
+        : > signing/SIGNING.txt
+        found=0
+        while IFS= read -r -d '' apk; do
+          found=1
+          echo "### $(basename "$apk")" | tee -a signing/SIGNING.txt
+          "$APKSIGNER" verify --verbose --print-certs "$apk" | tee -a signing/SIGNING.txt
+          echo | tee -a signing/SIGNING.txt
+        done < <(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print0)
+        [ "$found" -eq 1 ] || {
+          echo "::error::No release APK was produced"
+          exit 1
+        }
+
     - name: Upload CI diagnostics
       if: ${{ always() }}
       uses: actions/upload-artifact@v4
@@ -100,15 +145,31 @@ jobs:
         path: |
           gradle-ci.log
           app/build/test-results/**/*.xml
+          signing/SIGNING.txt
 
     - name: Stage & Rename Artifacts
       run: |
+        set -euo pipefail
         TAG="${{ github.event.inputs.tag_name || 'CI' }}"
         COMMIT_HASH=$(git log -1 --pretty=%h)
-        APK_NAME="X11Manager-${TAG}-${COMMIT_HASH}.apk"
         mkdir -p dist
-        mv app/build/outputs/apk/release/app-release.apk dist/${APK_NAME}
-        echo "APK_FILE=dist/${APK_NAME}" >> $GITHUB_ENV
+        found=0
+        while IFS= read -r -d '' apk; do
+          found=1
+          original=$(basename "$apk" .apk)
+          mv "$apk" "dist/X11Manager-${TAG}-${COMMIT_HASH}-${original}.apk"
+        done < <(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print0)
+        [ "$found" -eq 1 ] || {
+          echo "::error::No release APK was available for staging"
+          exit 1
+        }
+        (
+          cd dist
+          sha256sum ./*.apk > SHA256SUMS.txt
+        )
+        if [ -s signing/SIGNING.txt ]; then
+          cp signing/SIGNING.txt dist/SIGNING.txt
+        fi
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
@@ -182,7 +243,12 @@ jobs:
           ## What's Changed
           ${{ steps.changelog.outputs.notes }}
 
+          ## Verification
+          Every published APK was verified with Android SDK `apksigner` before this release job was allowed to run. SHA-256 checksums and signer details are included with the assets.
+
           ---
           **Automated Release by X11 Manager CI**
         files: |
           release-assets/*.apk
+          release-assets/SHA256SUMS.txt
+          release-assets/SIGNING.txt
