@@ -162,12 +162,10 @@ internal object GraphicSessionRuntimeController {
         logger: ContainerLogger?
     ) {
         val lines = (stdout + stderr)
-            .asSequence()
             .map(String::trim)
             .filter { it.isNotEmpty() && !it.startsWith(INIT_MARKER) }
             .map { it.removePrefix(DIAG_MARKER) }
             .takeLast(24)
-            .toList()
 
         if (lines.isEmpty()) return
         logger?.w("[!] Graphic session diagnostics:")
