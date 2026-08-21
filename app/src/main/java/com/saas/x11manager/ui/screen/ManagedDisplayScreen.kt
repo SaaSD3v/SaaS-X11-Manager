@@ -216,21 +216,26 @@ fun ManagedDisplayScreen(
                     logger.i("[*] Monitor: ${monitor.monitorNumber}")
                     logger.i("[*] Display: ${monitor.displayName}")
                     monitor.pid?.let { logger.i("[*] PID: $it") }
-                    monitor.containerName?.let { logger.i("[*] Container: $it") }
+                    monitor.containerName?.let { logger.i("[*] Container remains running: $it") }
                     logger.i("")
 
-                    val stopped = if (monitor.containerName != null) {
-                        X11SessionManager.stopX11Session(monitor.containerName, logger)
-                    } else {
-                        X11SessionManager.stopIntegratedServer(monitor.slot, logger)
-                    }
+                    // A monitor action owns only the Manager X11 server. Stopping
+                    // the card must never stop the associated DroidSpaces container.
+                    val stopped = X11SessionManager.stopIntegratedServer(monitor.slot, logger)
 
                     if (!stopped) {
                         message = "${monitor.slot.describe()} could not be stopped"
                         logger.e("[-] ${monitor.slot.describe()} stop failed")
                     } else {
                         connected = false
-                        if (monitor.slot.number > 0) {
+                        if (monitor.containerName != null) {
+                            // The running container still owns this display lease in
+                            // its bind mount. Keep the card so the same X11 server can
+                            // be started again without restarting the distro.
+                            persistKnownDisplayNumbers(knownDisplayNumbers + monitor.slot.number)
+                            logger.i("[+] Container '${monitor.containerName}' was left running")
+                            logger.i("[+] ${monitor.slot.describe()} retained for this container")
+                        } else if (monitor.slot.number > 0) {
                             persistKnownDisplayNumbers(knownDisplayNumbers - monitor.slot.number)
                             logger.i("[+] Monitor ${monitor.monitorNumber} removed from the monitor list")
                         } else {
@@ -701,17 +706,24 @@ private fun MonitorCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                if (canDelete) {
-                    IconButton(
-                        onClick = onDelete,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.DeleteOutline,
-                            contentDescription = "Delete monitor",
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                // Reserve the same action footprint in every state so stopped
+                // cards keep exactly the same geometry as running cards.
+                Box(
+                    modifier = Modifier.size(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (canDelete) {
+                        IconButton(
+                            onClick = onDelete,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.DeleteOutline,
+                                contentDescription = "Delete monitor",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
@@ -728,15 +740,15 @@ private fun MonitorCard(
                 overflow = TextOverflow.Ellipsis
             )
 
-            monitor.pid?.let { pid ->
-                Text(
-                    text = "PID $pid · ${monitor.slot.processName}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+            Text(
+                text = monitor.pid?.let { pid ->
+                    "PID $pid · ${monitor.slot.processName}"
+                } ?: "${monitor.slot.processName} · idle",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -753,7 +765,7 @@ private fun MonitorCard(
                     OutlinedButton(
                         onClick = onToggle,
                         enabled = !interactionsLocked,
-                        modifier = Modifier.height(34.dp),
+                        modifier = Modifier.height(36.dp),
                         contentPadding = PaddingValues(horizontal = 9.dp, vertical = 0.dp),
                         shape = RoundedCornerShape(7.dp)
                     ) {
