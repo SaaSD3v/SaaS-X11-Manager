@@ -2,7 +2,7 @@ name: Rootfs Compatibility Matrix
 
 on:
   push:
-    branches: [ "main", "master", "agent/structural-fixes", "agent/integrated-x11" ]
+    branches: [ "main", "master", "agent/structural-fixes", "agent/integrated-x11", "agent/multi-display" ]
     paths:
       - "ci/rootfs-compatibility.sh"
       - "ci/debian-apt-component-probe.sh"
