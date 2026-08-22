@@ -382,19 +382,25 @@ class EditContainerViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                X11SessionManager.startX11Session(
+                val startResult = X11SessionManager.startX11Session(
                     containerName = containerName,
                     logger = logger
                 )
-                val (runtimeStatus, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
-                status = runtimeStatus
-                if (runtimeStatus == ContainerStatus.RUNNING) {
+
+                status = if (startResult.containerStatus != ContainerStatus.UNKNOWN) {
+                    startResult.containerStatus
+                } else {
+                    ContainerManager.getContainerRuntimeStatePublic(containerName).first
+                }
+
+                if (startResult.success) {
                     installResult = "OK: X11 started with ${graphicSession.label}"
                     canStartX11FromInstall = false
                     quickStartCompleted = true
                 } else {
-                    installResult = "Warning: X11 start requested, but container state is ${runtimeStatus.name.lowercase()}"
+                    installResult = "Error: ${startResult.message}"
                     canStartX11FromInstall = true
+                    quickStartCompleted = false
                 }
             } catch (e: Exception) {
                 logOperationException(e, "X11 start failed")
