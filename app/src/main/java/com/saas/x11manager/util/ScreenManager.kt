@@ -16,6 +16,9 @@ object ScreenManager {
     private const val PREFS_NAME = "screen_manager"
     private const val IME_TOOLBAR_KEY = "ime_toolbar_enabled_v2"
     private const val LEGACY_IME_TOOLBAR_KEY = "show_additional_keyboard"
+    internal const val DEFAULT_RESOLUTION = "1280x1024"
+    internal const val MAX_FRAMEBUFFER_DIMENSION = 8192
+    internal const val MAX_FRAMEBUFFER_PIXELS = 16_777_216L
 
     val supportedExactResolutions = listOf(
         "800x600",
@@ -39,9 +42,9 @@ object ScreenManager {
             scalePercent = prefs.getInt("scale_percent", 100),
             exactResolution = prefs.getString("exact_resolution", null)
                 ?.takeIf { it in supportedExactResolutions }
-                ?: "1280x1024",
+                ?: DEFAULT_RESOLUTION,
             customResolution = prefs.getString("custom_resolution", null)
-                ?: "1280x1024",
+                ?: DEFAULT_RESOLUTION,
             filtering = ScreenFiltering.fromWireValue(
                 prefs.getString("filtering", null)
             ),
@@ -86,7 +89,7 @@ object ScreenManager {
      * keep-awake, fullscreen and our IME toolbar are implemented by the host UI.
      */
     internal fun buildPreferencePayload(config: ScreenConfig): Map<String, String> {
-        val normalized = config.normalized()
+        val normalized = config.normalizedForRenderer()
         return linkedMapOf(
             "displayResolutionMode" to normalized.resolutionMode.wireValue,
             "displayScale" to normalized.scalePercent.toString(),
@@ -110,7 +113,7 @@ object ScreenManager {
      * immediately while disk persistence continues asynchronously.
      */
     private fun applyEmbeddedLoriePreferences(context: Context, config: ScreenConfig) {
-        val normalized = config.normalized()
+        val normalized = config.normalizedForRenderer()
         Prefs(context.applicationContext)
             .get()
             .edit()
@@ -157,8 +160,8 @@ object ScreenManager {
 data class ScreenConfig(
     val resolutionMode: ScreenResolutionMode = ScreenResolutionMode.Native,
     val scalePercent: Int = 100,
-    val exactResolution: String = "1280x1024",
-    val customResolution: String = "1280x1024",
+    val exactResolution: String = ScreenManager.DEFAULT_RESOLUTION,
+    val customResolution: String = ScreenManager.DEFAULT_RESOLUTION,
     val filtering: ScreenFiltering = ScreenFiltering.Nearest,
     val adjustResolution: Boolean = false,
     val stretch: Boolean = false,
@@ -167,19 +170,42 @@ data class ScreenConfig(
     val keepScreenAwake: Boolean = false,
     val showAdditionalKeyboard: Boolean = false
 ) {
+    /**
+     * UI normalization deliberately preserves an incomplete Custom-resolution
+     * draft. The text field calls this on every keystroke, so replacing a
+     * partial value with a default here would make normal typing impossible.
+     */
     fun normalized(): ScreenConfig = copy(
         scalePercent = scalePercent.coerceIn(30, 300),
         exactResolution = exactResolution.takeIf { it in ScreenManager.supportedExactResolutions }
-            ?: "1280x1024",
-        customResolution = normalizeResolution(customResolution)
+            ?: ScreenManager.DEFAULT_RESOLUTION,
+        customResolution = customResolution.trim().take(32)
     )
 
-    private fun normalizeResolution(value: String): String {
-        val match = Regex("^(\\d{2,5})x(\\d{2,5})$").matchEntire(value.trim())
-            ?: return "1280x1024"
-        val width = match.groupValues[1].toIntOrNull() ?: return "1280x1024"
-        val height = match.groupValues[2].toIntOrNull() ?: return "1280x1024"
-        return if (width > 0 && height > 0) "${width}x${height}" else "1280x1024"
+    /**
+     * Renderer normalization is stricter than UI normalization. No unbounded
+     * or malformed framebuffer dimensions are ever forwarded to Lorie.
+     */
+    internal fun normalizedForRenderer(): ScreenConfig {
+        val normalized = normalized()
+        return normalized.copy(
+            customResolution = normalized.safeCustomResolution()
+                ?: ScreenManager.DEFAULT_RESOLUTION
+        )
+    }
+
+    internal fun isCustomResolutionValid(): Boolean = safeCustomResolution() != null
+
+    private fun safeCustomResolution(): String? {
+        val match = Regex("^(\\d{1,5})x(\\d{1,5})$").matchEntire(customResolution.trim())
+            ?: return null
+        val width = match.groupValues[1].toLongOrNull() ?: return null
+        val height = match.groupValues[2].toLongOrNull() ?: return null
+        if (width !in 1L..ScreenManager.MAX_FRAMEBUFFER_DIMENSION.toLong()) return null
+        if (height !in 1L..ScreenManager.MAX_FRAMEBUFFER_DIMENSION.toLong()) return null
+        val pixels = width * height
+        if (pixels > ScreenManager.MAX_FRAMEBUFFER_PIXELS) return null
+        return "${width}x${height}"
     }
 }
 

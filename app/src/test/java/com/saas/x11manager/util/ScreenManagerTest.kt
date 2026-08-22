@@ -73,16 +73,60 @@ class ScreenManagerTest {
     }
 
     @Test
-    fun invalidValuesAreNormalizedBeforeTheyReachLorie() {
+    fun uiNormalizationPreservesPartialCustomResolutionDraft() {
         val normalized = ScreenConfig(
             scalePercent = 999,
             exactResolution = "not-supported",
-            customResolution = "broken"
+            customResolution = "192"
         ).normalized()
 
         assertEquals(300, normalized.scalePercent)
-        assertEquals("1280x1024", normalized.exactResolution)
-        assertEquals("1280x1024", normalized.customResolution)
+        assertEquals(ScreenManager.DEFAULT_RESOLUTION, normalized.exactResolution)
+        assertEquals("192", normalized.customResolution)
+        assertFalse(normalized.isCustomResolutionValid())
         assertTrue(normalized.clipboard)
+    }
+
+    @Test
+    fun invalidCustomResolutionFallsBackOnlyAtRendererBoundary() {
+        val config = ScreenConfig(
+            resolutionMode = ScreenResolutionMode.Custom,
+            customResolution = "99999x99999"
+        )
+
+        assertEquals("99999x99999", config.normalized().customResolution)
+        assertFalse(config.isCustomResolutionValid())
+        assertEquals(
+            ScreenManager.DEFAULT_RESOLUTION,
+            ScreenManager.buildPreferencePayload(config)["displayResolutionCustom"]
+        )
+    }
+
+    @Test
+    fun rendererRejectsFramebufferThatExceedsPixelBudget() {
+        val config = ScreenConfig(
+            resolutionMode = ScreenResolutionMode.Custom,
+            customResolution = "8192x8192"
+        )
+
+        assertFalse(config.isCustomResolutionValid())
+        assertEquals(
+            ScreenManager.DEFAULT_RESOLUTION,
+            ScreenManager.buildPreferencePayload(config)["displayResolutionCustom"]
+        )
+    }
+
+    @Test
+    fun rendererAcceptsLargeResolutionWithinDimensionAndPixelBudgets() {
+        val config = ScreenConfig(
+            resolutionMode = ScreenResolutionMode.Custom,
+            customResolution = "4096x2160"
+        )
+
+        assertTrue(config.isCustomResolutionValid())
+        assertEquals(
+            "4096x2160",
+            ScreenManager.buildPreferencePayload(config)["displayResolutionCustom"]
+        )
     }
 }
