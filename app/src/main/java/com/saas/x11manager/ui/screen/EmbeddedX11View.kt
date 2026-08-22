@@ -40,6 +40,8 @@ class EmbeddedX11View(context: Context) : LorieView(context) {
     private val inputSender = InputEventSender(this)
     private var touchMode = ScreenTouchMode.Trackpad
     private var service: ICmdEntryInterface? = null
+    private var serviceBinder: IBinder? = null
+    private var deathRecipient: IBinder.DeathRecipient? = null
     private var receiverRegistered = false
     private var connectedCallback: ((Boolean) -> Unit)? = null
 
@@ -50,32 +52,17 @@ class EmbeddedX11View(context: Context) : LorieView(context) {
     private var downAt = 0L
     private var moved = false
 
-    private val reconnect = object : Runnable {
-        override fun run() {
-            if (!isAttachedToWindow || connected()) return
-            tryConnect()
-            if (!connected()) postDelayed(this, 350L)
-        }
-    }
-
     private val serverReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != CmdEntryPoint.ACTION_START) return
             val bundle: Bundle = intent.getBundleExtra(null) ?: return
             val binder: IBinder = bundle.getBinder(null) ?: return
-            service = ICmdEntryInterface.Stub.asInterface(binder)
-            try {
-                binder.linkToDeath({
-                    service = null
-                    post {
-                        notifyConnection(false)
-                        scheduleReconnect()
-                    }
-                }, 0)
-            } catch (_: Exception) {
-                service = null
+
+            if (binder == serviceBinder && service != null) {
+                tryConnect()
+                return
             }
-            tryConnect()
+            bindService(binder)
         }
     }
 
@@ -149,14 +136,16 @@ class EmbeddedX11View(context: Context) : LorieView(context) {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         registerServerReceiver()
-        scheduleReconnect()
+        // One active request is enough. CmdEntryPoint itself rebroadcasts its
+        // Binder every second while no X client is connected, so an idle local
+        // polling loop would only wake this View unnecessarily when X11 is off.
+        tryConnect()
     }
 
     override fun onDetachedFromWindow() {
-        removeCallbacks(reconnect)
         unregisterServerReceiver()
+        clearService(unlinkDeathRecipient = true)
         connectedCallback = null
-        service = null
         super.onDetachedFromWindow()
     }
 
@@ -283,6 +272,9 @@ class EmbeddedX11View(context: Context) : LorieView(context) {
         if (receiverRegistered) return
         val filter = IntentFilter(CmdEntryPoint.ACTION_START)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // CmdEntryPoint runs through app_process as root/shell rather than
+            // the app UID, so this bridge must remain exported on current Android.
+            // The broadcast is package-targeted by the upstream entry point.
             context.registerReceiver(serverReceiver, filter, Context.RECEIVER_EXPORTED)
         } else {
             @Suppress("DEPRECATION")
@@ -300,9 +292,42 @@ class EmbeddedX11View(context: Context) : LorieView(context) {
         receiverRegistered = false
     }
 
-    private fun scheduleReconnect() {
-        removeCallbacks(reconnect)
-        if (!connected()) post(reconnect)
+    private fun bindService(binder: IBinder) {
+        clearService(unlinkDeathRecipient = true)
+
+        val recipient = IBinder.DeathRecipient {
+            post {
+                if (serviceBinder == binder) {
+                    clearService(unlinkDeathRecipient = false)
+                    notifyConnection(false)
+                }
+            }
+        }
+
+        try {
+            binder.linkToDeath(recipient, 0)
+            service = ICmdEntryInterface.Stub.asInterface(binder)
+            serviceBinder = binder
+            deathRecipient = recipient
+            tryConnect()
+        } catch (_: Exception) {
+            clearService(unlinkDeathRecipient = false)
+            notifyConnection(false)
+        }
+    }
+
+    private fun clearService(unlinkDeathRecipient: Boolean) {
+        val binder = serviceBinder
+        val recipient = deathRecipient
+        if (unlinkDeathRecipient && binder != null && recipient != null) {
+            try {
+                binder.unlinkToDeath(recipient, 0)
+            } catch (_: Exception) {
+            }
+        }
+        service = null
+        serviceBinder = null
+        deathRecipient = null
     }
 
     private fun tryConnect() {
@@ -333,7 +358,7 @@ class EmbeddedX11View(context: Context) : LorieView(context) {
                 notifyConnection(connected())
             }
         } catch (_: Exception) {
-            service = null
+            clearService(unlinkDeathRecipient = true)
             notifyConnection(false)
         }
     }
