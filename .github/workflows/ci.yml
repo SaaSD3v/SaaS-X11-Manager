@@ -81,6 +81,21 @@ jobs:
         test -f third_party/termux-x11/lorie/src/main/java/com/termux/x11/CmdEntryPoint.java
         test -f third_party/termux-x11/LICENSE
 
+    - name: Require production signing inputs
+      if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' }}
+      env:
+        RELEASE_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE }}
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        test -n "$RELEASE_KEYSTORE" || { echo "RELEASE_KEYSTORE is required for a GitHub Release" >&2; exit 1; }
+        test -n "$KEYSTORE_PASSWORD" || { echo "KEYSTORE_PASSWORD is required for a GitHub Release" >&2; exit 1; }
+        test -n "$KEY_ALIAS" || { echo "KEY_ALIAS is required for a GitHub Release" >&2; exit 1; }
+        test -n "$KEY_PASSWORD" || { echo "KEY_PASSWORD is required for a GitHub Release" >&2; exit 1; }
+
     - name: Decode Keystore
       env:
         RELEASE_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE }}
@@ -95,9 +110,11 @@ jobs:
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        REQUIRE_RELEASE_SIGNING: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' }}
       run: |
         set -o pipefail
         ./gradlew testReleaseUnitTest assembleRelease \
+          -PrequireReleaseSigning="$REQUIRE_RELEASE_SIGNING" \
           -PKEYSTORE_PASSWORD="${{ secrets.KEYSTORE_PASSWORD }}" \
           -PKEY_ALIAS="${{ secrets.KEY_ALIAS }}" \
           -PKEY_PASSWORD="${{ secrets.KEY_PASSWORD }}" \

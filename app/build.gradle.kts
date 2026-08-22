@@ -1,6 +1,26 @@
+import org.gradle.api.GradleException
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+val releaseKeystoreFile = rootProject.file("x11manager.keystore")
+val releaseStorePassword = System.getenv("KEYSTORE_PASSWORD").orEmpty()
+val releaseKeyAlias = System.getenv("KEY_ALIAS").orEmpty()
+val releaseKeyPassword = System.getenv("KEY_PASSWORD").orEmpty()
+val releaseSigningAvailable = releaseKeystoreFile.exists() &&
+    releaseStorePassword.isNotBlank() &&
+    releaseKeyAlias.isNotBlank() &&
+    releaseKeyPassword.isNotBlank()
+val requireReleaseSigning = providers.gradleProperty("requireReleaseSigning")
+    .orNull
+    ?.equals("true", ignoreCase = true) == true
+
+if (requireReleaseSigning && !releaseSigningAvailable) {
+    throw GradleException(
+        "Production release signing was required, but x11manager.keystore or signing credentials are missing"
+    )
 }
 
 android {
@@ -22,12 +42,11 @@ android {
 
     signingConfigs {
         create("release") {
-            val keystoreFile = file("../../x11manager.keystore")
-            if (keystoreFile.exists()) {
-                storeFile = keystoreFile
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-                keyAlias = System.getenv("KEY_ALIAS") ?: "x11manager"
-                keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+            if (releaseSigningAvailable) {
+                storeFile = releaseKeystoreFile
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
             }
         }
     }
@@ -40,11 +59,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            val keystoreFile = file("../../x11manager.keystore")
-            if (keystoreFile.exists()) {
-                signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (releaseSigningAvailable) {
+                signingConfigs.getByName("release")
             } else {
-                signingConfig = signingConfigs.getByName("debug")
+                signingConfigs.getByName("debug")
             }
         }
         debug {
