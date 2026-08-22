@@ -153,17 +153,8 @@ object ScreenManager {
     }
 
     /** Stops the managed Graphic Session and X11 server, but never the container. */
-    suspend fun stop(logger: ContainerLogger? = null): Boolean {
-        val stopped = X11SessionManager.stopX11Session(logger)
-        if (!stopped) return false
-
-        if (DisplayLeaseRegistry.releaseSingleDisplayOwner()) {
-            logger?.i("[+] Released ${Constants.X11_DISPLAY} display lease; container lifecycle is unchanged")
-        } else {
-            logger?.w("[!] X11 stopped but the persisted display lease could not be cleared")
-        }
-        return true
-    }
+    suspend fun stop(logger: ContainerLogger? = null): Boolean =
+        X11SessionManager.stopX11Session(logger)
 }
 
 data class ScreenConfig(

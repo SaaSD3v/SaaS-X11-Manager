@@ -48,7 +48,8 @@ internal object GraphicSessionRuntimeController {
             "tmp=\"\${launcher}.saas.\$\$\"; " +
             "{ IFS= read -r first || true; printf '%s\\n' \"\$first\"; " +
             "printf '%s\\n' \"[ -f $sessionRequest ] || exit 0\"; cat; } < \"\$launcher\" > \"\$tmp\" && " +
-            "chmod 755 \"\$tmp\" && mv \"\$tmp\" \"\$launcher\" || { rm -f \"\$tmp\"; exit 40; }; fi; "
+            "chmod 755 \"\$tmp\" && mv \"\$tmp\" \"\$launcher\" || { " +
+            "rm -f \"\$tmp\" \"\$session_request\" \"\$socket_request\" 2>/dev/null; exit 40; }; fi; "
     }
 
     private fun cleanupRequests(): String =
@@ -232,6 +233,11 @@ internal object GraphicSessionRuntimeController {
         logger?.i("[CTX] Stop duration: ${elapsedMs}ms")
 
         if (result.isSuccess) {
+            if (DisplayLeaseRegistry.releaseSingleDisplayOwner()) {
+                logger?.i("[+] Released ${Constants.X11_DISPLAY} display lease")
+            } else {
+                logger?.w("[!] Graphic session stopped, but the persisted display lease could not be cleared")
+            }
             logger?.i("[+] Graphic session and container X11 socket bridge stopped; DroidSpaces container remains running")
             true
         } else {
