@@ -7,6 +7,20 @@ import org.junit.Test
 class GraphicSessionRuntimeControllerTest {
 
     @Test
+    fun rawSocketCommandPreparesAndRequiresSingleDisplaySocketWithoutStartingSession() {
+        val command = GraphicSessionRuntimeController.buildSocketEnsureCommand()
+
+        assertTrue(command.contains("/tmp/.X11-unix/X0"))
+        assertTrue(command.contains("test -S"))
+        assertTrue(command.contains("systemctl start setup-x11-socket.service"))
+        assertTrue(command.contains("rc-service x11-setup start"))
+        assertTrue(command.contains("socket-not-visible"))
+        assertFalse(command.contains("systemctl start x11-session.service"))
+        assertFalse(command.contains("rc-service x11-session start"))
+        assertFalse(command.contains(Constants.DS_BINARY_PATH))
+    }
+
+    @Test
     fun startCommandRequiresTheSingleDisplaySocketInsideContainer() {
         val command = GraphicSessionRuntimeController.buildStartCommand()
 

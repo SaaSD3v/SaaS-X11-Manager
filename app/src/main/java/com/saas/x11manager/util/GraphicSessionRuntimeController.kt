@@ -20,6 +20,30 @@ internal object GraphicSessionRuntimeController {
     private const val DIAG_MARKER = "__SAAS_X11_DIAG__="
     private const val EXPECTED_CONTAINER_SOCKET = "/tmp/.X11-unix/X0"
 
+    /**
+     * Raw X11 and legacy/init-owned sessions still require the Manager socket to
+     * be visible inside the container. This command only prepares/verifies the
+     * socket bridge and deliberately does not start x11-session.
+     */
+    internal fun buildSocketEnsureCommand(): String {
+        val expected = shellQuote(EXPECTED_CONTAINER_SOCKET)
+        return "expected=$expected; " +
+            "if command -v systemctl >/dev/null 2>&1 && " +
+            "test -f /etc/systemd/system/setup-x11-socket.service; then " +
+            "printf '%s\\n' '${INIT_MARKER}systemd'; " +
+            "systemctl start setup-x11-socket.service >/dev/null 2>&1 || true; " +
+            "if ! test -S \"\$expected\"; then systemctl restart setup-x11-socket.service >/dev/null 2>&1 || true; fi; " +
+            "elif command -v rc-service >/dev/null 2>&1 && test -x /etc/init.d/x11-setup; then " +
+            "printf '%s\\n' '${INIT_MARKER}openrc'; " +
+            "rc-service x11-setup start >/dev/null 2>&1 || true; " +
+            "if ! test -S \"\$expected\"; then rc-service x11-setup restart >/dev/null 2>&1 || true; fi; " +
+            "else printf '%s\\n' '${INIT_MARKER}none'; fi; " +
+            "if test -S \"\$expected\"; then " +
+            "printf '%s\\n' '${ACTION_MARKER}socket-visible'; exit 0; fi; " +
+            "printf '%s\\n' '${ACTION_MARKER}socket-not-visible'; " +
+            "printf '%s\\n' \"${DIAG_MARKER}expected socket missing: \$expected\" >&2; exit 41"
+    }
+
     internal fun buildStartCommand(): String {
         val expected = shellQuote(EXPECTED_CONTAINER_SOCKET)
         return "expected=$expected; " +
@@ -90,15 +114,22 @@ internal object GraphicSessionRuntimeController {
         logger?.i("[CTX] Expected container socket: $EXPECTED_CONTAINER_SOCKET")
         logger?.i("[CTX] Container lifecycle: unchanged")
 
-        if (configuredSession == GraphicSession.NONE) {
-            logger?.i("[CTX] Configured graphic session: none")
-            logger?.i("[+] Raw X11 requested; no managed desktop/window manager will be started")
-            return@withContext true
-        }
+        if (configuredSession == GraphicSession.NONE || configuredSession == null) {
+            val socketResult = runContainerCommand(containerName, buildSocketEnsureCommand())
+            logRuntimeMarkers(socketResult.out, logger)
+            if (!socketResult.isSuccess) {
+                logger?.e("[-] Container X11 socket could not be confirmed visible")
+                logFailureDiagnostics(socketResult.out, socketResult.err, logger)
+                return@withContext false
+            }
 
-        if (configuredSession == null) {
-            logger?.i("[CTX] Configured graphic session metadata: absent")
-            logger?.i("[+] Leaving legacy/init-owned graphic session state unchanged")
+            if (configuredSession == GraphicSession.NONE) {
+                logger?.i("[CTX] Configured graphic session: none")
+                logger?.i("[+] Raw X11 requested; socket is ready and no managed desktop/window manager will be started")
+            } else {
+                logger?.i("[CTX] Configured graphic session metadata: absent")
+                logger?.i("[+] X11 socket is ready; leaving legacy/init-owned graphic session state unchanged")
+            }
             return@withContext true
         }
 
