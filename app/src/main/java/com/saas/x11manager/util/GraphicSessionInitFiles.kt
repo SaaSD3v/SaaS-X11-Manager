@@ -120,5 +120,9 @@ internal object GraphicSessionInitFiles {
             "Restart=on-failure\n" +
             "RestartSec=3\n\n" +
             "[Install]\n" +
-            "WantedBy=graphical.target\n"
+            // DroidSpaces containers commonly reach multi-user.target without
+            // transitioning through graphical.target. The runtime controller can
+            // still start this service on demand, but installing it in multi-user
+            // makes automatic startup match the container's real boot target.
+            "WantedBy=multi-user.target\n"
 }
