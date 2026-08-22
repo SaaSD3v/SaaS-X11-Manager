@@ -3,7 +3,9 @@ package com.saas.x11manager.util
 import android.util.Log
 import com.topjohnwu.superuser.CallbackList
 import com.topjohnwu.superuser.Shell
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 internal data class AdditionalContainerLease(
     val restoreStoppedState: Boolean
@@ -107,12 +109,17 @@ internal object AdditionalGraphicSessionRuntime {
         return AdditionalContainerLease(restoreStoppedState)
     }
 
+    /**
+     * Lease cleanup must survive cancellation of the UI coroutine that owns the
+     * install/verification. A container started only for this operation must not
+     * be stranded RUNNING because its ViewModel disappeared mid-finally.
+     */
     suspend fun release(
         containerName: String,
         lease: AdditionalContainerLease,
         logger: ContainerLogger?
-    ) {
-        if (!lease.restoreStoppedState) return
+    ) = withContext(NonCancellable) {
+        if (!lease.restoreStoppedState) return@withContext
 
         logger?.i("")
         logger?.i("[*] Restoring original stopped container state...")
