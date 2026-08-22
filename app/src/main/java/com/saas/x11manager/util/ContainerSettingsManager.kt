@@ -135,32 +135,49 @@ object ContainerSettingsManager {
     /**
      * Related UI/runtime getters normally arrive in a short burst. Reusing the
      * parsed snapshot for one second collapses those calls to one root read.
-     * Manager writes invalidate it immediately, while the short lifetime keeps
-     * out-of-band/manual changes observable without a privileged stat per getter.
+     *
+     * Cache misses are serialized with writes. This prevents a reader from
+     * loading old disk contents, racing a completed write/invalidation, then
+     * publishing that old snapshot back into the cache after the new file is
+     * already visible.
      */
     fun readSnapshot(
         containerName: String,
         forceRefresh: Boolean = false
     ): ContainerSettingsSnapshot {
-        val now = System.nanoTime()
         if (!forceRefresh) {
-            synchronized(snapshotCacheLock) {
-                snapshotCache[containerName]?.let { cached ->
-                    if (now - cached.loadedAtNanos <= SNAPSHOT_CACHE_WINDOW_NANOS) {
-                        return cached.snapshot
-                    }
-                }
-            }
+            cachedSnapshot(containerName)?.let { return it }
         }
 
-        val snapshot = parseSnapshot(readLines(containerName))
-        synchronized(snapshotCacheLock) {
-            snapshotCache[containerName] = CachedSnapshot(
-                loadedAtNanos = System.nanoTime(),
-                snapshot = snapshot
-            )
+        return synchronized(settingsWriteLock) {
+            // Another reader may have populated the cache while this caller was
+            // waiting for an in-flight write/read. Recheck before touching disk.
+            if (!forceRefresh) {
+                cachedSnapshot(containerName)?.let { return@synchronized it }
+            }
+
+            val snapshot = parseSnapshot(readLines(containerName))
+            synchronized(snapshotCacheLock) {
+                snapshotCache[containerName] = CachedSnapshot(
+                    loadedAtNanos = System.nanoTime(),
+                    snapshot = snapshot
+                )
+            }
+            snapshot
         }
-        return snapshot
+    }
+
+    private fun cachedSnapshot(containerName: String): ContainerSettingsSnapshot? {
+        val now = System.nanoTime()
+        return synchronized(snapshotCacheLock) {
+            val cached = snapshotCache[containerName] ?: return@synchronized null
+            if (now - cached.loadedAtNanos <= SNAPSHOT_CACHE_WINDOW_NANOS) {
+                cached.snapshot
+            } else {
+                snapshotCache.remove(containerName)
+                null
+            }
+        }
     }
 
     /** Keeps the old readValue contract: the first occurrence of a key wins. */
@@ -245,6 +262,11 @@ object ContainerSettingsManager {
         values: Map<String, String>,
         cacheDir: File
     ): Boolean = synchronized(settingsWriteLock) {
+        // Once a writer owns the mutation lock, no new cache-miss reader may
+        // touch disk until the transaction finishes. Remove the old fast-path
+        // snapshot immediately so readers starting after this point cannot see it.
+        invalidateSnapshot(containerName)
+
         val containerDir = containerDir(containerName)
         val settingsPath = settingsPath(containerName)
         val lines = readLines(containerName).toMutableList()
@@ -275,7 +297,6 @@ object ContainerSettingsManager {
             ).exec()
 
             if (result.isSuccess) {
-                invalidateSnapshot(containerName)
                 true
             } else {
                 Shell.cmd("rm -f ${shellQuote(destinationTemp)} 2>/dev/null").exec()
