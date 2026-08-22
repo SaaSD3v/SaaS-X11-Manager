@@ -17,7 +17,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.util.X11ServerStatus
-import com.saas.x11manager.util.X11SessionManager
 import com.termux.x11.EmbeddedDisplayHost
 
 @Composable
@@ -25,23 +24,23 @@ fun DisplayScreen(
     viewModel: HomeViewModel,
     onOpenScreen: () -> Unit
 ) {
-    val serverStatus by viewModel.x11ServerStatus.collectAsState()
-    val serverPid by viewModel.x11ServerPid.collectAsState()
+    val monitors by viewModel.monitors.collectAsState()
     val context = LocalContext.current
     val prefs = remember(context) { EmbeddedDisplayHost.getPrefs(context) }
     val store = remember(prefs) { prefs.get() }
     var showConfig by remember { mutableStateOf(false) }
-    var activeDisplays by remember { mutableStateOf<List<String>>(emptyList()) }
 
     LaunchedEffect(store) {
         ensureManagedX11Defaults(context, store)
     }
 
-    LaunchedEffect(serverStatus, serverPid) {
-        activeDisplays = X11SessionManager.getMonitors()
+    val activeDisplays = remember(monitors) {
+        monitors
+            .asSequence()
             .filter { it.status == X11ServerStatus.Running }
             .sortedBy { it.slot.number }
             .map { it.displayName }
+            .toList()
     }
 
     val screenSubtitle = when {
