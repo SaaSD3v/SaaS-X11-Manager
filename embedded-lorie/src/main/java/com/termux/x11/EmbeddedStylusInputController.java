@@ -1,8 +1,10 @@
 package com.termux.x11;
 
+import android.content.SharedPreferences;
 import android.graphics.Matrix;
 import android.view.InputDevice;
 import android.view.MotionEvent;
+import android.view.View;
 
 import com.termux.x11.input.InputEventSender;
 import com.termux.x11.input.RenderData;
@@ -22,13 +24,34 @@ public final class EmbeddedStylusInputController {
     private final InputEventSender sender;
     private final RenderData renderData = new RenderData();
     private final float[] mappedPoint = new float[2];
+    private final SharedPreferences preferenceStore;
+    private final SharedPreferences.OnSharedPreferenceChangeListener preferenceListener;
+    private final View.OnAttachStateChangeListener attachStateListener;
+
+    private boolean preferenceListenerRegistered;
 
     public EmbeddedStylusInputController(LorieView view) {
         if (view == null)
             throw new NullPointerException("view");
         this.view = view;
         this.sender = new InputEventSender(view);
-        reloadPreferences();
+        this.preferenceStore = EmbeddedDisplayHost.getPrefs(view.getContext()).get();
+        this.preferenceListener = (store, key) -> refreshPreferences();
+        this.attachStateListener = new View.OnAttachStateChangeListener() {
+            @Override
+            public void onViewAttachedToWindow(View attachedView) {
+                registerPreferenceListener();
+                refreshPreferences();
+            }
+
+            @Override
+            public void onViewDetachedFromWindow(View detachedView) {
+                unregisterPreferenceListener();
+            }
+        };
+        view.addOnAttachStateChangeListener(attachStateListener);
+        registerPreferenceListener();
+        refreshPreferences();
     }
 
     public boolean handles(MotionEvent event) {
@@ -52,7 +75,6 @@ public final class EmbeddedStylusInputController {
         if (event == null || !view.connected() || !handles(event))
             return false;
 
-        reloadPreferences();
         view.requestFocus();
         if (event.getActionMasked() == MotionEvent.ACTION_DOWN)
             view.requestUnbufferedDispatch(event);
@@ -103,7 +125,26 @@ public final class EmbeddedStylusInputController {
         return true;
     }
 
-    private void reloadPreferences() {
+    public void dispose() {
+        unregisterPreferenceListener();
+        view.removeOnAttachStateChangeListener(attachStateListener);
+    }
+
+    private void registerPreferenceListener() {
+        if (preferenceListenerRegistered)
+            return;
+        preferenceStore.registerOnSharedPreferenceChangeListener(preferenceListener);
+        preferenceListenerRegistered = true;
+    }
+
+    private void unregisterPreferenceListener() {
+        if (!preferenceListenerRegistered)
+            return;
+        preferenceStore.unregisterOnSharedPreferenceChangeListener(preferenceListener);
+        preferenceListenerRegistered = false;
+    }
+
+    private void refreshPreferences() {
         Prefs prefs = EmbeddedDisplayHost.getPrefs(view.getContext());
         sender.stylusIsMouse = prefs.stylusIsMouse.get();
         sender.stylusButtonContactModifierMode =
