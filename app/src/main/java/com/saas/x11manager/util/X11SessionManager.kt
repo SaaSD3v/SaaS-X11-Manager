@@ -36,7 +36,7 @@ data class X11ServerSnapshot(
     val socketPresent: Boolean
 )
 
-/** Owns the project X11 server process, socket, XKB bootstrap and container session startup. */
+/** Owns the project X11 server process, socket and container session startup. */
 object X11SessionManager {
 
     private data class ServerLease(
@@ -111,69 +111,12 @@ object X11SessionManager {
         }
     }
 
-    private fun hasCachedXkbConfig(): Boolean {
-        val root = shellQuote(Constants.INTEGRATED_X11_XKB_DIR)
-        return try {
-            Shell.cmd(
-                "test -d $root/rules && test -d $root/symbols && test -d $root/keycodes"
-            ).exec().isSuccess
-        } catch (_: Exception) {
-            false
-        }
-    }
+    private fun hasCachedXkbConfig(): Boolean = XkbRepository.hasCachedConfig()
 
     private suspend fun stageXkbConfig(
         containerName: String,
         logger: ContainerLogger? = null
-    ): Boolean {
-        if (hasCachedXkbConfig()) {
-            logger?.i("[+] Reusing cached XKB configuration")
-            return true
-        }
-
-        val info = ContainerManager.getContainerInfo(containerName) ?: run {
-            logger?.e("[-] Cannot resolve container rootfs for XKB data")
-            return false
-        }
-
-        val staged = RootfsAccessor.use(
-            rootfsPath = info.rootfsPath,
-            tag = "xkb_$containerName"
-        ) { root ->
-            val x11Path = "$root/usr/share/X11/xkb"
-            val alternatePath = "$root/usr/share/xkeyboard-config-2"
-            val source = when {
-                Shell.cmd("test -d ${shellQuote(x11Path)}").exec().isSuccess -> x11Path
-                Shell.cmd("test -d ${shellQuote(alternatePath)}").exec().isSuccess -> alternatePath
-                else -> null
-            } ?: return@use false
-
-            val destination = Constants.INTEGRATED_X11_XKB_DIR
-            val temporary = "$destination.tmp.${android.os.Process.myPid()}"
-            val result = Shell.cmd(
-                "rm -rf ${shellQuote(temporary)} && " +
-                    "mkdir -p ${shellQuote(temporary)} && " +
-                    "cp -a ${shellQuote("$source/.")} ${shellQuote("$temporary/")} && " +
-                    "chmod -R a+rX ${shellQuote(temporary)} && " +
-                    "rm -rf ${shellQuote(destination)} && " +
-                    "mv ${shellQuote(temporary)} ${shellQuote(destination)}"
-            ).exec()
-            if (!result.isSuccess) {
-                Shell.cmd("rm -rf ${shellQuote(temporary)} 2>/dev/null").exec()
-            }
-            result.isSuccess
-        } ?: false
-
-        if (staged && hasCachedXkbConfig()) {
-            logger?.i("[+] Cached XKB configuration from $containerName")
-            return true
-        }
-
-        logger?.e(
-            "[-] XKB configuration was not found in $containerName; expected /usr/share/X11/xkb"
-        )
-        return false
-    }
+    ): Boolean = XkbRepository.ensureCached(containerName, logger)
 
     private fun clearX11SocketFiles() {
         Shell.cmd(

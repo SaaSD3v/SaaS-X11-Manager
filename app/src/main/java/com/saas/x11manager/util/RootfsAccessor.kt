@@ -14,7 +14,8 @@ object RootfsAccessor {
 
     data class Access(
         val path: String,
-        val mountPoint: String? = null
+        val mountPoint: String? = null,
+        val readOnly: Boolean = false
     ) {
         val isMounted: Boolean get() = mountPoint != null
     }
@@ -28,12 +29,30 @@ object RootfsAccessor {
         return "/mnt/saas_x11_${safeTag}_$suffix"
     }
 
-    fun open(rootfsPath: String, tag: String = "edit"): Access? {
+    internal fun buildMountCommand(
+        rootfsArg: String,
+        mountPointArg: String,
+        isFile: Boolean,
+        readOnly: Boolean
+    ): String {
+        val access = if (readOnly) "ro" else "rw"
+        return if (isFile) {
+            "mount -o loop,$access $rootfsArg $mountPointArg 2>/dev/null"
+        } else {
+            "mount -o $access $rootfsArg $mountPointArg 2>/dev/null"
+        }
+    }
+
+    fun open(
+        rootfsPath: String,
+        tag: String = "edit",
+        readOnly: Boolean = false
+    ): Access? {
         if (rootfsPath.isBlank()) return null
 
         val rootfsArg = shellQuote(rootfsPath)
         if (Shell.cmd("test -d $rootfsArg").exec().isSuccess) {
-            return Access(path = rootfsPath)
+            return Access(path = rootfsPath, readOnly = readOnly)
         }
 
         val isFile = Shell.cmd("test -f $rootfsArg").exec().isSuccess
@@ -45,33 +64,48 @@ object RootfsAccessor {
         val mkdir = Shell.cmd("mkdir -p $mountPointArg 2>/dev/null").exec()
         if (!mkdir.isSuccess) return null
 
-        val mountCommand = if (isFile) {
-            "mount -o loop,rw $rootfsArg $mountPointArg 2>/dev/null"
-        } else {
-            "mount -o rw $rootfsArg $mountPointArg 2>/dev/null"
-        }
-
-        val mounted = Shell.cmd(mountCommand).exec()
+        val mounted = Shell.cmd(
+            buildMountCommand(
+                rootfsArg = rootfsArg,
+                mountPointArg = mountPointArg,
+                isFile = isFile,
+                readOnly = readOnly
+            )
+        ).exec()
         if (!mounted.isSuccess) {
             Shell.cmd("rmdir $mountPointArg 2>/dev/null").exec()
             return null
         }
 
-        return Access(path = mountPoint, mountPoint = mountPoint)
+        return Access(path = mountPoint, mountPoint = mountPoint, readOnly = readOnly)
     }
 
-    fun close(access: Access?) {
-        val mountPoint = access?.mountPoint ?: return
+    /**
+     * Clean up only mounts created by this accessor. Never use lazy/forced
+     * unmount here: a busy mount is diagnostic information and must not be
+     * detached behind another operation's back.
+     */
+    fun close(access: Access?): Boolean {
+        val mountPoint = access?.mountPoint ?: return true
         val mountPointArg = shellQuote(mountPoint)
 
         if (Shell.cmd("mountpoint -q $mountPointArg 2>/dev/null").exec().isSuccess) {
-            Shell.cmd("umount $mountPointArg 2>/dev/null").exec()
+            val unmounted = Shell.cmd("umount $mountPointArg 2>/dev/null").exec()
+            if (!unmounted.isSuccess) return false
         }
-        Shell.cmd("rmdir $mountPointArg 2>/dev/null").exec()
+
+        val removed = Shell.cmd("rmdir $mountPointArg 2>/dev/null").exec()
+        return removed.isSuccess ||
+            !Shell.cmd("test -e $mountPointArg").exec().isSuccess
     }
 
-    inline fun <T> use(rootfsPath: String, tag: String = "edit", block: (String) -> T): T? {
-        val access = open(rootfsPath, tag) ?: return null
+    inline fun <T> use(
+        rootfsPath: String,
+        tag: String = "edit",
+        readOnly: Boolean = false,
+        block: (String) -> T
+    ): T? {
+        val access = open(rootfsPath, tag, readOnly) ?: return null
         return try {
             block(access.path)
         } finally {
