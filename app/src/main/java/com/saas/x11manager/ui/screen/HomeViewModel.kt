@@ -109,11 +109,7 @@ class HomeViewModel : ViewModel() {
                         available to requirements
                     }
                     val containersDef = async(Dispatchers.IO) { ContainerManager.listContainers() }
-                    val serverDef = async(Dispatchers.IO) {
-                        val status = X11SessionManager.getLoaderStatus()
-                        val pid = if (status == LoaderStatus.Running) X11SessionManager.getLoaderPid() else null
-                        status to pid
-                    }
+                    val serverDef = async(Dispatchers.IO) { X11SessionManager.getServerSnapshot() }
                     val systemDef = async(Dispatchers.IO) { readDeviceSnapshot() }
 
                     FullRefreshSnapshot(
@@ -143,8 +139,7 @@ class HomeViewModel : ViewModel() {
                     runningOperationContainer == null
                 ) {
                     _containers.value = snapshot.containers
-                    _loaderStatus.value = snapshot.server.first
-                    _loaderPid.value = snapshot.server.second
+                    applyServerSnapshot(snapshot.server)
                 }
 
                 initialized = true
@@ -169,11 +164,7 @@ class HomeViewModel : ViewModel() {
             try {
                 val snapshot = coroutineScope {
                     val containersDef = async(Dispatchers.IO) { ContainerManager.listContainers() }
-                    val serverDef = async(Dispatchers.IO) {
-                        val status = X11SessionManager.getLoaderStatus()
-                        val pid = if (status == LoaderStatus.Running) X11SessionManager.getLoaderPid() else null
-                        status to pid
-                    }
+                    val serverDef = async(Dispatchers.IO) { X11SessionManager.getServerSnapshot() }
                     RuntimeRefreshSnapshot(
                         containers = containersDef.await(),
                         server = serverDef.await()
@@ -186,8 +177,7 @@ class HomeViewModel : ViewModel() {
                 ) return@launch
 
                 _containers.value = snapshot.containers
-                _loaderStatus.value = snapshot.server.first
-                _loaderPid.value = snapshot.server.second
+                applyServerSnapshot(snapshot.server)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -210,6 +200,11 @@ class HomeViewModel : ViewModel() {
         } catch (e: Exception) {
             Log.e("HomeViewModel", "refreshContainers() failed", e)
         }
+    }
+
+    private fun applyServerSnapshot(snapshot: X11ServerSnapshot) {
+        _loaderStatus.value = snapshot.status
+        _loaderPid.value = snapshot.pid
     }
 
     private fun updateContainerState(name: String, status: ContainerStatus, pid: Int? = null) {
@@ -237,20 +232,26 @@ class HomeViewModel : ViewModel() {
             val logger = ViewModelLogger { level, message -> appendLog(logs, level, message) }
 
             try {
-                X11SessionManager.startX11Session(
+                val result = X11SessionManager.startX11Session(
                     containerName = container.name,
                     logger = logger
                 )
 
-                val (running, pid) = ContainerManager.checkContainerStatusPublic(container.name)
-                if (running) {
-                    updateContainerState(container.name, ContainerStatus.RUNNING, pid)
+                when (result.containerStatus) {
+                    ContainerStatus.RUNNING -> updateContainerState(
+                        container.name,
+                        ContainerStatus.RUNNING,
+                        result.containerPid
+                    )
+                    ContainerStatus.STOPPED -> updateContainerState(
+                        container.name,
+                        ContainerStatus.STOPPED,
+                        null
+                    )
+                    ContainerStatus.UNKNOWN -> Unit
                 }
 
-                _loaderStatus.value = X11SessionManager.getLoaderStatus()
-                _loaderPid.value = if (_loaderStatus.value == LoaderStatus.Running) {
-                    X11SessionManager.getLoaderPid()
-                } else null
+                applyServerSnapshot(X11SessionManager.getServerSnapshot())
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "startX11 failed", e)
                 logger.e("Error: ${e.message}")
@@ -397,13 +398,13 @@ class HomeViewModel : ViewModel() {
         val root: Pair<RootStatus, String>,
         val droidspaces: Pair<Boolean, DroidspacesRequirementsResult?>,
         val containers: List<ContainerInfo>,
-        val server: Pair<LoaderStatus, Int?>,
+        val server: X11ServerSnapshot,
         val system: DeviceSnapshot
     )
 
     private data class RuntimeRefreshSnapshot(
         val containers: List<ContainerInfo>,
-        val server: Pair<LoaderStatus, Int?>
+        val server: X11ServerSnapshot
     )
 
     private companion object {
