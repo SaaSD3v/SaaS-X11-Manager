@@ -149,8 +149,9 @@ object ScreenManager {
         }
     }
 
+    /** Stops the managed Graphic Session and X11 server, but never the container. */
     suspend fun stop(logger: ContainerLogger? = null): Boolean =
-        X11SessionManager.stopIntegratedServer(logger)
+        X11SessionManager.stopX11Session(logger)
 }
 
 data class ScreenConfig(
