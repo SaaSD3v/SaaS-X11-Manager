@@ -28,6 +28,7 @@ data class ContainerInfo(
 object ContainerManager {
 
     private const val CONFIG_MARKER = "@@SAAS_X11_CONTAINER@@"
+    private const val PID_MARKER = "@@SAAS_X11_PID@@"
 
     suspend fun listContainers(): List<ContainerInfo> = withContext(Dispatchers.IO) {
         try {
@@ -96,7 +97,7 @@ object ContainerManager {
 
         tryMachineReadableShow(names)?.let { return it }
         tryPlainShow(names)?.let { return it }
-        return queryPidsIndividually(names)
+        return queryPidsBatch(names)
     }
 
     private fun tryMachineReadableShow(
@@ -123,20 +124,32 @@ object ContainerManager {
         }
     }
 
-    private fun queryPidsIndividually(
+    private fun queryPidsBatch(
         containerNames: List<String>
     ): Map<String, ContainerRuntimeState> {
-        return buildMap {
-            containerNames.forEach { name ->
-                val state = try {
-                    val result = Shell.cmd(
-                        "${Constants.DS_BINARY_PATH} --name=${shellQuote(name)} pid 2>/dev/null"
-                    ).exec()
-                    ContainerRuntimeParser.parsePid(result.out)
-                } catch (_: Exception) {
-                    ContainerRuntimeState(ContainerStatus.UNKNOWN)
+        return try {
+            val script = buildString {
+                containerNames.forEach { name ->
+                    append("printf '%s%s\\n' ")
+                    append(shellQuote(PID_MARKER))
+                    append(' ')
+                    append(shellQuote(name))
+                    append("; ")
+                    append(Constants.DS_BINARY_PATH)
+                    append(" --name=")
+                    append(shellQuote(name))
+                    append(" pid 2>/dev/null || true; ")
                 }
-                put(name, state)
+            }
+            val result = Shell.cmd(script).exec()
+            ContainerRuntimeParser.parsePidBatch(
+                lines = result.out,
+                containerNames = containerNames,
+                marker = PID_MARKER
+            )
+        } catch (_: Exception) {
+            containerNames.associateWith {
+                ContainerRuntimeState(ContainerStatus.UNKNOWN)
             }
         }
     }

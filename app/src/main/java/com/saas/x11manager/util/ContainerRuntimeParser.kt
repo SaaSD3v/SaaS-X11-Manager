@@ -105,6 +105,37 @@ internal object ContainerRuntimeParser {
         }
     }
 
+    /**
+     * Parse one shell invocation containing multiple `droidspaces ... pid`
+     * queries. Every query is prefixed by a marker carrying the requested
+     * container name. Missing/unsupported output remains UNKNOWN exactly as it
+     * does in [parsePid]; the batch transport must never manufacture STOPPED.
+     */
+    fun parsePidBatch(
+        lines: List<String>,
+        containerNames: List<String>,
+        marker: String
+    ): Map<String, ContainerRuntimeState> {
+        val names = normalizedNames(containerNames)
+        if (names.isEmpty()) return emptyMap()
+
+        val sections = names.associateWithTo(mutableMapOf()) { mutableListOf<String>() }
+        var currentName: String? = null
+
+        lines.forEach { raw ->
+            if (raw.startsWith(marker)) {
+                val candidate = raw.removePrefix(marker)
+                currentName = candidate.takeIf { it in sections }
+            } else {
+                currentName?.let { sections.getValue(it).add(raw) }
+            }
+        }
+
+        return names.associateWith { name ->
+            parsePid(sections[name].orEmpty())
+        }
+    }
+
     private fun normalizedNames(containerNames: List<String>): List<String> =
         containerNames.filter { it.isNotBlank() }.distinct()
 

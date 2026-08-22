@@ -124,4 +124,39 @@ class ContainerRuntimeParserTest {
         assertEquals(ContainerStatus.UNKNOWN, state.status)
         assertEquals(null, state.pid)
     }
+
+    @Test
+    fun pidBatchPreservesRunningStoppedAndUnknownSemantics() {
+        val marker = "@@PID@@"
+        val states = ContainerRuntimeParser.parsePidBatch(
+            lines = listOf(
+                "${marker}alpha",
+                "4321",
+                "${marker}beta",
+                "NONE",
+                "${marker}gamma",
+                "unsupported command"
+            ),
+            containerNames = listOf("alpha", "beta", "gamma"),
+            marker = marker
+        )
+
+        assertEquals(ContainerStatus.RUNNING, states.getValue("alpha").status)
+        assertEquals(4321, states.getValue("alpha").pid)
+        assertEquals(ContainerStatus.STOPPED, states.getValue("beta").status)
+        assertEquals(ContainerStatus.UNKNOWN, states.getValue("gamma").status)
+    }
+
+    @Test
+    fun pidBatchMissingSectionRemainsUnknown() {
+        val marker = "@@PID@@"
+        val states = ContainerRuntimeParser.parsePidBatch(
+            lines = listOf("${marker}alpha", "123"),
+            containerNames = listOf("alpha", "beta"),
+            marker = marker
+        )
+
+        assertEquals(ContainerStatus.RUNNING, states.getValue("alpha").status)
+        assertEquals(ContainerStatus.UNKNOWN, states.getValue("beta").status)
+    }
 }
