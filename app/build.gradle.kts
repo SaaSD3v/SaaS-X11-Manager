@@ -81,6 +81,10 @@ android {
 dependencies {
     // Embedded Termux:X11/Lorie engine for the isolated integrated-X11 spike.
     implementation(project(":lorie"))
+    // The pinned Lorie module keeps Preference as an implementation dependency.
+    // Expose the same already-packaged API to this module so ScreenManager can
+    // write the embedded Prefs store directly without an exported receiver hop.
+    implementation("androidx.preference:preference:1.2.1")
 
     // Compose BOM
     implementation(platform("androidx.compose:compose-bom:2024.02.00"))

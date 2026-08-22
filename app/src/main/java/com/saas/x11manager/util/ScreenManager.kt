@@ -1,8 +1,7 @@
 package com.saas.x11manager.util
 
-import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
+import com.termux.x11.Prefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -17,8 +16,6 @@ object ScreenManager {
     private const val PREFS_NAME = "screen_manager"
     private const val IME_TOOLBAR_KEY = "ime_toolbar_enabled_v2"
     private const val LEGACY_IME_TOOLBAR_KEY = "show_additional_keyboard"
-    private const val LORIE_CHANGE_PREFERENCE = "com.termux.x11.CHANGE_PREFERENCE"
-    private const val LORIE_PREFERENCE_RECEIVER = "com.termux.x11.LoriePreferences\$Receiver"
 
     val supportedExactResolutions = listOf(
         "800x600",
@@ -102,15 +99,36 @@ object ScreenManager {
         )
     }
 
+    /**
+     * Lorie is embedded in this APK, so its renderer preferences live in the
+     * host application's own SharedPreferences. Write them directly instead of
+     * routing an in-process settings change through the standalone Termux:X11
+     * exported preference receiver.
+     *
+     * SharedPreferences.Editor.apply() updates the in-process memory view before
+     * returning, so EmbeddedX11View.reloadPreferences() can observe the values
+     * immediately while disk persistence continues asynchronously.
+     */
+    private fun applyEmbeddedLoriePreferences(context: Context, config: ScreenConfig) {
+        val normalized = config.normalized()
+        Prefs(context.applicationContext)
+            .get()
+            .edit()
+            .putString("displayResolutionMode", normalized.resolutionMode.wireValue)
+            .putInt("displayScale", normalized.scalePercent)
+            .putString("displayResolutionExact", normalized.exactResolution)
+            .putString("displayResolutionCustom", normalized.customResolution)
+            .putString("displayFilteringMode", normalized.filtering.wireValue)
+            .putBoolean("adjustResolution", normalized.adjustResolution)
+            .putBoolean("displayStretch", normalized.stretch)
+            .putBoolean("clipboardEnable", normalized.clipboard)
+            .apply()
+    }
+
     fun apply(context: Context, config: ScreenConfig) {
         val normalized = config.normalized()
         save(context, normalized)
-
-        val intent = Intent(LORIE_CHANGE_PREFERENCE).apply {
-            component = ComponentName(context.packageName, LORIE_PREFERENCE_RECEIVER)
-            buildPreferencePayload(normalized).forEach { (key, value) -> putExtra(key, value) }
-        }
-        context.sendBroadcast(intent)
+        applyEmbeddedLoriePreferences(context, normalized)
     }
 
     /** Starts only the server; rendering remains hosted by the Screen tab. */
