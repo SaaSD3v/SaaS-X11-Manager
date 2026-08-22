@@ -16,7 +16,8 @@ enum class X11SessionStartState {
     CONFIG_FAILED,
     SERVER_FAILED,
     CONTAINER_FAILED,
-    CONTAINER_NOT_READY
+    CONTAINER_NOT_READY,
+    GRAPHIC_SESSION_FAILED
 }
 
 data class X11SessionStartResult(
@@ -464,6 +465,38 @@ object X11SessionManager {
             }
         }
 
+    /**
+     * Stop the Manager-owned graphical session first, then the host X11 server.
+     * The DroidSpaces container deliberately remains running. If the session
+     * cannot be stopped while its container is alive, keep X11 up instead of
+     * creating a service restart loop against a missing display.
+     */
+    suspend fun stopX11Session(logger: ContainerLogger? = null): Boolean =
+        withContext(Dispatchers.IO) {
+            lifecycleMutex.withLock {
+                val owner = readOwner()
+                if (!owner.isNullOrBlank()) {
+                    val (ownerStatus, _) = ContainerManager.getContainerRuntimeStatePublic(owner)
+                    when (ownerStatus) {
+                        ContainerStatus.STOPPED -> {
+                            logger?.i("[+] Display owner $owner is stopped; releasing stale ownership")
+                            clearOwner()
+                        }
+                        ContainerStatus.RUNNING, ContainerStatus.UNKNOWN -> {
+                            val sessionStopped = GraphicSessionRuntimeController.stop(owner, logger)
+                            if (!sessionStopped) {
+                                logger?.e(
+                                    "[-] X11 server kept running because the graphical session in $owner could not be stopped safely"
+                                )
+                                return@withLock false
+                            }
+                        }
+                    }
+                }
+                stopIntegratedServerLocked(logger)
+            }
+        }
+
     private suspend fun waitForContainerRuntime(
         containerName: String,
         timeoutMillis: Long = 5_000L,
@@ -686,6 +719,48 @@ object X11SessionManager {
                 }
 
                 logger?.i("[+] Container command channel ready")
+                logger?.i("[*] Synchronizing configured Graphic Session with ${Constants.X11_DISPLAY}...")
+                val graphicSessionReady = GraphicSessionRuntimeController.ensureRunning(containerName, logger)
+                if (!graphicSessionReady) {
+                    val message = "Configured Graphic Session could not be confirmed active"
+                    logger?.e("[-] $message")
+
+                    val sessionStopped = GraphicSessionRuntimeController.stop(containerName, logger)
+                    val restoreContainer =
+                        initialContainerStatus == ContainerStatus.STOPPED && containerStartAttempted
+
+                    val finalState = if (restoreContainer) {
+                        rollbackFailedStart(
+                            lease = activeServer,
+                            containerName = containerName,
+                            restoreContainer = true,
+                            logger = logger
+                        )
+                    } else {
+                        val currentState = ContainerManager.getContainerRuntimeStatePublic(containerName)
+                        if (sessionStopped) {
+                            rollbackServer(activeServer, logger)
+                        } else {
+                            // The container was already active before this operation and its
+                            // managed service could not be stopped. Keep/reserve :0 rather
+                            // than removing the display underneath a potentially restarting WM.
+                            if (!writeOwner(containerName)) {
+                                logger?.w("[!] Could not persist conservative ${Constants.X11_DISPLAY} ownership after Graphic Session failure")
+                            }
+                            logger?.w("[!] Preserving ${Constants.X11_DISPLAY} because the Graphic Session stop was not confirmed")
+                        }
+                        currentState
+                    }
+
+                    return@withLock X11SessionStartResult(
+                        state = X11SessionStartState.GRAPHIC_SESSION_FAILED,
+                        containerStatus = finalState.first,
+                        containerPid = finalState.second,
+                        serverPid = activeServer.pid,
+                        message = message
+                    )
+                }
+
                 if (!writeOwner(containerName)) {
                     logger?.w("[!] Session started, but the persistent ${Constants.X11_DISPLAY} owner marker could not be written")
                 }
@@ -727,6 +802,15 @@ object X11SessionManager {
         lifecycleMutex.withLock {
             try {
                 logger?.i("--- Stopping All ---")
+
+                val owner = readOwner()
+                if (!owner.isNullOrBlank()) {
+                    val (ownerStatus, _) = ContainerManager.getContainerRuntimeStatePublic(owner)
+                    if (ownerStatus != ContainerStatus.STOPPED) {
+                        GraphicSessionRuntimeController.stop(owner, logger)
+                    }
+                }
+
                 stopIntegratedServerLocked(logger)
                 val containers = ContainerManager.listContainers()
                 for (container in containers) {
