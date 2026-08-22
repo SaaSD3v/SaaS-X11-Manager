@@ -7,9 +7,10 @@ import org.junit.Test
 class GraphicSessionInitFilesTest {
 
     @Test
-    fun openboxSessionScriptExecutesOnlyOpenbox() {
+    fun openboxSessionScriptExecutesOnlyOpenboxUnderExplicitLease() {
         val script = GraphicSessionInitFiles.sessionScript(GraphicSession.OPENBOX, "/bin/sh")
 
+        assertTrue(script.contains("[ -f ${GraphicSessionRuntimePolicy.SESSION_REQUEST_FILE} ] || exit 0"))
         assertTrue(script.contains("export DISPLAY=:0"))
         assertTrue(script.contains("exec openbox-session"))
         assertFalse(script.contains("startxfce4"))
@@ -36,17 +37,19 @@ class GraphicSessionInitFilesTest {
 
         assertTrue(script.contains("export DISPLAY=:0"))
         assertTrue(script.endsWith("exit 0\n"))
+        assertFalse(script.contains(GraphicSessionRuntimePolicy.SESSION_REQUEST_FILE))
         assertFalse(script.contains("exec openbox-session"))
         assertFalse(script.contains("exec startxfce4"))
         assertFalse(script.contains("exec startlxqt"))
     }
 
     @Test
-    fun openrcUsesGenericSessionServiceNameAndPidfile() {
+    fun openrcSetupIsInertUntilSocketLeaseExists() {
         val setup = GraphicSessionInitFiles.openRcSetupService()
         val session = GraphicSessionInitFiles.openRcSessionService(GraphicSession.OPENBOX)
 
         assertTrue(setup.contains("before x11-session"))
+        assertTrue(setup.contains(GraphicSessionRuntimePolicy.SOCKET_REQUEST_FILE))
         assertTrue(setup.contains("chmod 700 /tmp/runtime-root"))
         assertTrue(session.contains("/run/x11-session.pid"))
         assertTrue(session.contains("X11 Openbox Session"))
@@ -54,17 +57,19 @@ class GraphicSessionInitFilesTest {
     }
 
     @Test
-    fun systemdUsesGenericSessionUnitAndIdempotentSocketSetup() {
+    fun systemdUnitsRequireEphemeralManagerLeases() {
         val socket = GraphicSessionInitFiles.systemdSocketService()
         val session = GraphicSessionInitFiles.systemdSessionService(GraphicSession.OPENBOX)
 
         assertTrue(socket.contains("Before=x11-session.service"))
+        assertTrue(socket.contains("ConditionPathExists=${GraphicSessionRuntimePolicy.SOCKET_REQUEST_FILE}"))
         assertTrue(socket.contains("test -d /usr/.X11-unix"))
         assertTrue(socket.contains("chmod 700 /tmp/runtime-root"))
         assertTrue(socket.contains("mountpoint -q /tmp/.X11-unix"))
         assertTrue(socket.contains("mount --bind /usr/.X11-unix /tmp/.X11-unix"))
         assertTrue(socket.contains("ExecStop=/bin/sh -c 'if mountpoint -q /tmp/.X11-unix"))
         assertTrue(socket.contains("umount /tmp/.X11-unix"))
+        assertTrue(session.contains("ConditionPathExists=${GraphicSessionRuntimePolicy.SESSION_REQUEST_FILE}"))
         assertTrue(session.contains("X11 Openbox Session"))
         assertTrue(session.contains("ExecStart=/usr/local/bin/x11-session.sh"))
         assertFalse(session.contains("x11-xfce"))

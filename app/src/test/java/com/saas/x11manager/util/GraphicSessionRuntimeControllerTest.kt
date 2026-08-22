@@ -7,9 +7,11 @@ import org.junit.Test
 class GraphicSessionRuntimeControllerTest {
 
     @Test
-    fun rawSocketCommandPreparesAndRequiresSingleDisplaySocketWithoutStartingSession() {
+    fun rawSocketCommandAcquiresOnlySocketLease() {
         val command = GraphicSessionRuntimeController.buildSocketEnsureCommand()
 
+        assertTrue(command.contains(GraphicSessionRuntimePolicy.SOCKET_REQUEST_FILE))
+        assertFalse(command.contains(": > \"\$session_request\""))
         assertTrue(command.contains("/tmp/.X11-unix/X0"))
         assertTrue(command.contains("test -S"))
         assertTrue(command.contains("systemctl start setup-x11-socket.service"))
@@ -21,9 +23,14 @@ class GraphicSessionRuntimeControllerTest {
     }
 
     @Test
-    fun startCommandRequiresTheSingleDisplaySocketInsideContainer() {
+    fun startCommandRequiresLeaseSocketAndMigratesLegacyLauncher() {
         val command = GraphicSessionRuntimeController.buildStartCommand()
 
+        assertTrue(command.contains(GraphicSessionRuntimePolicy.SOCKET_REQUEST_FILE))
+        assertTrue(command.contains(GraphicSessionRuntimePolicy.SESSION_REQUEST_FILE))
+        assertTrue(command.contains("had_session_request"))
+        assertTrue(command.contains("/usr/local/bin/x11-session.sh"))
+        assertTrue(command.contains("grep -Fq"))
         assertTrue(command.contains("/tmp/.X11-unix/X0"))
         assertTrue(command.contains("test -S"))
         assertTrue(command.contains("systemctl start setup-x11-socket.service"))
@@ -35,13 +42,15 @@ class GraphicSessionRuntimeControllerTest {
     }
 
     @Test
-    fun stopCommandStopsOnlyTheManagedGraphicSession() {
+    fun stopCommandStopsSessionThenSocketBridgeAndReleasesMarkers() {
         val command = GraphicSessionRuntimeController.buildStopCommand()
 
         assertTrue(command.contains("systemctl stop x11-session.service"))
+        assertTrue(command.contains("systemctl stop setup-x11-socket.service"))
         assertTrue(command.contains("rc-service x11-session stop"))
-        assertFalse(command.contains("systemctl stop setup-x11-socket.service"))
-        assertFalse(command.contains("rc-service x11-setup stop"))
+        assertTrue(command.contains("rc-service x11-setup stop"))
+        assertTrue(command.contains(GraphicSessionRuntimePolicy.SOCKET_REQUEST_FILE))
+        assertTrue(command.contains(GraphicSessionRuntimePolicy.SESSION_REQUEST_FILE))
         assertFalse(command.contains(Constants.DS_BINARY_PATH))
     }
 }

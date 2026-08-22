@@ -9,8 +9,14 @@ internal object GraphicSessionInitFiles {
         } else {
             "exec ${session.startCommand}\n"
         }
+        val leaseGuard = if (session == GraphicSession.NONE) {
+            ""
+        } else {
+            "[ -f ${GraphicSessionRuntimePolicy.SESSION_REQUEST_FILE} ] || exit 0\n"
+        }
 
         return "#!$shell\n" +
+            leaseGuard +
             "export DISPLAY=:0\n" +
             "export HOME=/root\n" +
             "export USER=root\n" +
@@ -29,6 +35,10 @@ internal object GraphicSessionInitFiles {
             "}\n\n" +
             "start() {\n" +
             "    ebegin \"Setting up X11 socket\"\n" +
+            "    if [ ! -f ${GraphicSessionRuntimePolicy.SOCKET_REQUEST_FILE} ]; then\n" +
+            "        eend 0\n" +
+            "        return 0\n" +
+            "    fi\n" +
             "    if [ ! -d /usr/.X11-unix ]; then\n" +
             "        eerror \"X11 source socket directory /usr/.X11-unix is missing\"\n" +
             "        eend 1\n" +
@@ -70,7 +80,8 @@ internal object GraphicSessionInitFiles {
     fun systemdSocketService(): String =
         "[Unit]\n" +
             "Description=Setup X11 socket directory\n" +
-            "Before=x11-session.service\n\n" +
+            "Before=x11-session.service\n" +
+            "ConditionPathExists=${GraphicSessionRuntimePolicy.SOCKET_REQUEST_FILE}\n\n" +
             "[Service]\n" +
             "Type=oneshot\n" +
             "ExecStart=/bin/sh -c 'test -d /usr/.X11-unix && " +
@@ -88,7 +99,8 @@ internal object GraphicSessionInitFiles {
         "[Unit]\n" +
             "Description=X11 ${session.label} Session on Termux:X11\n" +
             "After=network.target setup-x11-socket.service\n" +
-            "Requires=setup-x11-socket.service\n\n" +
+            "Requires=setup-x11-socket.service\n" +
+            "ConditionPathExists=${GraphicSessionRuntimePolicy.SESSION_REQUEST_FILE}\n\n" +
             "[Service]\n" +
             "Type=simple\n" +
             "Environment=DISPLAY=:0\n" +
