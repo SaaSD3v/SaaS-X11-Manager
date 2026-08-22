@@ -8,8 +8,8 @@ import android.window.OnBackInvokedDispatcher
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +30,9 @@ import com.saas.x11manager.ui.navigation.AppNavigation
 import com.saas.x11manager.ui.screen.HomeViewModel
 import com.saas.x11manager.ui.screen.PREF_FULLSCREEN
 import com.saas.x11manager.ui.screen.publishLoriePreferenceChange
+import com.saas.x11manager.ui.theme.ManagerAppearancePreferences
+import com.saas.x11manager.ui.theme.ManagerAppearanceSettings
+import com.saas.x11manager.ui.theme.ManagerThemeMode
 import com.saas.x11manager.ui.theme.X11ManagerTheme
 import com.termux.x11.EmbeddedDisplayHost
 
@@ -39,9 +42,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var fallbackBackCallback: OnBackPressedCallback
     private var platformBackCallback: OnBackInvokedCallback? = null
     private var fullscreenExitDialogVisible by mutableStateOf(false)
+    private var appearanceSettings by mutableStateOf(ManagerAppearanceSettings())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        appearanceSettings = ManagerAppearancePreferences.load(this)
 
         fallbackBackCallback = object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -59,15 +64,31 @@ class MainActivity : ComponentActivity() {
             platformBackCallback = callback
         }
 
-        enableEdgeToEdge()
         setContent {
-            X11ManagerTheme {
+            val systemDark = isSystemInDarkTheme()
+            val useDarkTheme = when (appearanceSettings.themeMode) {
+                ManagerThemeMode.SYSTEM -> systemDark
+                ManagerThemeMode.LIGHT -> false
+                ManagerThemeMode.DARK -> true
+            }
+
+            X11ManagerTheme(
+                darkTheme = useDarkTheme,
+                dynamicColor = appearanceSettings.dynamicColor,
+                amoledMode = appearanceSettings.amoledMode,
+                themePalette = appearanceSettings.palette
+            ) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background
                     ) {
-                        AppNavigation(viewModel = viewModel)
+                        AppNavigation(
+                            viewModel = viewModel,
+                            appearanceSettings = appearanceSettings,
+                            onAppearanceSettingsChange = ::updateAppearance,
+                            onResetAppearance = ::resetAppearance
+                        )
                     }
 
                     if (fullscreenExitDialogVisible) {
@@ -113,6 +134,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun updateAppearance(settings: ManagerAppearanceSettings) {
+        if (appearanceSettings == settings) return
+        appearanceSettings = settings
+        ManagerAppearancePreferences.save(this, settings)
+    }
+
+    private fun resetAppearance() {
+        appearanceSettings = ManagerAppearancePreferences.reset(this)
+    }
+
     /**
      * LorieView is focusable and can consume hardware key events before Compose
      * BackHandler sees them. Intercept Android Back at the Activity boundary so
@@ -134,8 +165,6 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        // Delegate normal navigation to the Compose callbacks/fallback while
-        // keeping this Activity-level safety net out of its own dispatch path.
         fallbackBackCallback.isEnabled = false
         try {
             onBackPressedDispatcher.onBackPressed()
