@@ -40,6 +40,7 @@ fun AppNavigation(viewModel: HomeViewModel) {
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { tabs.size })
     val selectedTab = tabs[pagerState.currentPage]
     val scope = rememberCoroutineScope()
+    var screenFullscreen by remember { mutableStateOf(false) }
 
     val navigateToEdit = viewModel.navigateToEdit
 
@@ -55,51 +56,59 @@ fun AppNavigation(viewModel: HomeViewModel) {
         Scaffold(
             containerColor = Color.Transparent,
             topBar = {
-                TopAppBar(
-                    title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = when (selectedTab) {
-                                    TabItem.Home -> Icons.Default.Computer
-                                    TabItem.Screen -> Icons.Default.DisplaySettings
-                                    TabItem.Requirements -> Icons.Default.FactCheck
-                                },
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .padding(end = 8.dp)
-                                    .size(24.dp)
-                            )
-                            Text(
-                                text = selectedTab.title,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Black
-                            )
-                        }
-                    },
-                    windowInsets = WindowInsets.statusBars
-                )
+                if (!screenFullscreen) {
+                    TopAppBar(
+                        title = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = when (selectedTab) {
+                                        TabItem.Home -> Icons.Default.Computer
+                                        TabItem.Screen -> Icons.Default.DisplaySettings
+                                        TabItem.Requirements -> Icons.Default.FactCheck
+                                    },
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .padding(end = 8.dp)
+                                        .size(24.dp)
+                                )
+                                Text(
+                                    text = selectedTab.title,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                        },
+                        windowInsets = WindowInsets.statusBars
+                    )
+                }
             },
             bottomBar = {
-                MainBottomBar(
-                    selectedTab = selectedTab,
-                    onTabSelected = { tab ->
-                        scope.launch {
-                            pagerState.animateScrollToPage(tabs.indexOf(tab))
+                if (!screenFullscreen) {
+                    MainBottomBar(
+                        selectedTab = selectedTab,
+                        onTabSelected = { tab ->
+                            scope.launch {
+                                pagerState.animateScrollToPage(tabs.indexOf(tab))
+                            }
                         }
-                    }
-                )
+                    )
+                }
             },
             contentWindowInsets = WindowInsets(0)
         ) { innerPadding ->
             HorizontalPager(
                 state = pagerState,
+                userScrollEnabled = !screenFullscreen,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
             ) { page ->
                 when (tabs[page]) {
                     TabItem.Home -> HomeScreen(viewModel = viewModel)
-                    TabItem.Screen -> IntegratedScreenScreen(viewModel = viewModel)
+                    TabItem.Screen -> IntegratedScreenScreen(
+                        viewModel = viewModel,
+                        onFullscreenChanged = { screenFullscreen = it }
+                    )
                     TabItem.Requirements -> RequirementsScreen(viewModel = viewModel)
                 }
             }

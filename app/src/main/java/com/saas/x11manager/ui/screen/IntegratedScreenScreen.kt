@@ -1,7 +1,9 @@
 package com.saas.x11manager.ui.screen
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.view.KeyEvent
-import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -13,7 +15,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DisplaySettings
 import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
@@ -36,9 +37,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -57,13 +55,17 @@ enum class ScreenSettingsPage { Display, X11 }
  * Project-owned Screen UI.
  *
  * Display presentation and X11 runtime controls are deliberately separated.
- * The X11 SurfaceView remains embedded in this app; fullscreen is an immersive
- * viewer for the same embedded renderer, not the upstream Lorie Activity.
+ * Fullscreen only changes the host layout around the same EmbeddedX11View; the
+ * Lorie SurfaceView is never moved to a Dialog or detached from the app window.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun IntegratedScreenScreen(viewModel: HomeViewModel) {
+fun IntegratedScreenScreen(
+    viewModel: HomeViewModel,
+    onFullscreenChanged: (Boolean) -> Unit = {}
+) {
     val context = LocalContext.current
+    val hostView = LocalView.current
     val serverStatus by viewModel.loaderStatus.collectAsState()
     val serverPid by viewModel.loaderPid.collectAsState()
     val containers by viewModel.containers.collectAsState()
@@ -75,6 +77,7 @@ fun IntegratedScreenScreen(viewModel: HomeViewModel) {
     var embeddedView by remember { mutableStateOf<EmbeddedX11View?>(null) }
     var surfaceConnected by remember { mutableStateOf(false) }
     var fullscreen by rememberSaveable { mutableStateOf(false) }
+    var showFullscreenExitConfirm by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var messageIsError by remember { mutableStateOf(false) }
@@ -90,6 +93,57 @@ fun IntegratedScreenScreen(viewModel: HomeViewModel) {
     LaunchedEffect(serverStatus, config.keepScreenAwake, embeddedView) {
         embeddedView?.keepScreenOn =
             serverStatus == LoaderStatus.Running && config.keepScreenAwake
+    }
+
+    LaunchedEffect(fullscreen) {
+        onFullscreenChanged(fullscreen)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { onFullscreenChanged(false) }
+    }
+
+    DisposableEffect(fullscreen, hostView) {
+        val window = hostView.context.findActivity()?.window
+        if (fullscreen && window != null) {
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            WindowInsetsControllerCompat(window, hostView).apply {
+                hide(WindowInsetsCompat.Type.systemBars())
+                systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        }
+        onDispose {
+            if (fullscreen && window != null) {
+                WindowInsetsControllerCompat(window, hostView)
+                    .show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
+
+    BackHandler(enabled = fullscreen) {
+        showFullscreenExitConfirm = true
+    }
+
+    if (showFullscreenExitConfirm) {
+        AlertDialog(
+            onDismissRequest = { showFullscreenExitConfirm = false },
+            title = { Text("Exit fullscreen?") },
+            text = { Text("The X11 session will keep running.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showFullscreenExitConfirm = false
+                        fullscreen = false
+                    }
+                ) { Text("Exit fullscreen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFullscreenExitConfirm = false }) {
+                    Text("Stay")
+                }
+            }
+        )
     }
 
     fun updateConfig(next: ScreenConfig) {
@@ -114,152 +168,138 @@ fun IntegratedScreenScreen(viewModel: HomeViewModel) {
         }, 100L)
     }
 
-    if (fullscreen) {
-        FullscreenX11Dialog(
-            status = serverStatus,
-            config = config,
-            onViewReady = ::bindView,
-            onDismiss = {
-                surfaceConnected = false
-                embeddedView = null
-                fullscreen = false
-            }
-        )
-        return
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 14.dp)
+            .background(if (fullscreen) Color.Black else Color.Transparent)
+            .padding(horizontal = if (fullscreen) 0.dp else 14.dp)
     ) {
         DisplayViewportCard(
             status = serverStatus,
             connected = surfaceConnected,
             config = config,
             view = embeddedView,
+            fullscreen = fullscreen,
             onViewReady = ::bindView,
-            onFullscreen = {
-                surfaceConnected = false
-                embeddedView = null
-                fullscreen = true
-            }
+            onFullscreen = { fullscreen = true }
         )
 
-        Spacer(Modifier.height(10.dp))
+        if (!fullscreen) {
+            Spacer(Modifier.height(10.dp))
 
-        SettingsPageSelector(
-            selected = selectedPage,
-            onSelected = { selectedPage = it }
-        )
+            SettingsPageSelector(
+                selected = selectedPage,
+                onSelected = { selectedPage = it }
+            )
 
-        Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(10.dp))
 
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            contentPadding = PaddingValues(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            when (selectedPage) {
-                ScreenSettingsPage.Display -> {
-                    item {
-                        DisplaySettingsCard(
-                            config = config,
-                            onConfigChanged = ::updateConfig
-                        )
-                    }
-                    item {
-                        InputSettingsCard(
-                            config = config,
-                            onConfigChanged = ::updateConfig
-                        )
-                    }
-                    item {
-                        ApplySettingsCard(
-                            busy = busy,
-                            running = serverStatus == LoaderStatus.Running,
-                            onApply = {
-                                applyToEmbeddedSurface()
-                                message = if (serverStatus == LoaderStatus.Running) {
-                                    "Display settings applied"
-                                } else {
-                                    "Display settings saved for the next X11 start"
-                                }
-                                messageIsError = false
-                            },
-                            onReset = {
-                                val defaults = ScreenConfig()
-                                updateConfig(defaults)
-                                applyToEmbeddedSurface(defaults)
-                                message = "Display settings restored to defaults"
-                                messageIsError = false
-                            }
-                        )
-                    }
-                }
-
-                ScreenSettingsPage.X11 -> {
-                    item {
-                        X11RuntimeCard(
-                            status = serverStatus,
-                            pid = serverPid,
-                            connected = surfaceConnected,
-                            selectedContainerName = selectedContainerName,
-                            containerNames = containers.map { it.name },
-                            busy = busy,
-                            message = message,
-                            messageIsError = messageIsError,
-                            onContainerSelected = { selectedContainerName = it },
-                            onStart = {
-                                scope.launch {
-                                    busy = true
-                                    message = null
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentPadding = PaddingValues(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                when (selectedPage) {
+                    ScreenSettingsPage.Display -> {
+                        item {
+                            DisplaySettingsCard(
+                                config = config,
+                                onConfigChanged = ::updateConfig
+                            )
+                        }
+                        item {
+                            InputSettingsCard(
+                                config = config,
+                                onConfigChanged = ::updateConfig
+                            )
+                        }
+                        item {
+                            ApplySettingsCard(
+                                busy = busy,
+                                running = serverStatus == LoaderStatus.Running,
+                                onApply = {
+                                    applyToEmbeddedSurface()
+                                    message = if (serverStatus == LoaderStatus.Running) {
+                                        "Display settings applied"
+                                    } else {
+                                        "Display settings saved for the next X11 start"
+                                    }
                                     messageIsError = false
-                                    try {
-                                        val result = ScreenManager.startServer(
-                                            context = context,
-                                            xkbContainerName = selectedContainerName,
-                                            config = config
-                                        )
-                                        if (result.isSuccess) {
-                                            val pid = result.getOrThrow()
-                                            embeddedView?.postDelayed({
-                                                embeddedView?.applyScreenConfig(config)
-                                            }, 100L)
-                                            message = "X11 server started · PID $pid"
-                                        } else {
-                                            message = result.exceptionOrNull()?.message
-                                                ?: "X11 server could not start"
-                                            messageIsError = true
+                                },
+                                onReset = {
+                                    val defaults = ScreenConfig()
+                                    updateConfig(defaults)
+                                    applyToEmbeddedSurface(defaults)
+                                    message = "Display settings restored to defaults"
+                                    messageIsError = false
+                                }
+                            )
+                        }
+                    }
+
+                    ScreenSettingsPage.X11 -> {
+                        item {
+                            X11RuntimeCard(
+                                status = serverStatus,
+                                pid = serverPid,
+                                connected = surfaceConnected,
+                                selectedContainerName = selectedContainerName,
+                                containerNames = containers.map { it.name },
+                                busy = busy,
+                                message = message,
+                                messageIsError = messageIsError,
+                                onContainerSelected = { selectedContainerName = it },
+                                onStart = {
+                                    scope.launch {
+                                        busy = true
+                                        message = null
+                                        messageIsError = false
+                                        try {
+                                            val result = ScreenManager.startServer(
+                                                context = context,
+                                                xkbContainerName = selectedContainerName,
+                                                config = config
+                                            )
+                                            if (result.isSuccess) {
+                                                val pid = result.getOrThrow()
+                                                embeddedView?.postDelayed({
+                                                    embeddedView?.applyScreenConfig(config)
+                                                }, 100L)
+                                                message = "X11 server started · PID $pid"
+                                            } else {
+                                                message = result.exceptionOrNull()?.message
+                                                    ?: "X11 server could not start"
+                                                messageIsError = true
+                                            }
+                                        } finally {
+                                            busy = false
+                                            viewModel.refreshRuntimeState()
                                         }
-                                    } finally {
-                                        busy = false
-                                        viewModel.refreshRuntimeState()
+                                    }
+                                },
+                                onStop = {
+                                    scope.launch {
+                                        busy = true
+                                        message = null
+                                        messageIsError = false
+                                        try {
+                                            if (ScreenManager.stop()) {
+                                                message = "X11 session stopped · container remains running"
+                                                surfaceConnected = false
+                                            } else {
+                                                message = "X11 session could not be stopped safely"
+                                                messageIsError = true
+                                            }
+                                        } finally {
+                                            busy = false
+                                            viewModel.refreshRuntimeState()
+                                        }
                                     }
                                 }
-                            },
-                            onStop = {
-                                scope.launch {
-                                    busy = true
-                                    message = null
-                                    messageIsError = false
-                                    try {
-                                        if (ScreenManager.stop()) {
-                                            message = "X11 server stopped"
-                                            surfaceConnected = false
-                                        } else {
-                                            message = "X11 server could not be stopped cleanly"
-                                            messageIsError = true
-                                        }
-                                    } finally {
-                                        busy = false
-                                        viewModel.refreshRuntimeState()
-                                    }
-                                }
-                            }
-                        )
+                            )
+                        }
                     }
                 }
             }
@@ -273,58 +313,73 @@ private fun DisplayViewportCard(
     connected: Boolean,
     config: ScreenConfig,
     view: EmbeddedX11View?,
+    fullscreen: Boolean,
     onViewReady: (EmbeddedX11View) -> Unit,
     onFullscreen: () -> Unit
 ) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        tonalElevation = 2.dp
+        modifier = if (fullscreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth(),
+        shape = if (fullscreen) RoundedCornerShape(0.dp) else RoundedCornerShape(20.dp),
+        border = if (fullscreen) null else BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant
+        ),
+        tonalElevation = if (fullscreen) 0.dp else 2.dp,
+        color = if (fullscreen) Color.Black else MaterialTheme.colorScheme.surface
     ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "Display",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        displayStatusText(status, connected),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                FilledTonalButton(
-                    onClick = onFullscreen,
-                    enabled = status == LoaderStatus.Running
+        Column(modifier = if (fullscreen) Modifier.fillMaxSize() else Modifier) {
+            if (!fullscreen) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Icon(Icons.Default.Fullscreen, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Fullscreen")
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Display",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            displayStatusText(status, connected),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    FilledTonalButton(
+                        onClick = onFullscreen,
+                        enabled = status == LoaderStatus.Running
+                    ) {
+                        Icon(Icons.Default.Fullscreen, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Fullscreen")
+                    }
                 }
             }
 
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp)
+                modifier = if (fullscreen) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp)
+                }
             ) {
                 AndroidView(
                     factory = { context ->
                         EmbeddedX11View(context).also(onViewReady)
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(previewAspectRatio(config)),
+                    modifier = if (fullscreen) {
+                        Modifier.fillMaxSize()
+                    } else {
+                        Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(previewAspectRatio(config))
+                    },
                     update = { embedded ->
                         embedded.keepScreenOn =
                             status == LoaderStatus.Running && config.keepScreenAwake
@@ -332,119 +387,15 @@ private fun DisplayViewportCard(
                 )
             }
 
-            if (config.showAdditionalKeyboard) {
-                ImeToolbar(
-                    view = view,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
-                )
-            } else {
-                Spacer(Modifier.height(10.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun FullscreenX11Dialog(
-    status: LoaderStatus,
-    config: ScreenConfig,
-    onViewReady: (EmbeddedX11View) -> Unit,
-    onDismiss: () -> Unit
-) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            dismissOnBackPress = true,
-            dismissOnClickOutside = false,
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
-        )
-    ) {
-        val dialogView = LocalView.current
-        var fullscreenView by remember { mutableStateOf<EmbeddedX11View?>(null) }
-        var connected by remember { mutableStateOf(false) }
-
-        BackHandler(onBack = onDismiss)
-
-        DisposableEffect(dialogView) {
-            val window = (dialogView.parent as? DialogWindowProvider)?.window
-            if (window != null) {
-                window.setLayout(
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.MATCH_PARENT
-                )
-                WindowCompat.setDecorFitsSystemWindows(window, false)
-                WindowInsetsControllerCompat(window, window.decorView).apply {
-                    hide(WindowInsetsCompat.Type.systemBars())
-                    systemBarsBehavior =
-                        WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                }
-            }
-            onDispose {
-                if (window != null) {
-                    WindowInsetsControllerCompat(window, window.decorView)
-                        .show(WindowInsetsCompat.Type.systemBars())
-                }
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-        ) {
-            AndroidView(
-                factory = { context ->
-                    EmbeddedX11View(context).also { embedded ->
-                        fullscreenView = embedded
-                        embedded.setConnectionListener { connected = it }
-                        embedded.applyScreenConfig(config)
-                        embedded.keepScreenOn =
-                            status == LoaderStatus.Running && config.keepScreenAwake
-                        onViewReady(embedded)
-                    }
-                },
-                modifier = Modifier.fillMaxSize(),
-                update = { embedded ->
-                    embedded.keepScreenOn =
-                        status == LoaderStatus.Running && config.keepScreenAwake
-                }
-            )
-
-            Row(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .safeDrawingPadding()
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(999.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
-                ) {
-                    Text(
-                        if (connected) "X11 connected" else "Attaching X11…",
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold
+            if (!fullscreen) {
+                if (config.showAdditionalKeyboard) {
+                    ImeToolbar(
+                        view = view,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
                     )
+                } else {
+                    Spacer(Modifier.height(10.dp))
                 }
-
-                FilledTonalIconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.FullscreenExit, contentDescription = "Exit fullscreen")
-                }
-            }
-
-            if (config.showAdditionalKeyboard) {
-                ImeToolbar(
-                    view = fullscreenView,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .safeDrawingPadding()
-                        .padding(12.dp)
-                )
             }
         }
     }
@@ -990,4 +941,10 @@ private fun previewAspectRatio(config: ScreenConfig): Float {
     val height = match?.groupValues?.getOrNull(2)?.toFloatOrNull() ?: 9f
     if (width <= 0f || height <= 0f) return 16f / 9f
     return (width / height).coerceIn(1.15f, 2.4f)
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
