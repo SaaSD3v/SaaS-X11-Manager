@@ -24,11 +24,26 @@
             </intent-filter>
         </activity>
 
-        <!-- The Lorie engine stays embedded as a library, but its standalone
-             Activity is intentionally removed. X11 pixels are rendered by the
-             EmbeddedX11View hosted directly inside our Screen tab. -->
+        <!-- Lorie is an embedded renderer/server library in this APK. Its
+             standalone UI, settings, accessibility service and exported
+             broadcast entry points are not part of the Manager surface. The
+             EmbeddedX11View registers its CmdEntryPoint Binder receiver
+             dynamically, so none of these manifest components are needed for
+             the in-process Screen integration. -->
         <activity
             android:name="com.termux.x11.MainActivity"
+            tools:node="remove" />
+        <activity
+            android:name="com.termux.x11.LoriePreferences"
+            tools:node="remove" />
+        <service
+            android:name="com.termux.x11.utils.KeyInterceptor"
+            tools:node="remove" />
+        <receiver
+            android:name="com.termux.x11.LoriePreferences$Receiver"
+            tools:node="remove" />
+        <receiver
+            android:name="com.termux.x11.LorieBroadcastReceiver"
             tools:node="remove" />
     </application>
 
