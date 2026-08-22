@@ -20,23 +20,31 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.saas.x11manager.ui.screen.ConfigScreen
 import com.saas.x11manager.ui.screen.DisplayScreen
 import com.saas.x11manager.ui.screen.EditContainerScreen
 import com.saas.x11manager.ui.screen.HomeScreen
 import com.saas.x11manager.ui.screen.HomeViewModel
 import com.saas.x11manager.ui.screen.ManagedDisplayScreen
 import com.saas.x11manager.ui.screen.RequirementsScreen
+import com.saas.x11manager.ui.theme.ManagerAppearanceSettings
 import kotlinx.coroutines.launch
 
 enum class TabItem(val title: String, val icon: ImageVector) {
     Home("Home", Icons.Default.Home),
     Display("Display", Icons.Default.DisplaySettings),
-    Requirements("Requirements", Icons.Default.FactCheck)
+    Requirements("Requirements", Icons.Default.FactCheck),
+    Config("Config", Icons.Default.Settings)
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun AppNavigation(viewModel: HomeViewModel) {
+fun AppNavigation(
+    viewModel: HomeViewModel,
+    appearanceSettings: ManagerAppearanceSettings,
+    onAppearanceSettingsChange: (ManagerAppearanceSettings) -> Unit,
+    onResetAppearance: () -> Unit
+) {
     val tabs = remember { TabItem.entries }
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { tabs.size })
     val selectedTab = tabs[pagerState.currentPage]
@@ -75,6 +83,7 @@ fun AppNavigation(viewModel: HomeViewModel) {
                                         TabItem.Home -> Icons.Default.Computer
                                         TabItem.Display -> Icons.Default.DisplaySettings
                                         TabItem.Requirements -> Icons.Default.FactCheck
+                                        TabItem.Config -> Icons.Default.Settings
                                     },
                                     contentDescription = null,
                                     modifier = Modifier.padding(end = 8.dp).size(24.dp)
@@ -114,6 +123,11 @@ fun AppNavigation(viewModel: HomeViewModel) {
                             onOpenScreen = { displayScreenOpen = true }
                         )
                         TabItem.Requirements -> RequirementsScreen(viewModel = viewModel)
+                        TabItem.Config -> ConfigScreen(
+                            settings = appearanceSettings,
+                            onSettingsChange = onAppearanceSettingsChange,
+                            onReset = onResetAppearance
+                        )
                     }
                 }
             }
@@ -143,7 +157,7 @@ private fun MainBottomBar(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .padding(horizontal = 8.dp, vertical = 8.dp)
                     .height(56.dp)
             ) {
                 BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
@@ -196,7 +210,7 @@ private fun MainBottomBar(
                                 Icon(
                                     imageVector = tab.icon,
                                     contentDescription = null,
-                                    modifier = Modifier.size(if (isSelected) 24.dp else 22.dp),
+                                    modifier = Modifier.size(if (isSelected) 23.dp else 21.dp),
                                     tint = contentColor
                                 )
                                 Text(
@@ -204,7 +218,8 @@ private fun MainBottomBar(
                                     style = MaterialTheme.typography.labelSmall,
                                     color = contentColor,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    fontSize = if (isSelected) 11.sp else 10.sp
+                                    fontSize = if (isSelected) 10.sp else 9.sp,
+                                    maxLines = 1
                                 )
                             }
                         }
