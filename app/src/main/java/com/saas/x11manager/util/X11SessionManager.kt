@@ -247,8 +247,11 @@ object X11SessionManager {
         val persistedOwner = readOwner()
         if (!persistedOwner.isNullOrBlank() && persistedOwner != containerName) {
             val (ownerStatus, _) = ContainerManager.getContainerRuntimeStatePublic(persistedOwner)
-            if (ownerStatus == ContainerStatus.RUNNING) return persistedOwner
-            if (ownerStatus == ContainerStatus.STOPPED) clearOwner()
+            when (ownerStatus) {
+                ContainerStatus.RUNNING -> return persistedOwner
+                ContainerStatus.STOPPED -> clearOwner()
+                ContainerStatus.UNKNOWN -> return persistedOwner
+            }
         }
 
         // Compatibility fallback for sessions started before the owner marker
@@ -406,7 +409,7 @@ object X11SessionManager {
         if (lease.reused) return
         terminateServerPids(listOf(lease.pid))
         clearX11SocketFiles()
-        clearOwner()
+        preserveOrClearOwnerAfterServerStop(logger)
         logger?.i("[+] Rolled back integrated X11 server after failed session start")
     }
 
@@ -479,6 +482,51 @@ object X11SessionManager {
         return latest
     }
 
+    private suspend fun restoreStoppedContainerAfterFailedStart(
+        containerName: String,
+        shouldRestore: Boolean,
+        logger: ContainerLogger? = null
+    ): Pair<ContainerStatus, Int?> {
+        var latest = ContainerManager.getContainerRuntimeStatePublic(containerName)
+        if (!shouldRestore || latest.first == ContainerStatus.STOPPED) {
+            return latest
+        }
+
+        logger?.i("[*] Restoring container to its pre-start STOPPED state...")
+        ContainerManager.stopContainer(containerName, logger)
+
+        val deadline = System.nanoTime() + 5_000_000_000L
+        while (System.nanoTime() < deadline) {
+            latest = ContainerManager.getContainerRuntimeStatePublic(containerName)
+            if (latest.first == ContainerStatus.STOPPED) break
+            delay(500)
+        }
+
+        if (latest.first == ContainerStatus.STOPPED) {
+            logger?.i("[+] Container restored to STOPPED after failed X11 start")
+        } else {
+            logger?.w(
+                "[!] Could not confirm container restored to STOPPED; current state is ${latest.first}"
+            )
+        }
+        return latest
+    }
+
+    private suspend fun rollbackFailedStart(
+        lease: ServerLease,
+        containerName: String,
+        restoreContainer: Boolean,
+        logger: ContainerLogger? = null
+    ): Pair<ContainerStatus, Int?> {
+        val finalContainerState = restoreStoppedContainerAfterFailedStart(
+            containerName = containerName,
+            shouldRestore = restoreContainer,
+            logger = logger
+        )
+        rollbackServer(lease, logger)
+        return finalContainerState
+    }
+
     private suspend fun waitForContainerCommandReady(
         containerName: String,
         timeoutMillis: Long = 15_000L,
@@ -509,6 +557,8 @@ object X11SessionManager {
     ): X11SessionStartResult = withContext(Dispatchers.IO) {
         lifecycleMutex.withLock {
             var serverLease: ServerLease? = null
+            var initialContainerStatus = ContainerStatus.UNKNOWN
+            var containerStartAttempted = false
 
             try {
                 logger?.i("--- Starting Integrated X11 Session ---")
@@ -517,13 +567,20 @@ object X11SessionManager {
                 val ownerConflict = activeOwnerConflict(containerName)
                 if (ownerConflict != null) {
                     val message =
-                        "Display ${Constants.X11_DISPLAY} is already owned by running container $ownerConflict"
+                        "Display ${Constants.X11_DISPLAY} is already owned by container $ownerConflict whose runtime is not confirmed stopped"
                     logger?.e("[-] $message")
-                    logger?.i("[!] This branch is single-display; stop that graphical container before starting another")
+                    logger?.i("[!] This branch is single-display; stop or verify that graphical container before starting another")
                     return@withLock X11SessionStartResult(
                         state = X11SessionStartState.OWNER_CONFLICT,
                         message = message
                     )
+                }
+
+                val initialRuntime = ContainerManager.getContainerRuntimeStatePublic(containerName)
+                initialContainerStatus = initialRuntime.first
+                logger?.i("[*] Initial container state: ${initialRuntime.first}${initialRuntime.second?.let { " (PID=$it)" } ?: ""}")
+                if (initialContainerStatus == ContainerStatus.UNKNOWN) {
+                    logger?.w("[!] Initial container state is unknown; rollback will not stop it automatically")
                 }
 
                 logger?.i("[*] Preparing container X11 config...")
@@ -533,6 +590,8 @@ object X11SessionManager {
                     logger?.e("[-] $message")
                     return@withLock X11SessionStartResult(
                         state = X11SessionStartState.CONFIG_FAILED,
+                        containerStatus = initialRuntime.first,
+                        containerPid = initialRuntime.second,
                         message = message
                     )
                 }
@@ -544,6 +603,8 @@ object X11SessionManager {
                     logger?.e("[-] Integrated X11 failed: $message")
                     return@withLock X11SessionStartResult(
                         state = X11SessionStartState.SERVER_FAILED,
+                        containerStatus = initialRuntime.first,
+                        containerPid = initialRuntime.second,
                         message = message
                     )
                 }
@@ -551,26 +612,31 @@ object X11SessionManager {
                 serverLease = activeServer
 
                 logger?.i("")
-                logger?.i("[*] Starting container...")
-                val started = ContainerManager.startContainer(containerName, logger)
-                if (!started) {
-                    val (statusAfterFailure, pidAfterFailure) =
-                        ContainerManager.getContainerRuntimeStatePublic(containerName)
-                    if (statusAfterFailure == ContainerStatus.RUNNING) {
-                        logger?.w("[!] Start command reported failure, but container is running")
-                    } else if (statusAfterFailure == ContainerStatus.STOPPED) {
-                        val message = "Container start failed and runtime is stopped"
-                        logger?.e("[-] $message")
-                        rollbackServer(activeServer, logger)
-                        return@withLock X11SessionStartResult(
-                            state = X11SessionStartState.CONTAINER_FAILED,
-                            containerStatus = statusAfterFailure,
-                            containerPid = pidAfterFailure,
-                            serverPid = activeServer.pid,
-                            message = message
-                        )
-                    } else {
-                        logger?.w("[!] Start command was inconclusive; confirming runtime state")
+                if (initialContainerStatus == ContainerStatus.RUNNING) {
+                    logger?.i("[+] Container already running; preserving its lifecycle state")
+                } else {
+                    logger?.i("[*] Starting container...")
+                    containerStartAttempted = true
+                    val started = ContainerManager.startContainer(containerName, logger)
+                    if (!started) {
+                        val (statusAfterFailure, pidAfterFailure) =
+                            ContainerManager.getContainerRuntimeStatePublic(containerName)
+                        if (statusAfterFailure == ContainerStatus.RUNNING) {
+                            logger?.w("[!] Start command reported failure, but container is running")
+                        } else if (statusAfterFailure == ContainerStatus.STOPPED) {
+                            val message = "Container start failed and runtime is stopped"
+                            logger?.e("[-] $message")
+                            rollbackServer(activeServer, logger)
+                            return@withLock X11SessionStartResult(
+                                state = X11SessionStartState.CONTAINER_FAILED,
+                                containerStatus = statusAfterFailure,
+                                containerPid = pidAfterFailure,
+                                serverPid = activeServer.pid,
+                                message = message
+                            )
+                        } else {
+                            logger?.w("[!] Start command was inconclusive; confirming runtime state")
+                        }
                     }
                 }
 
@@ -583,11 +649,16 @@ object X11SessionManager {
                         ContainerStatus.RUNNING -> error("unreachable")
                     }
                     logger?.e("[-] $message")
-                    rollbackServer(activeServer, logger)
+                    val finalState = rollbackFailedStart(
+                        lease = activeServer,
+                        containerName = containerName,
+                        restoreContainer = initialContainerStatus == ContainerStatus.STOPPED && containerStartAttempted,
+                        logger = logger
+                    )
                     return@withLock X11SessionStartResult(
                         state = X11SessionStartState.CONTAINER_FAILED,
-                        containerStatus = runtimeStatus,
-                        containerPid = pid,
+                        containerStatus = finalState.first,
+                        containerPid = finalState.second,
                         serverPid = activeServer.pid,
                         message = message
                     )
@@ -599,11 +670,16 @@ object X11SessionManager {
                 if (!commandReady) {
                     val message = "Container command channel did not become ready"
                     logger?.e("[-] $message")
-                    rollbackServer(activeServer, logger)
+                    val finalState = rollbackFailedStart(
+                        lease = activeServer,
+                        containerName = containerName,
+                        restoreContainer = initialContainerStatus == ContainerStatus.STOPPED && containerStartAttempted,
+                        logger = logger
+                    )
                     return@withLock X11SessionStartResult(
                         state = X11SessionStartState.CONTAINER_NOT_READY,
-                        containerStatus = runtimeStatus,
-                        containerPid = pid,
+                        containerStatus = finalState.first,
+                        containerPid = finalState.second,
                         serverPid = activeServer.pid,
                         message = message
                     )
@@ -626,11 +702,21 @@ object X11SessionManager {
                     message = "Integrated X11 session started"
                 )
             } catch (e: Exception) {
-                serverLease?.let { rollbackServer(it, logger) }
+                val finalContainerState = serverLease?.let { lease ->
+                    rollbackFailedStart(
+                        lease = lease,
+                        containerName = containerName,
+                        restoreContainer = initialContainerStatus == ContainerStatus.STOPPED && containerStartAttempted,
+                        logger = logger
+                    )
+                } ?: ContainerManager.getContainerRuntimeStatePublic(containerName)
                 val message = e.message ?: "Unexpected X11 session start error"
                 logger?.e("[-] Error: $message")
                 X11SessionStartResult(
                     state = X11SessionStartState.CONTAINER_FAILED,
+                    containerStatus = finalContainerState.first,
+                    containerPid = finalContainerState.second,
+                    serverPid = serverLease?.pid,
                     message = message
                 )
             }
