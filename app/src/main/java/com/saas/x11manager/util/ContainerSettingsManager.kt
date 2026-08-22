@@ -4,6 +4,22 @@ import com.topjohnwu.superuser.Shell
 import java.io.File
 
 /**
+ * Immutable view of the Manager-owned sidecar for one container.
+ *
+ * Reading one snapshot avoids a privileged shell call for every individual
+ * field/session marker while keeping the on-disk format unchanged.
+ */
+data class ContainerSettingsSnapshot(
+    val initSystem: InitSystem? = null,
+    val platform: ContainerPlatform? = null,
+    val graphicSession: GraphicSession? = null,
+    val installedSessions: Set<GraphicSession> = emptySet()
+) {
+    fun isGraphicSessionInstalled(graphicSession: GraphicSession): Boolean =
+        graphicSession != GraphicSession.NONE && graphicSession in installedSessions
+}
+
+/**
  * SaaS-X11-Manager-owned settings stored beside container.config.
  *
  * Keeping app metadata in a sidecar avoids adding private keys to the
@@ -17,14 +33,19 @@ object ContainerSettingsManager {
     private const val INIT_SYSTEM_KEY = "init_system"
     private const val PLATFORM_KEY = "platform"
     private const val GRAPHIC_SESSION_KEY = "graphic_session"
+    private const val SNAPSHOT_CACHE_WINDOW_NANOS = 1_000_000_000L
 
-    fun getInitSystem(containerName: String): InitSystem? {
-        return when (readValue(containerName, INIT_SYSTEM_KEY)?.lowercase()) {
-            "systemd" -> InitSystem.SYSTEMD
-            "openrc" -> InitSystem.OPENRC
-            else -> null
-        }
-    }
+    private data class CachedSnapshot(
+        val loadedAtNanos: Long,
+        val snapshot: ContainerSettingsSnapshot
+    )
+
+    private val snapshotCacheLock = Any()
+    private val settingsWriteLock = Any()
+    private val snapshotCache = mutableMapOf<String, CachedSnapshot>()
+
+    fun getInitSystem(containerName: String): InitSystem? =
+        readSnapshot(containerName).initSystem
 
     fun setInitSystem(
         containerName: String,
@@ -38,13 +59,8 @@ object ContainerSettingsManager {
         return setValue(containerName, INIT_SYSTEM_KEY, value, cacheDir)
     }
 
-    fun getPlatform(containerName: String): ContainerPlatform? {
-        return when (readValue(containerName, PLATFORM_KEY)?.lowercase()) {
-            "ubuntu" -> ContainerPlatform.UBUNTU
-            "alpine" -> ContainerPlatform.ALPINE
-            else -> null
-        }
-    }
+    fun getPlatform(containerName: String): ContainerPlatform? =
+        readSnapshot(containerName).platform
 
     fun setPlatform(
         containerName: String,
@@ -60,12 +76,8 @@ object ContainerSettingsManager {
         cacheDir = cacheDir
     )
 
-    fun getGraphicSession(containerName: String): GraphicSession? {
-        val saved = readValue(containerName, GRAPHIC_SESSION_KEY) ?: return null
-        return GraphicSession.entries.firstOrNull {
-            it.name.equals(saved.trim(), ignoreCase = true)
-        }
-    }
+    fun getGraphicSession(containerName: String): GraphicSession? =
+        readSnapshot(containerName).graphicSession
 
     fun setGraphicSession(
         containerName: String,
@@ -103,11 +115,7 @@ object ContainerSettingsManager {
     fun isGraphicSessionInstalled(
         containerName: String,
         graphicSession: GraphicSession
-    ): Boolean {
-        if (graphicSession == GraphicSession.NONE) return false
-        val value = readValue(containerName, installedSessionKey(graphicSession))?.lowercase()
-        return value == "1" || value == "true" || value == "yes"
-    }
+    ): Boolean = readSnapshot(containerName).isGraphicSessionInstalled(graphicSession)
 
     fun setGraphicSessionInstalled(
         containerName: String,
@@ -124,20 +132,87 @@ object ContainerSettingsManager {
         )
     }
 
+    /**
+     * Related UI/runtime getters normally arrive in a short burst. Reusing the
+     * parsed snapshot for one second collapses those calls to one root read.
+     * Manager writes invalidate it immediately, while the short lifetime keeps
+     * out-of-band/manual changes observable without a privileged stat per getter.
+     */
+    fun readSnapshot(
+        containerName: String,
+        forceRefresh: Boolean = false
+    ): ContainerSettingsSnapshot {
+        val now = System.nanoTime()
+        if (!forceRefresh) {
+            synchronized(snapshotCacheLock) {
+                snapshotCache[containerName]?.let { cached ->
+                    if (now - cached.loadedAtNanos <= SNAPSHOT_CACHE_WINDOW_NANOS) {
+                        return cached.snapshot
+                    }
+                }
+            }
+        }
+
+        val snapshot = parseSnapshot(readLines(containerName))
+        synchronized(snapshotCacheLock) {
+            snapshotCache[containerName] = CachedSnapshot(
+                loadedAtNanos = System.nanoTime(),
+                snapshot = snapshot
+            )
+        }
+        return snapshot
+    }
+
+    /** Keeps the old readValue contract: the first occurrence of a key wins. */
+    internal fun parseSnapshot(lines: List<String>): ContainerSettingsSnapshot {
+        val values = linkedMapOf<String, String>()
+        lines.asSequence()
+            .map(String::trim)
+            .filter { it.isNotEmpty() && !it.startsWith("#") }
+            .forEach { line ->
+                val parts = line.split("=", limit = 2)
+                if (parts.size != 2) return@forEach
+                val key = parts[0].trim()
+                if (key.isEmpty() || key in values) return@forEach
+                values[key] = parts[1].trim()
+            }
+
+        val initSystem = when (values[INIT_SYSTEM_KEY]?.lowercase()) {
+            "systemd" -> InitSystem.SYSTEMD
+            "openrc" -> InitSystem.OPENRC
+            else -> null
+        }
+        val platform = when (values[PLATFORM_KEY]?.lowercase()) {
+            "ubuntu" -> ContainerPlatform.UBUNTU
+            "alpine" -> ContainerPlatform.ALPINE
+            else -> null
+        }
+        val graphicSession = values[GRAPHIC_SESSION_KEY]?.let { saved ->
+            GraphicSession.entries.firstOrNull {
+                it.name.equals(saved.trim(), ignoreCase = true)
+            }
+        }
+        val installedSessions = GraphicSession.entries
+            .asSequence()
+            .filter { it != GraphicSession.NONE }
+            .filter { session ->
+                when (values[installedSessionKey(session)]?.lowercase()) {
+                    "1", "true", "yes" -> true
+                    else -> false
+                }
+            }
+            .toSet()
+
+        return ContainerSettingsSnapshot(
+            initSystem = initSystem,
+            platform = platform,
+            graphicSession = graphicSession,
+            installedSessions = installedSessions
+        )
+    }
+
     private fun installedSessionKey(graphicSession: GraphicSession): String =
         "installed_${graphicSession.name.lowercase()}"
-
-    private fun readValue(containerName: String, key: String): String? {
-        return readLines(containerName)
-            .asSequence()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() && !it.startsWith("#") }
-            .mapNotNull { line ->
-                val parts = line.split("=", limit = 2)
-                if (parts.size == 2 && parts[0].trim() == key) parts[1].trim() else null
-            }
-            .firstOrNull()
-    }
 
     private fun readLines(containerName: String): List<String> {
         return try {
@@ -159,11 +234,17 @@ object ContainerSettingsManager {
         cacheDir = cacheDir
     )
 
+    /**
+     * Serializes Manager read-modify-write updates. Data is first staged in app
+     * cache, copied to a temporary file beside the destination, chmod'ed, then
+     * atomically renamed over the sidecar. The old file therefore remains valid
+     * until the complete replacement is ready.
+     */
     private fun setValues(
         containerName: String,
         values: Map<String, String>,
         cacheDir: File
-    ): Boolean {
+    ): Boolean = synchronized(settingsWriteLock) {
         val containerDir = containerDir(containerName)
         val settingsPath = settingsPath(containerName)
         val lines = readLines(containerName).toMutableList()
@@ -180,20 +261,40 @@ object ContainerSettingsManager {
         values.forEach { (key, value) -> lines.add("$key=$value") }
 
         val safeName = containerName.replace(Regex("[^A-Za-z0-9_.-]"), "_")
-        val tmpFile = File.createTempFile("saas_x11_${safeName}_", ".conf", cacheDir)
+        val appTemp = File.createTempFile("saas_x11_${safeName}_", ".conf", cacheDir)
+        val destinationTemp =
+            "$settingsPath.tmp.${android.os.Process.myPid()}.${System.nanoTime()}"
 
-        return try {
-            tmpFile.writeText(lines.joinToString("\n") + "\n")
+        try {
+            appTemp.writeText(lines.joinToString("\n") + "\n")
             val result = Shell.cmd(
                 "mkdir -p ${shellQuote(containerDir)} && " +
-                    "cp ${shellQuote(tmpFile.absolutePath)} ${shellQuote(settingsPath)} && " +
-                    "chmod 600 ${shellQuote(settingsPath)}"
+                    "cp ${shellQuote(appTemp.absolutePath)} ${shellQuote(destinationTemp)} && " +
+                    "chmod 600 ${shellQuote(destinationTemp)} && " +
+                    "mv -f ${shellQuote(destinationTemp)} ${shellQuote(settingsPath)}"
             ).exec()
-            result.isSuccess
+
+            if (result.isSuccess) {
+                invalidateSnapshot(containerName)
+                true
+            } else {
+                Shell.cmd("rm -f ${shellQuote(destinationTemp)} 2>/dev/null").exec()
+                false
+            }
         } catch (_: Exception) {
+            try {
+                Shell.cmd("rm -f ${shellQuote(destinationTemp)} 2>/dev/null").exec()
+            } catch (_: Exception) {
+            }
             false
         } finally {
-            tmpFile.delete()
+            appTemp.delete()
+        }
+    }
+
+    private fun invalidateSnapshot(containerName: String) {
+        synchronized(snapshotCacheLock) {
+            snapshotCache.remove(containerName)
         }
     }
 
