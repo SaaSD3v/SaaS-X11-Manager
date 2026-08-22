@@ -2,7 +2,13 @@ name: X11 Manager CI
 
 on:
   push:
-    branches: [ "main", "master", "agent/structural-fixes", "agent/integrated-x11", "agent/multi-display" ]
+    branches:
+      - "main"
+      - "master"
+      - "agent/structural-fixes"
+      - "agent/integrated-x11"
+      - "agent/multi-display"
+      - "release/**"
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
@@ -63,14 +69,14 @@ jobs:
         key: ${{ runner.os }}-x11-native-${{ hashFiles('embedded-lorie/build.gradle', 'build.gradle.kts', 'settings.gradle.kts', 'third_party/termux-x11/lorie/src/main/cpp/**') }}
 
     - name: Validate integrated X11 source
-      if: ${{ github.ref == 'refs/heads/agent/integrated-x11' || github.ref == 'refs/heads/agent/multi-display' }}
+      if: ${{ github.ref == 'refs/heads/agent/integrated-x11' || github.ref == 'refs/heads/agent/multi-display' || startsWith(github.ref, 'refs/heads/release/') }}
       run: |
         test -f third_party/termux-x11/lorie/src/main/cpp/CMakeLists.txt
         test -f third_party/termux-x11/lorie/src/main/java/com/termux/x11/CmdEntryPoint.java
         test -f third_party/termux-x11/LICENSE
 
     - name: Require release signing material
-      if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' }}
+      if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true') || startsWith(github.ref, 'refs/heads/release/') }}
       env:
         RELEASE_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE }}
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -91,9 +97,9 @@ jobs:
         echo "Release signing material and expected certificate fingerprint are present."
 
     - name: Decode Keystore
+      if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true') || startsWith(github.ref, 'refs/heads/release/') }}
       env:
         RELEASE_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE }}
-      if: "${{ env.RELEASE_KEYSTORE != '' }}"
       run: |
         set -euo pipefail
         printf '%s' "${RELEASE_KEYSTORE}" | base64 -d > x11manager.keystore
@@ -111,23 +117,34 @@ jobs:
       run: |
         set -euo pipefail
         VERSION_NAME="1.0.0"
-        if [ "${{ github.event_name }}" = "workflow_dispatch" ] && \
-           [ "${{ github.event.inputs.create_release }}" = "true" ]; then
-          VERSION_NAME="${{ github.event.inputs.tag_name }}"
-          VERSION_NAME="${VERSION_NAME#v}"
-          [ -n "$VERSION_NAME" ] && [ "$VERSION_NAME" != "test" ] || {
-            echo "::error::A real release tag is required when create_release=true"
+        RELEASE_TAG="CI"
+
+        if [[ "${GITHUB_REF}" == refs/heads/release/* ]]; then
+          RELEASE_TAG="${GITHUB_REF#refs/heads/release/}"
+          if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release branches must be named release/vMAJOR.MINOR.PATCH"
             exit 1
-          }
+          fi
+          VERSION_NAME="${RELEASE_TAG#v}"
+        elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && \
+             [ "${{ github.event.inputs.create_release }}" = "true" ]; then
+          RELEASE_TAG="${{ github.event.inputs.tag_name }}"
+          if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::A semantic release tag such as v1.0.0 is required"
+            exit 1
+          fi
+          VERSION_NAME="${RELEASE_TAG#v}"
         fi
+
         VERSION_CODE="${{ github.run_number }}"
-        echo "Building versionName=${VERSION_NAME} versionCode=${VERSION_CODE}"
+        echo "Building versionName=${VERSION_NAME} versionCode=${VERSION_CODE} releaseTag=${RELEASE_TAG}"
         ./gradlew testReleaseUnitTest assembleRelease \
           -PVERSION_NAME="$VERSION_NAME" \
           -PVERSION_CODE="$VERSION_CODE" \
           2>&1 | tee gradle-ci.log
         printf '%s\n' "$VERSION_NAME" > .ci-version-name
         printf '%s\n' "$VERSION_CODE" > .ci-version-code
+        printf '%s\n' "$RELEASE_TAG" > .ci-release-tag
 
     - name: Validate multi-ABI APK set
       run: |
@@ -154,7 +171,7 @@ jobs:
         echo "Validated 4 ABI-specific APKs plus universal APK."
 
     - name: Verify release APK signatures
-      if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true' }}
+      if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true') || startsWith(github.ref, 'refs/heads/release/') }}
       env:
         RELEASE_CERT_SHA256: ${{ secrets.RELEASE_CERT_SHA256 }}
       run: |
@@ -210,7 +227,7 @@ jobs:
     - name: Stage & Rename Artifacts
       run: |
         set -euo pipefail
-        TAG="${{ github.event.inputs.tag_name || 'CI' }}"
+        TAG=$(cat .ci-release-tag)
         COMMIT_HASH=$(git log -1 --pretty=%h)
         VERSION_NAME=$(cat .ci-version-name)
         VERSION_CODE=$(cat .ci-version-code)
@@ -270,10 +287,12 @@ jobs:
     name: Create GitHub Release
     needs: [build]
     if: |
-      github.event_name == 'workflow_dispatch' &&
-      github.event.inputs.create_release == 'true' &&
-      github.event.inputs.tag_name != '' &&
-      github.event.inputs.tag_name != 'test'
+      needs.build.result == 'success' &&
+      ((github.event_name == 'workflow_dispatch' &&
+        github.event.inputs.create_release == 'true' &&
+        github.event.inputs.tag_name != '' &&
+        github.event.inputs.tag_name != 'test') ||
+       startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -282,6 +301,21 @@ jobs:
       with:
         fetch-depth: 0
         submodules: recursive
+
+    - name: Resolve release tag
+      id: release_meta
+      run: |
+        set -euo pipefail
+        if [[ "${GITHUB_REF}" == refs/heads/release/* ]]; then
+          TAG="${GITHUB_REF#refs/heads/release/}"
+        else
+          TAG="${{ github.event.inputs.tag_name }}"
+        fi
+        if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+          echo "::error::Invalid release tag: $TAG"
+          exit 1
+        fi
+        echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
     - name: Download Artifacts
       uses: actions/download-artifact@v4
@@ -307,8 +341,8 @@ jobs:
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: ${{ github.event.inputs.tag_name }}
-        name: X11 Manager ${{ github.event.inputs.tag_name }}
+        tag_name: ${{ steps.release_meta.outputs.tag }}
+        name: X11 Manager ${{ steps.release_meta.outputs.tag }}
         target_commitish: ${{ github.sha }}
         body: |
           ## What's Changed
