@@ -1,568 +1,971 @@
 # SaaS X11 Manager
 
-Android app for managing **DroidSpaces containers with Termux:X11**, with root-assisted X11 startup, container runtime control, per-container init selection, graphical-session provisioning, and live logs.
+<p align="center">
+  <strong>A rooted Android control plane for DroidSpaces graphical sessions with an embedded Termux:X11/Lorie renderer owned by the Manager itself.</strong>
+</p>
 
-The project is being developed around one main rule: **detect capabilities at runtime instead of assuming fixed DroidSpaces, kernel, distribution, or package versions**.
+<p align="center">
+  <a href="https://github.com/SaaSD3v/SaaS-X11-Manager/actions/workflows/ci.yml"><img alt="Android CI" src="https://github.com/SaaSD3v/SaaS-X11-Manager/actions/workflows/ci.yml/badge.svg?branch=agent%2Fscreen-manager"></a>
+</p>
 
-## Current project status
+> [!IMPORTANT]
+> **Active development branch documented here: `agent/screen-manager`.**
+>
+> This branch is the current Manager-owned Screen architecture: the X11 server and Lorie renderer are embedded in the SaaS X11 Manager APK. It is still a **single-display `:0` implementation**. Multi-monitor support is a future evolution, not current behavior on this branch.
 
-The active development work lives on `agent/structural-fixes` and is tracked through draft PR #5.
+SaaS X11 Manager manages DroidSpaces containers, graphical-session provisioning and an integrated X11 display from one Android application. Instead of handing rendering to a separately launched Termux:X11 Activity, the Manager builds the pinned Termux:X11/Lorie source into its own build graph, starts `CmdEntryPoint` from its installed APK, embeds the renderer in its own UI, and exposes the Manager-owned X11 socket to DroidSpaces containers.
 
-The current architecture has already moved beyond the original XFCE-only flow:
+The project follows two architectural rules:
 
-- container discovery and runtime status use capability-based fallbacks;
-- Termux:X11 is started through the app-managed root Loader path;
-- container configuration is changed only where required for the X11 socket bind;
-- app-owned settings are stored in a sidecar file instead of private DroidSpaces config keys;
-- OpenRC and systemd are user-selected per container;
-- X11 startup uses generic `x11-setup` / `x11-session` services;
-- PulseAudio-specific provisioning has been removed;
-- graphical sessions are modeled independently from the init system;
-- Openbox is the first fully implemented `Graphic Session` workflow.
+> **Detect capabilities at runtime. Do not select behavior from a hardcoded DroidSpaces version, kernel version, distro release or package version.**
 
-### Validation status
+> **Keep responsibilities explicit. Container lifecycle, X11 server lifecycle, graphical sessions, the embedded renderer and UI should not slowly collapse into one giant manager class.**
 
-| Area | Status |
+---
+
+## Project status
+
+This branch combines several generations of work that previously existed separately: structural container/runtime fixes, graphical-session provisioning, the integrated X11 spike and the first project-owned Screen UI.
+
+The important point is that the source is **ahead of the old README**. In particular:
+
+- the Manager already embeds Termux:X11/Lorie in its own build;
+- the Manager starts the integrated X server from its own APK classpath;
+- the Manager renders `LorieView` inside its own Android UI;
+- the external Termux:X11 Activity is not the normal Screen UI;
+- `ScreenManager` owns persisted display/input configuration;
+- `X11SessionManager` owns the current single-display X11 process/socket/XKB/session lifecycle;
+- the graphical-session catalog is much larger than the original Openbox-only documentation;
+- OpenRC and systemd remain independent runtime backends;
+- package-platform behavior is capability-driven instead of version-driven.
+
+The next phase should be **consolidation and cleanup before another large feature layer**.
+
+| Area | Current branch | Direction |
+| --- | --- | --- |
+| DroidSpaces lifecycle | Capability-driven runtime integration | Isolate behind focused container/runtime APIs |
+| X11 server | Manager-owned integrated `:0` server | Extract server lifecycle from the larger coordinator |
+| Screen | Manager-owned embedded Lorie surface | Keep rendering/input isolated from container policy |
+| Display configuration | `ScreenManager` + Screen UI | Keep UI preferences separate from X11 process lifecycle |
+| Graphic sessions | Broad catalog, install/verify/runtime infrastructure | Reduce duplicated legacy/generic paths |
+| Init systems | OpenRC + systemd | Move toward explicit interchangeable backends |
+| Multi-monitor | Not implemented on this branch | Add only after the single-display boundaries are clean |
+| Android VirtualDisplay / scrcpy | Not part of current Screen model | Future independent layer; do not conflate with X11 display numbers |
+
+A green CI validates compilation and automated tests. It does **not** replace real-device validation of root access, DroidSpaces lifecycle, Android input, Binder/Lorie connection or graphical-session behavior.
+
+---
+
+## Contents
+
+- [What the Manager owns](#what-the-manager-owns)
+- [Architecture today](#architecture-today)
+- [Integrated X11 runtime](#integrated-x11-runtime)
+- [Starting X11](#starting-x11)
+- [The Screen workspace](#the-screen-workspace)
+- [Display and input configuration](#display-and-input-configuration)
+- [Fullscreen](#fullscreen)
+- [DroidSpaces integration](#droidspaces-integration)
+- [Rootfs access and XKB](#rootfs-access-and-xkb)
+- [Per-container metadata](#per-container-metadata)
+- [Graphic Session model](#graphic-session-model)
+- [Graphic Session installation](#graphic-session-installation)
+- [Init backends](#init-backends)
+- [Capability-driven policy](#capability-driven-policy)
+- [Architecture cleanup plan](#architecture-cleanup-plan)
+- [Future multi-monitor direction](#future-multi-monitor-direction)
+- [Repository layout](#repository-layout)
+- [Requirements](#requirements)
+- [Build from source](#build-from-source)
+- [CI and validation](#ci-and-validation)
+- [Troubleshooting](#troubleshooting)
+- [Known limitations](#known-limitations)
+- [Embedded Termux:X11 source](#embedded-termuxx11-source)
+- [Licensing](#licensing)
+- [Development discipline](#development-discipline)
+
+---
+
+## What the Manager owns
+
+The Android application currently owns:
+
+- root-assisted DroidSpaces control;
+- container discovery and runtime-state resolution;
+- integrated X11 server lifecycle for `:0`;
+- XKB staging for the embedded X server;
+- the X11 socket exposed to containers;
+- embedded `LorieView` rendering inside the Manager UI;
+- mouse/touch/keyboard handling implemented by the embedded Screen path;
+- display resolution/filtering/stretch preferences;
+- clipboard preference forwarding to Lorie;
+- touch-mode selection;
+- keep-screen-awake behavior;
+- optional additional keyboard controls;
+- per-container init-system selection;
+- graphical-session install/verify/select/reinstall workflows;
+- OpenRC/systemd X11 startup provisioning;
+- operation logs and runtime diagnostics.
+
+The standalone Termux:X11 application is **not** the owner of the Screen lifecycle in this branch.
+
+---
+
+## Architecture today
+
+The code is already conceptually divided, even though some objects still own too much behavior:
+
+```mermaid
+flowchart TB
+    subgraph App["SaaS X11 Manager APK"]
+        UI["Compose UI\nHome · Edit Container · Screen"]
+        ScreenMgr["ScreenManager\ndisplay/input preferences"]
+        SessionMgr["X11SessionManager\ncurrent X11/session coordinator"]
+        ContainerMgr["ContainerManager / ContainerConfigManager"]
+        Graphic["Graphic Session installers/runtime"]
+
+        subgraph Embedded["Embedded Termux:X11/Lorie"]
+            Cmd["CmdEntryPoint"]
+            View["EmbeddedX11View / LorieView"]
+            Input["embedded input path"]
+        end
+
+        UI --> ScreenMgr
+        UI --> SessionMgr
+        SessionMgr --> ContainerMgr
+        SessionMgr --> Cmd
+        Graphic --> ContainerMgr
+        ScreenMgr --> View
+        Cmd --> View
+        Input --> View
+    end
+
+    Runtime["/data/local/tmp/saas-x11\n.X11-unix/X0 · .X0-lock · xkb · server.log"]
+    SessionMgr --> Runtime
+
+    subgraph DS["DroidSpaces container"]
+        Bound["/usr/.X11-unix"]
+        Tmp["/tmp/.X11-unix"]
+        Init["OpenRC or systemd"]
+        Launcher["/usr/local/bin/x11-session.sh"]
+        Session["selected X11 WM / desktop"]
+
+        Bound --> Tmp
+        Init --> Launcher
+        Launcher --> Session
+    end
+
+    Runtime --> Bound
+    Session -- "DISPLAY=:0" --> Runtime
+```
+
+The current architecture has two distinct connections:
+
+1. **Android renderer connection** — the embedded Lorie surface connects to the Manager-owned X server.
+2. **Container X11 connection** — DroidSpaces exposes the Manager-owned X11 socket inside the Linux container so the selected graphical session can connect to `DISPLAY=:0`.
+
+These are different concerns and should remain different concerns during the cleanup.
+
+---
+
+## Integrated X11 runtime
+
+This branch is intentionally still single-display.
+
+The current contract in `Constants.kt` is:
+
+| Item | Value |
 | --- | --- |
-| Release unit tests | ✅ CI validated |
-| Release APK build | ✅ CI validated |
-| Container runtime fallback parsing | ✅ Unit tested |
-| Manual Termux:X11 container config | ✅ Unit tested |
-| OpenRC session provisioning | ✅ Unit tested |
-| systemd session provisioning | ✅ Unit tested |
-| Openbox + Alpine + OpenRC install flow | ✅ Tested on a real container |
-| Openbox runtime Start X11 on current HEAD | ⚠️ Needs another device pass after recent race fixes |
-| Openbox + apt/dpkg install flow | 🧪 Unit/CI tested; real device test still pending |
+| X11 display | `:0` |
+| Server process | `saas-x11` |
+| Runtime directory | `/data/local/tmp/saas-x11` |
+| Socket directory | `/data/local/tmp/saas-x11/.X11-unix` |
+| Socket | `/data/local/tmp/saas-x11/.X11-unix/X0` |
+| Lock | `/data/local/tmp/saas-x11/.X0-lock` |
+| XKB cache | `/data/local/tmp/saas-x11/xkb` |
+| Server log | `/data/local/tmp/saas-x11/server.log` |
 
-A green CI proves compilation and automated tests. It does **not** replace device/runtime validation.
+The Manager starts the X server from its own installed APK using Android `app_process`:
 
-## What the app does
+```sh
+TMPDIR=/data/local/tmp/saas-x11 \
+XKB_CONFIG_ROOT=/data/local/tmp/saas-x11/xkb \
+CLASSPATH=<installed-manager-apk> \
+/system/bin/app_process -Xnoimage-dex2oat / \
+  --nice-name=saas-x11 \
+  com.termux.x11.CmdEntryPoint :0
+```
 
-The app discovers DroidSpaces containers and provides a native Android UI for:
+The real command redirects output to `server.log`.
 
-- viewing container state and PID;
-- starting a container together with its Termux:X11 session;
-- stopping individual containers or all managed sessions;
-- viewing live operation logs;
-- editing per-container X11 settings;
-- selecting **OpenRC** or **systemd** as the X11 init backend;
-- installing, verifying, selecting and reinstalling supported graphical sessions;
-- preserving installed sessions even when they are not selected.
+### Health model
 
-## Architecture overview
+A process alone is not sufficient proof that X11 is healthy, and a socket alone is not sufficient either.
+
+The runtime treats the server as usable when it has both:
+
+- a live Manager-owned `saas-x11` process;
+- a real X11 `X0` socket.
+
+Stale process/socket state is cleaned before a fresh start. A newly created server can also be rolled back when a later session-start stage fails.
+
+---
+
+## Starting X11
+
+There are two related flows in the app.
+
+### Starting only the integrated server from Screen
+
+The Screen page can start the Manager-owned X server directly:
 
 ```text
-Android app
-   │
-   ├── DroidSpaces runtime discovery/status
-   │      ├── machine-readable show capability
-   │      ├── plain show capability
-   │      └── per-container PID fallback
-   │
-   ├── Termux:X11 Loader (:0)
-   │      ├── live process verification
-   │      ├── X0 socket verification
-   │      ├── stale socket cleanup
-   │      └── owned-loader rollback
-   │
-   ├── DroidSpaces container.config
-   │      └── minimal manual X11 socket integration
-   │
-   ├── .saas-x11-manager.conf
-   │      ├── init_system
-   │      ├── platform
-   │      ├── graphic_session
-   │      └── installed_<session>
-   │
-   └── container rootfs
-          ├── /usr/local/bin/x11-session.sh
-          ├── OpenRC services
-          │      ├── x11-setup
-          │      └── x11-session
-          └── systemd units
-                 ├── setup-x11-socket.service
-                 └── x11-session.service
+ScreenManager
+    ↓
+apply display/Lorie preferences
+    ↓
+X11SessionManager.startIntegratedServer()
+    ↓
+prepare runtime + XKB
+    ↓
+launch CmdEntryPoint :0
+    ↓
+wait for process + X0 socket
+    ↓
+EmbeddedX11View connects
 ```
+
+This is useful because the Screen is a first-class Manager surface instead of a side effect of opening another application.
+
+### Starting a container graphical session
+
+The full container flow coordinates host X11 with DroidSpaces lifecycle:
+
+```text
+prepare container X11 config
+        ↓
+start/reuse integrated :0 server
+        ↓
+start/reuse DroidSpaces container
+        ↓
+confirm runtime state
+        ↓
+wait until `droidspaces run` actually works
+        ↓
+OpenRC/systemd starts x11-session.sh
+        ↓
+selected graphical session connects to DISPLAY=:0
+        ↓
+render through the Manager Screen
+```
+
+A container PID alone is not treated as proof that userspace is ready; the project waits for a real container command channel before continuing with operations that require it.
+
+---
+
+## The Screen workspace
+
+`IntegratedScreenScreen` is the project-owned Screen UI.
+
+It deliberately separates **display presentation** from **X11 runtime controls**.
+
+The Screen includes:
+
+- an embedded X11 viewport;
+- current X11 server status;
+- current server PID;
+- selected seed/container context where required;
+- Start/Stop X11 controls;
+- display configuration;
+- input configuration;
+- fullscreen mode;
+- optional additional keyboard controls.
+
+The embedded surface is hosted by the Manager. It is not the upstream Termux:X11 MainActivity presented as a separate app window.
+
+---
+
+## Display and input configuration
+
+`ScreenManager` persists only the settings owned by this Screen architecture and forwards the subset consumed by Lorie.
+
+Current display settings include:
+
+- resolution mode: Native, Scaled, Exact or Custom;
+- scaling percentage;
+- predefined exact resolutions;
+- custom resolution;
+- Nearest or Bilinear filtering;
+- adjust-resolution preference;
+- stretch display;
+- clipboard synchronization;
+- keep-screen-awake behavior.
+
+Current touch modes are:
+
+| Mode | Wire value |
+| --- | ---: |
+| Trackpad | `1` |
+| Simulated touch | `2` |
+| Direct touch | `3` |
+
+The current exact-resolution catalog includes common sizes from `800x600` through `3840x2160`.
+
+`ScreenManager` intentionally avoids treating old standalone-Lorie Activity preferences as Manager-owned features. For example, stale standalone keys such as old fullscreen/orientation/cutout preferences are removed from the Manager preference store instead of pretending that the upstream Activity still controls the UI.
+
+---
+
+## Fullscreen
+
+Fullscreen on this branch is an immersive presentation of the **same embedded renderer**.
+
+It is not a transition into the upstream Termux:X11 Activity.
+
+The current implementation still contains its own fullscreen dialog/chrome. One of the cleanup goals is to make fullscreen input-safe: controls must not permanently occupy areas that should belong to the X11 surface, and exiting fullscreen should be possible without creating invisible click-blocking regions over the desktop.
+
+This is an area that must be validated on-device because Compose layout, Android window insets and the embedded SurfaceView all meet at the same boundary.
+
+---
 
 ## DroidSpaces integration
 
-The app currently expects the DroidSpaces installation under:
+The current filesystem contract is:
 
 ```text
 /data/local/Droidspaces
 ```
 
-with the runtime binary at:
+with the CLI at:
 
 ```text
 /data/local/Droidspaces/bin/droidspaces
 ```
 
-Runtime behavior is **not selected by a hardcoded DroidSpaces version**.
+This is a path contract in the current code, **not** a declaration that one DroidSpaces version or one kernel version is required.
 
-Container status resolution tries available capabilities in order and only accepts output that can be parsed confidently. If one mechanism is unavailable or has an unknown format, the app falls back to the next one instead of assuming that every container is stopped.
+### Manager-owned X11 socket
 
-## Manual Termux:X11 path
+The Manager does not rely on DroidSpaces' automatic Termux:X11 lifecycle for this integrated path.
 
-SaaS X11 Manager does not rely on DroidSpaces automatically owning the Termux:X11 lifecycle.
+The container configuration uses:
 
-Before Start X11, the app ensures the container configuration contains the minimum manual integration required by this project:
-
-```text
+```ini
 enable_termux_x11=0
 ```
 
-and a bind mount from the Termux:X11 host socket directory to:
+and exposes the Manager-owned socket directory to:
 
 ```text
 /usr/.X11-unix
 ```
 
-Existing unrelated `container.config` values and bind mounts are preserved.
+Unrelated container configuration and unrelated bind mounts should be preserved.
 
-The mutation is designed to be idempotent: running the preparation again should not keep changing the config or duplicate the X11 bind.
+---
 
-## Termux:X11 Loader lifecycle
+## Rootfs access and XKB
 
-The root Loader is managed for display `:0`.
+DroidSpaces root filesystems are not assumed to always be unpacked directories.
 
-An existing Loader is reused only when both conditions are true:
+The shared rootfs accessor supports operation-owned access to representations such as:
 
-1. the X0 socket exists;
-2. a live `termux-x11` process exists.
+- normal directories;
+- filesystem images;
+- block-backed root filesystems.
 
-A socket without a live process is treated as stale and cleaned up.
+Temporary mounts belong to the operation that created them and should be cleaned without pre-emptively unmounting unrelated mounts.
 
-When the app starts a new Loader, it tracks processes created by that operation so a failed session start can roll back only the Loader it owns.
+### XKB bootstrap
 
-Start X11 also waits for the container to accept a real `droidspaces run` command before considering the command channel ready. A PID alone is not treated as proof that container userspace is ready.
+The embedded server needs keyboard configuration data.
 
-## Rootfs access
+Before the first successful integrated X11 start, the Manager can stage XKB from a configured container rootfs, looking for paths such as:
 
-DroidSpaces root filesystems are not assumed to always be directories.
+```text
+/usr/share/X11/xkb
+```
 
-The app can obtain a directory view of:
+with an alternate xkeyboard-config path when present.
 
-- an unpacked rootfs directory;
-- a filesystem image;
-- a block device.
+The staged data is cached under:
 
-Image/block-backed root filesystems are mounted into operation-owned temporary mount points and released after use. The accessor does not pre-emptively unmount an unrelated mount belonging to another process.
+```text
+/data/local/tmp/saas-x11/xkb
+```
 
-## Per-container settings
+and reused on later starts.
 
-SaaS X11 Manager-specific metadata lives beside `container.config` in:
+---
+
+## Per-container metadata
+
+Manager-owned metadata is kept outside the DroidSpaces `container.config` format in:
 
 ```text
 .saas-x11-manager.conf
 ```
 
-Example:
+Typical fields include:
 
 ```ini
-# SaaS-X11-Manager container settings
-init_system=openrc
 platform=alpine
+init_system=openrc
 graphic_session=openbox
 installed_openbox=1
 ```
 
-This keeps app-specific metadata outside the DroidSpaces config format.
+The important semantic distinction is:
 
-Persisted user choices are the source of truth. Distribution detection may suggest an initial profile, but it must not silently override an existing user choice.
+```text
+installed ≠ selected
+```
 
-## Init systems
+A session can remain installed while another session becomes the selected default.
 
-The Edit Container screen currently supports:
+User selections are the source of truth. Capability/distro detection may help resolve what is possible, but it should not silently overwrite a persisted manual choice.
 
-- **OpenRC**
-- **systemd**
+---
 
-The init system is a manual per-container selection.
+## Graphic Session model
 
-It is intentionally independent from the package family. For example, an Alpine-based container is not forced to OpenRC merely because it uses `apk`, and a Debian-family container is not forced to systemd merely because it uses `apt/dpkg`.
+A **Graphic Session** is the X11 client environment started inside a DroidSpaces container. It can be a lightweight window manager or a complete desktop session.
+
+The project separates:
+
+```text
+package platform
+        ↓
+init backend
+        ↓
+graphic-session package/install plan
+        ↓
+session-specific setup/verification
+        ↓
+generic x11-session.sh startup
+```
+
+The source now contains a broad session catalog and support-spec layer; it is no longer accurate to describe the branch as Openbox-only.
+
+Examples represented in the current support infrastructure include Openbox, IceWM, JWM, Fluxbox, cwm, i3, AwesomeWM, Ratpoison, Window Maker, dwm, bspwm, Qtile, XMonad, XFWM4, KWin X11, Enlightenment, MATE, LXDE, Plasma X11, Cinnamon, GNOME/Xorg-style paths and many additional window managers.
+
+**Catalog presence is not the same as universal compatibility.** A usable workflow still depends on the package plan, repositories, executable/session artifacts and capabilities available in the selected rootfs.
+
+Openbox remains an important reference implementation because it established several project rules: minimal packages, non-destructive configuration preservation, separate install/verify behavior and generic init provisioning.
+
+---
+
+## Graphic Session installation
+
+The project currently contains both older/reference installer paths and newer generic session infrastructure.
+
+That history is useful, but it is also one of the reasons the source now needs consolidation.
+
+The intended generic workflow is:
+
+```text
+resolve package platform by capability
+        ↓
+resolve supported Graphic Session plan
+        ↓
+start stopped container temporarily when required
+        ↓
+run the real package transaction
+        ↓
+perform only necessary session-specific setup
+        ↓
+validate required executables/configuration
+        ↓
+provision selected init backend
+        ↓
+persist platform/init/session state
+        ↓
+restore original stopped state when appropriate
+```
+
+Installation and verification are different operations.
+
+### Install / Reinstall
+
+May mutate package state and create required session-specific files.
+
+### Verify
+
+Should inspect the existing installation and startup contract without quietly turning itself into a reinstall.
+
+### Package-manager policy
+
+The architecture should avoid redundant standalone package simulations when the real `apk` or `apt` transaction is about to resolve repositories and dependencies anyway. Compatibility checks belong where they add real safety or clear error reporting, not as duplicated work for its own sake.
+
+---
+
+## Init backends
+
+Init system and package platform are independent.
+
+The Manager supports two startup families.
 
 ### OpenRC
 
-The generic services are:
+Typical generated files:
 
 ```text
 /etc/init.d/x11-setup
 /etc/init.d/x11-session
-```
-
-and are enabled under the default runlevel.
-
-`x11-setup` prepares `/tmp/.X11-unix` and binds the socket directory exposed by DroidSpaces.
-
-`x11-session` launches:
-
-```text
 /usr/local/bin/x11-session.sh
 ```
 
+`x11-setup` prepares the socket path and `x11-session` launches the selected graphical-session command.
+
 ### systemd
 
-The generic units are:
+Typical generated files:
 
 ```text
 /etc/systemd/system/setup-x11-socket.service
 /etc/systemd/system/x11-session.service
+/usr/local/bin/x11-session.sh
 ```
 
-The setup unit prepares the X11 socket/runtime directories and the session unit launches the same generic `x11-session.sh` entry point.
+The setup unit prepares the socket path and the session service launches the same generic session entry point.
 
-Legacy XFCE-specific service names are removed during migration/provisioning.
+A package family must not silently force an init system just because that pairing is common on a conventional distro installation.
 
-## Graphic Session model
+---
 
-A **Graphic Session** is the X11 client environment started inside the container. It may be a full desktop environment or only a window manager.
+## Capability-driven policy
 
-The init backend and the graphical session are separate concepts:
-
-```text
-OpenRC / systemd
-        │
-        ▼
-  x11-session.sh
-        │
-        ▼
- selected Graphic Session
-```
-
-A session does not need to be uninstalled when it is deselected.
-
-The app tracks two independent states:
-
-```text
-installed
-selected
-```
-
-This allows a future container to keep several graphical sessions installed and switch which one is started.
-
-## Openbox — reference implementation
-
-Openbox is currently the first fully enabled graphical-session workflow and is the reference contract for future sessions.
-
-### Alpine / apk
-
-Minimal package set:
-
-```sh
-apk add openbox
-apk add xterm
-apk add font-terminus
-```
-
-### Debian / Ubuntu / apt-dpkg
-
-Minimal package set:
-
-```sh
-DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openbox
-DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xterm
-DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends fonts-terminus
-```
-
-### Session command
-
-```sh
-openbox-session
-```
-
-The generated generic launcher ultimately executes:
-
-```sh
-exec openbox-session
-```
-
-### Configuration preservation
-
-The installer creates the Openbox user config directory but does not overwrite existing user configuration.
-
-Default `rc.xml` and `menu.xml` are copied only when the corresponding user file does not already exist.
-
-### Install workflow
-
-The successful Openbox model is:
-
-```text
-Detect package capability
-        ↓
-Resolve apk or apt/dpkg path
-        ↓
-Install minimal packages
-        ↓
-Preserve/create required user config
-        ↓
-Validate session command
-        ↓
-Provision selected init backend
-        ↓
-Persist package platform
-        ↓
-Persist init system
-        ↓
-Persist graphic session
-        ↓
-Persist installed marker
-        ↓
-Restore original stopped state when required
-```
-
-If an installation operation needs to start a previously stopped container, the app waits for its command channel to become ready and restores the stopped state afterward.
-
-## Verify is intentionally non-destructive
-
-`Verify` is not a reinstall operation.
-
-For Openbox it validates the existing setup without performing package installation or rewriting startup files.
-
-A verification path must not silently run operations such as:
-
-```text
-apk update
-apk add
-apt-get update
-apt-get install
-rm
-cp
-chmod
-mkdir
-service rewrites
-```
-
-It checks the package state, session command, user configuration, generic launcher and selected init backend.
-
-## Package-platform detection
-
-The installer resolves the package family by capability when it is not already supplied:
-
-```text
-apk
-```
-
-or:
-
-```text
-apt-get + dpkg
-```
-
-The UI/platform name `Ubuntu / Debian (.deb)` represents the shared apt/dpkg path. It is not a strict distro identity requirement.
-
-No fixed Ubuntu, Debian or Alpine release is pinned by this design.
-
-## Termux:X11 is the X server
-
-Graphical-session installers should install **X11 clients/session components**, not a second X server simply because traditional desktop documentation assumes a normal PC installation.
-
-The project therefore avoids adding components without a demonstrated need, including:
-
-- local Xorg server stacks;
-- display managers such as LightDM/SDDM/GDM;
-- PulseAudio provisioning;
-- unrelated desktop meta packages when a smaller session package set is sufficient.
-
-D-Bus, Mesa, polkit, companion processes or other components should be introduced only when a specific session actually requires them.
-
-## Planned graphical sessions
-
-The next sessions are being researched by adapting the Openbox contract rather than duplicating Openbox-specific code.
-
-| Session | Type | Expected command | Current state |
-| --- | --- | --- | --- |
-| Openbox | stacking WM | `openbox-session` | ✅ Implemented |
-| IceWM | stacking WM + panel | `icewm-session` | 🔬 Researched / next candidate |
-| Fluxbox | stacking WM | `startfluxbox` | 🔬 Researched |
-| JWM | lightweight WM | `jwm` | 🔬 Researched |
-| i3 | tiling WM | `i3` | 🔬 Researched |
-| AwesomeWM | dynamic/tiling WM | `awesome` | 🔬 Researched |
-| bspwm | tiling WM | custom bspwm + sxhkd launcher | 🔬 Researched |
-| XFCE | desktop environment | `startxfce4` | 🧱 Model/install plans exist; installer not enabled |
-| LXQt | desktop environment | `startlxqt` | 🧱 Model/install plans exist; installer not enabled |
-| LXDE | desktop environment | `startlxde` / capability fallback | 🗺️ Planned |
-| MATE | desktop environment | `mate-session` | 🗺️ Planned |
-| Plasma X11 | desktop environment | capability-dependent | 🧪 Experimental candidate |
-| Cinnamon | desktop environment | `cinnamon-session` | 🧪 Experimental candidate |
-| GNOME Xorg | desktop environment | Xorg session path | 🧪 Experimental candidate |
-
-Being listed here does **not** mean a session is supported yet.
-
-## How new sessions should be implemented
-
-The Openbox implementation established the behavior that future sessions should reuse:
-
-```text
-GraphicSession
-   │
-   ├── package/install plan
-   ├── runtime command probe
-   ├── optional session-specific setup
-   ├── read-only verification rules
-   └── start command
-            │
-            ▼
- generic OpenRC/systemd provisioning
-            │
-            ▼
- x11-session.sh
-```
-
-A new session should not require a new copy of the entire ViewModel/installer lifecycle.
-
-The intended direction is to move Openbox-specific UI and operation state toward reusable per-session definitions while keeping any genuinely session-specific setup isolated.
+The Manager should answer questions from what the current environment can actually do.
 
 Examples:
 
-- **IceWM:** likely package + command validation with distro defaults preserved;
-- **Fluxbox:** package + `startfluxbox`, preserving distro/user defaults;
-- **JWM:** package + `jwm`, with configuration validation rather than hardcoded distro paths where possible;
-- **i3:** session-specific config bootstrap may be required to avoid the first-run configuration wizard;
-- **bspwm:** requires a companion process (`sxhkd`), so it cannot be modeled as only a single `exec bspwm` command.
+- package platform: detect `apk` or `apt-get` + `dpkg`;
+- init backend: detect the relevant OpenRC/systemd capabilities;
+- runtime state: use the DroidSpaces mechanisms that are actually available and confidently parseable;
+- rootfs: handle the representation the container really uses;
+- session availability: intersect package plan, support spec and repository/runtime capabilities.
 
-## UI behavior
+`/etc/os-release` can provide context, but it should not become a global switch such as “if distro version X then do Y”.
 
-### Home
+The same applies to Android/kernel/DroidSpaces versions: test capabilities and behavior rather than freezing logic around one test device.
 
-Each container card exposes runtime state and actions such as:
+---
 
-- Start X11;
-- Stop;
-- Logs;
-- Edit container.
+## Architecture cleanup plan
 
-Runtime operations are serialized so two conflicting Start/Stop flows are not intentionally launched at the same time.
+The project has reached the point where adding features without cleaning boundaries will make every later change more expensive.
 
-### Edit Container
+The cleanup should be incremental and behavior-preserving.
 
-The current screen separates:
+### 1. Freeze the current single-display behavior
 
-1. **Init System**
-2. **Graphic Session**
+Before moving files around, keep tests around the existing `:0` contract:
 
-The Openbox card can be expanded and exposes:
+- process name;
+- socket health;
+- stale cleanup;
+- XKB bootstrap;
+- container bind preparation;
+- Start X11 rollback;
+- Screen connection behavior.
 
-- `Install` when not installed;
-- `Verify` when installed;
-- `Reinstall` when installed;
-- selection/deselection independently from installed state.
+### 2. Split `X11SessionManager`
 
-Saving applies the selected Graphic Session together with the selected init backend. If init provisioning fails, the persisted Graphic Session selection is rolled back.
-
-## Logging
-
-Container and installation operations stream stdout/stderr into terminal-style dialogs.
-
-The logger uses bounded buffers so long-running output does not grow indefinitely in memory.
-
-Installation output is deliberately step-oriented, for example:
+Today it still owns too much. The target responsibilities are closer to:
 
 ```text
-[+] Detecting package platform
-[+] OK
+X11ServerManager
+  process / socket / runtime / PID / cleanup
 
-[+] Installing Openbox
-root@container: apk add openbox
-...
-[+] OK
+ContainerX11Bridge
+  DroidSpaces bind/config preparation
 
-[+] Validating Openbox session command
-root@container: command -v openbox-session
-/usr/bin/openbox-session
-[+] OK
+GraphicSessionController
+  start/stop selected session inside an already-running container
+
+XkbRepository
+  shared XKB bootstrap/cache
+
+X11SessionCoordinator
+  orchestration only
 ```
+
+This does not require turning every class into a Gradle module immediately.
+
+### 3. Isolate DroidSpaces integration
+
+Compose/ViewModels should not construct shell commands or understand container config syntax.
+
+The target direction is:
+
+```text
+UI
+ ↓
+ViewModel / use case
+ ↓
+container + X11 domain API
+ ↓
+DroidSpaces/shell implementation
+```
+
+### 4. Consolidate Graphic Session installers
+
+The project should end with one coherent install/verify/runtime contract and only small session-specific definitions where required.
+
+Do not keep two full installer frameworks forever simply because both once worked.
+
+### 5. Make OpenRC/systemd explicit backends
+
+Instead of spreading `systemctl`/`rc-service` policy across unrelated code, hide them behind one startup contract with two implementations.
+
+### 6. Keep Lorie behind an embedded boundary
+
+The rest of the app should depend on a small Manager-owned renderer/input interface, not on scattered `com.termux.x11.*` implementation details.
+
+This reduces the blast radius when the pinned upstream Termux:X11 source changes.
+
+### 7. Simplify Screen UI responsibilities
+
+The Screen should render state and send user intent. It should not become the place that decides how to kill processes, mount rootfs images, choose package managers or rewrite DroidSpaces configuration.
+
+### 8. Remove dead/duplicate paths only after replacement is proven
+
+Delete obsolete helpers, old Loader assumptions, duplicated session logic, unreachable screens and stale documentation only after the replacement path is covered and validated.
+
+---
+
+## Future multi-monitor direction
+
+Multi-monitor is a **planned evolution from this branch**, not something the current branch already provides.
+
+The desired future model is:
+
+```text
+Monitor 1 -> X11 :0
+Monitor 2 -> X11 :1
+Monitor 3 -> X11 :2
+...
+```
+
+Container assignment should be a temporary runtime lease, not a permanent historical property.
+
+Example policy:
+
+```text
+A uses Monitor 1 (:0)
+B uses Monitor 2 (:1)
+C uses Monitor 3 (:2)
+
+B disconnects and releases :1
+
+D starts next
+D receives Monitor 2 (:1)
+```
+
+The allocator should therefore choose the **lowest currently free X11 display number**.
+
+A container that previously used another monitor should not automatically return there unless there is a separate explicit reservation feature in the future.
+
+### X11 monitor number is not Android displayId
+
+Future work involving Android `VirtualDisplay`, scrcpy or Android `DisplayManager` must stay architecturally separate.
+
+```text
+X11 DISPLAY=:2
+```
+
+and
+
+```text
+Android displayId=2
+```
+
+are different namespaces with different lifecycles. They must not be treated as equivalent just because both happen to use integers.
+
+---
+
+## Repository layout
+
+The current branch is roughly organized as:
+
+```text
+.
+├── app/
+│   ├── Android UI / ViewModels
+│   └── util/
+│       ├── DroidSpaces/container integration
+│       ├── X11SessionManager
+│       ├── ScreenManager
+│       ├── Graphic Session catalog/install/runtime
+│       └── rootfs/capability helpers
+│
+├── third_party/termux-x11/
+│   └── pinned Termux:X11 source submodule
+│
+├── shell-loader/
+│   └── compile-time stub bridge required by the Lorie build graph
+│
+├── ci/
+│   └── package/session compatibility tooling
+│
+└── .github/workflows/
+    ├── ci.yml
+    └── rootfs-compatibility.yml
+```
+
+Important current source-of-truth files include:
+
+| Concern | Source |
+| --- | --- |
+| X11 process/socket/XKB lifecycle | `X11SessionManager.kt` |
+| X11 runtime constants | `Constants.kt` |
+| Screen configuration | `ScreenManager.kt` |
+| Embedded Screen UI | `IntegratedScreenScreen.kt` |
+| Embedded Lorie view/input bridge | `EmbeddedX11View.kt` |
+| Container config mutation | `ContainerConfigManager.kt` |
+| Container lifecycle/state | `ContainerManager.kt` |
+| Rootfs access | `RootfsAccessor.kt` |
+| Capability detection | `ContainerCapabilities.kt` |
+| Per-container Manager metadata | `ContainerSettingsManager.kt` |
+| Graphic Session support specs | `GraphicSessionSupport.kt` |
+| Generic/extended installs | `AdditionalGraphicSessionInstaller.kt` |
+| Extended session runtime | `AdditionalGraphicSessionRuntime.kt` |
+
+The cleanup plan above is expected to change this layout gradually.
+
+---
 
 ## Requirements
 
-The project currently assumes:
+Runtime requirements for this branch are:
 
-- Android device with working root access;
-- a supported root solution capable of granting the app root shell access;
-- Termux installed;
-- Termux:X11 installed with its Loader assets available;
-- DroidSpaces installed at the path expected by the current integration;
-- at least one DroidSpaces container for container-specific operations.
+- Android device able to grant the Manager a working root shell;
+- DroidSpaces available through the current filesystem integration contract;
+- at least one configured DroidSpaces container for container-specific work and first XKB bootstrap;
+- a rootfs with the package/init/session capabilities required by the graphical session being installed or started.
 
-The app contains root-provider detection for several common solutions, including KernelSU, APatch, Magisk, SuperSU and Lineage-style SU, but the architecture is based on **working root capability**, not a requirement for one fixed provider.
+A separately launched Termux:X11 Activity is **not** the Manager Screen requirement in this branch.
 
-## Build
+The Termux:X11/Lorie source is part of the project build through the pinned git submodule.
 
-The Android project uses Gradle and JDK 17 in CI.
+No fixed DroidSpaces, kernel, distro or package version should be treated as the architectural requirement unless a concrete capability truly cannot be expressed any other way.
 
-Debug build:
+---
+
+## Build from source
+
+### Toolchain
+
+The Android app currently uses:
+
+- Android Gradle Plugin / Gradle project configuration from the repository;
+- Kotlin + Jetpack Compose;
+- Java 17;
+- app `compileSdk` / `targetSdk` 34;
+- app `minSdk` 26;
+- libsu for root execution.
+
+These are project build settings, not DroidSpaces/kernel compatibility declarations.
+
+### Clone with submodules
+
+The embedded X11 engine is pinned as a git submodule:
+
+```sh
+git clone --recurse-submodules <repository-url>
+cd SaaS-X11-Manager
+```
+
+For an existing clone:
+
+```sh
+git submodule update --init --recursive
+```
+
+### Build
+
+Debug:
 
 ```sh
 ./gradlew assembleDebug
 ```
 
-Release tests + build:
+Release tests + release APK:
 
 ```sh
 ./gradlew testReleaseUnitTest assembleRelease
 ```
 
-Release-only build:
+Release APK only:
 
 ```sh
 ./gradlew assembleRelease
 ```
 
-## CI/CD
+---
 
-GitHub Actions currently runs release unit tests before the release APK build:
+## CI and validation
 
-```sh
-./gradlew testReleaseUnitTest assembleRelease
+The Android CI is configured to run on pushes to `agent/screen-manager`.
+
+Its responsibilities include initializing the integrated Termux:X11 source, validating expected upstream source files and running the project's automated test/build pipeline.
+
+The rootfs compatibility workflow is a separate concern and uses path filters around package/session compatibility infrastructure. A README-only change should not be interpreted as rootfs validation.
+
+Keep these concepts separate:
+
+```text
+CI green
+  = source compiles + automated tests pass
+
+real device validation
+  = Android root + DroidSpaces + X11 process + Binder/Lorie + input + real session proven together
 ```
 
-The resulting APK is staged and uploaded as a workflow artifact.
+A build cannot prove vendor-specific touchpad/stylus behavior or every Linux desktop package combination.
 
-Manual workflow dispatch can also create a GitHub Release when release creation is explicitly requested and a non-test tag is supplied.
+---
 
-Optional signing uses the repository secrets:
+## Troubleshooting
 
-- `RELEASE_KEYSTORE`
-- `KEYSTORE_PASSWORD`
-- `KEY_ALIAS`
-- `KEY_PASSWORD`
+### X11 server does not start
+
+Inspect:
+
+```text
+/data/local/tmp/saas-x11/server.log
+```
+
+Then verify that both exist conceptually:
+
+```text
+live saas-x11 process
+/data/local/tmp/saas-x11/.X11-unix/X0
+```
+
+A process without the socket or a socket without the process is stale/incomplete state.
+
+### First X11 start fails before the server is ready
+
+Check whether XKB was successfully staged from a configured container rootfs.
+
+Expected cached destination:
+
+```text
+/data/local/tmp/saas-x11/xkb
+```
+
+### Screen is open but not connected
+
+This can be different from a container/session problem. The X11 process/socket can be alive while the embedded Lorie surface has not completed its connection.
+
+Inspect the Android-side embedded view/Binder path separately from the Linux X client path.
+
+### Screen is connected but black
+
+A connected renderer does not guarantee that an X11 client is drawing.
+
+Check:
+
+- is the intended DroidSpaces container actually running?
+- is the Manager X11 bind present in the container config?
+- does the container see the X11 socket path?
+- is the selected OpenRC/systemd session service active?
+- does `x11-session.sh` execute the selected session command?
+- is `DISPLAY=:0` present in the current single-display branch?
+
+### A Graphic Session is not usable
+
+Do not assume that being listed in the catalog guarantees that the selected rootfs repository still contains every expected package/session artifact.
+
+Inspect the current package plan, support spec, repository availability and executable/session probes.
+
+---
+
+## Known limitations
+
+Current limitations and constraints include:
+
+- root access is required;
+- current DroidSpaces paths are fixed by the integration code;
+- this branch currently owns only X11 display `:0`;
+- multi-monitor is not yet implemented here;
+- the embedded Screen/input path still needs device-specific validation across Android vendors;
+- first server bootstrap depends on obtaining usable XKB data when no cache exists;
+- graphical-session packages and X11 artifacts can change as distro repositories evolve;
+- catalog presence is not universal runtime proof;
+- the project intentionally avoids adding a second local X server or display manager unless a specific architecture change requires it;
+- CI cannot prove every real-device root/input/renderer combination;
+- some classes still own too many responsibilities and are explicitly scheduled for cleanup.
+
+---
+
+## Embedded Termux:X11 source
+
+The project pins upstream Termux:X11 under:
+
+```text
+third_party/termux-x11
+```
+
+and includes the Lorie module in the Gradle graph.
+
+The build also includes the required shell-loader stub namespace for compile-time compatibility, but the Manager's Screen architecture is not based on launching an external shell-loader UI.
+
+When updating the pinned upstream source:
+
+1. update the git submodule deliberately;
+2. inspect Lorie/CmdEntryPoint/AIDL/input changes;
+3. run the full Android test/build pipeline;
+4. test real-device server startup and Screen connection;
+5. test mouse/touch/keyboard/fullscreen behavior;
+6. test at least one real graphical session;
+7. keep Manager-specific adaptation as isolated as possible.
+
+Do not make upstream changes invisible by scattering workarounds throughout unrelated app code.
+
+---
+
+## Licensing
+
+There is currently **no top-level project `LICENSE` file on this branch**.
+
+The embedded third-party Termux:X11 source carries its own license and is compiled into the Manager build. Therefore the old README's one-line `MIT` declaration should not be treated as a reliable project-wide license statement.
+
+Before distributing releases as a product, define the repository's own license deliberately and review the license/source-compliance requirements of all bundled third-party code.
+
+---
 
 ## Development discipline
 
-This project intentionally evolves in small validated changes.
-
-The working rule is:
+The project should continue to move through small, validated changes:
 
 ```text
-one focused change
+inspect current branch and real source
+        ↓
+one focused logical change
         ↓
 one commit
         ↓
-unit tests + release build in CI
+unit tests + release build
         ↓
-only after green CI: next change
+real-device validation where CI cannot prove behavior
+        ↓
+next change
 ```
 
-Do not stack several unrelated structural fixes or graphical-session implementations into a single commit.
+Rules for the cleanup phase:
 
-Device-only behavior must also be called out separately from CI validation.
+- do not mix architecture refactors with unrelated features in one commit;
+- do not continue to the next refactor while the previous logical change is failing CI;
+- preserve current single-display behavior while extracting responsibilities;
+- do not infer behavior from fixed DroidSpaces/kernel/distro versions;
+- do not overwrite unrelated container/user configuration;
+- keep installed and selected Graphic Session state independent;
+- preserve stopped container state when an operation only needs a temporary runtime start;
+- keep embedded Termux:X11 details behind a narrow boundary;
+- treat multi-monitor as a later feature built on the cleaned single-display foundation;
+- document uncertainty instead of calling device-only behavior proven because it compiled.
 
-For graphical sessions, the preferred sequence is to establish one implementation, validate it, then adapt the generic infrastructure for the next session without regressing the previous one.
+---
 
-## Non-goals / design constraints
-
-The current direction deliberately avoids:
-
-- hardcoding behavior to a specific DroidSpaces release;
-- hardcoding behavior to a specific kernel version;
-- assuming one init system from the distro name alone;
-- modifying unrelated DroidSpaces container settings;
-- installing a local X server when Termux:X11 already provides the display;
-- forcing desktop meta packages when a minimal client/session set is enough;
-- overwriting existing user desktop/window-manager configuration;
-- treating `installed` and `selected` as the same state;
-- considering CI success equivalent to real-device validation.
-
-## License
-
-MIT
+**SaaS X11 Manager is an integration project.** Android UI, root execution, DroidSpaces, an embedded X11 server, an embedded renderer and Linux graphical-session provisioning all meet at the same boundary. The project becomes maintainable when those pieces are explicit and independently testable instead of accumulating inside one large flow.
