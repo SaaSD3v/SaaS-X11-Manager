@@ -9,6 +9,8 @@ on:
       - "ci/export-graphic-session-plans.py"
       - "app/src/main/java/com/saas/x11manager/util/GraphicSessionInstallPlan.kt"
       - "app/src/main/java/com/saas/x11manager/util/AdditionalGraphicSessionInstaller.kt"
+      - "app/src/main/java/com/saas/x11manager/util/AlpineInstallProfileOverride.kt"
+      - "app/src/main/java/com/saas/x11manager/util/AptInstallRecommendationOverride.kt"
       - "app/src/main/java/com/saas/x11manager/util/DebianAptComponentSource.kt"
       - "app/src/main/java/com/saas/x11manager/util/AptTransactionSafety.kt"
       - "app/src/main/java/com/saas/x11manager/util/ApkTransactionSafety.kt"
@@ -21,6 +23,8 @@ on:
       - "ci/export-graphic-session-plans.py"
       - "app/src/main/java/com/saas/x11manager/util/GraphicSessionInstallPlan.kt"
       - "app/src/main/java/com/saas/x11manager/util/AdditionalGraphicSessionInstaller.kt"
+      - "app/src/main/java/com/saas/x11manager/util/AlpineInstallProfileOverride.kt"
+      - "app/src/main/java/com/saas/x11manager/util/AptInstallRecommendationOverride.kt"
       - "app/src/main/java/com/saas/x11manager/util/DebianAptComponentSource.kt"
       - "app/src/main/java/com/saas/x11manager/util/AptTransactionSafety.kt"
       - "app/src/main/java/com/saas/x11manager/util/ApkTransactionSafety.kt"
@@ -37,7 +41,7 @@ jobs:
   rootfs-compatibility:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -54,13 +58,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Export graphic session plan catalog
+      - name: Export graphic session runtime profile catalog
         run: |
           python3 -m py_compile ci/export-graphic-session-plans.py
           python3 ci/export-graphic-session-plans.py \
             --output "${RUNNER_TEMP}/graphic-session-plans.tsv"
           test -s "${RUNNER_TEMP}/graphic-session-plans.tsv"
-          awk -F '\t' 'NF != 3 { exit 1 } END { if (NR < 1) exit 1 }' \
+          awk -F '\t' 'NF != 4 { exit 1 } END { if (NR < 1) exit 1 }' \
             "${RUNNER_TEMP}/graphic-session-plans.tsv"
 
       - name: Validate compatibility probe syntax
@@ -121,7 +125,7 @@ jobs:
               state: succeeded ? 'success' : 'failure',
               context: 'rootfs-compatibility',
               description: succeeded
-                ? 'Current rootfs probes and catalog audits passed'
-                : 'A current rootfs compatibility probe failed',
+                ? 'Current rootfs runtime-profile audits passed'
+                : 'A current rootfs runtime-profile compatibility probe failed',
               target_url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
             });

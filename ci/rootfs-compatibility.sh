@@ -101,10 +101,11 @@ AUDIT_REPORT=''
 record_audit() {
     platform=$1
     session_name=$2
-    status=$3
-    detail=$4
-    printf '%s\t%s\t%s\t%s\t%s\n' \
-        "$ROOTFS_ID" "$platform" "$session_name" "$status" "$detail" >> "$AUDIT_REPORT"
+    profile=$3
+    status=$4
+    detail=$5
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$ROOTFS_ID" "$platform" "$session_name" "$profile" "$status" "$detail" >> "$AUDIT_REPORT"
 }
 
 compact_failure_detail() {
@@ -129,7 +130,14 @@ compact_failure_detail() {
 
 audit_apt_plan() {
     session_name=$1
-    shift
+    profile=$2
+    shift 2
+    case "$profile" in
+        minimal) recommends_flag=--no-install-recommends ;;
+        recommended) recommends_flag=--install-recommends ;;
+        *) fail "Unknown APT runtime profile: $profile" ;;
+    esac
+
     missing=''
     for package_name in "$@"; do
         if ! apt_package_available "$package_name"; then
@@ -138,17 +146,17 @@ audit_apt_plan() {
     done
     if [ -n "$missing" ]; then
         AUDIT_UNAVAILABLE=$((AUDIT_UNAVAILABLE + 1))
-        record_audit apt "$session_name" UNAVAILABLE "$missing"
+        record_audit apt "$session_name" "$profile" UNAVAILABLE "$missing"
         return 0
     fi
 
     simulation=$(mktemp)
     if ! LC_ALL=C DEBIAN_FRONTEND=noninteractive \
-        apt-get -s --no-install-recommends install "$@" >"$simulation" 2>&1; then
+        apt-get -s "$recommends_flag" install "$@" >"$simulation" 2>&1; then
         detail=$(compact_failure_detail "$simulation")
         rm -f "$simulation"
         AUDIT_UNRESOLVABLE=$((AUDIT_UNRESOLVABLE + 1))
-        record_audit apt "$session_name" UNRESOLVABLE "$detail"
+        record_audit apt "$session_name" "$profile" UNRESOLVABLE "$detail"
         return 0
     fi
 
@@ -156,7 +164,7 @@ audit_apt_plan() {
     if [ -n "$removed" ]; then
         rm -f "$simulation"
         AUDIT_BLOCKED=$((AUDIT_BLOCKED + 1))
-        record_audit apt "$session_name" BLOCKED "removes:$removed"
+        record_audit apt "$session_name" "$profile" BLOCKED "removes:$removed"
         return 0
     fi
 
@@ -165,17 +173,23 @@ audit_apt_plan() {
     rm -f "$simulation"
     if [ -n "$blocked" ]; then
         AUDIT_BLOCKED=$((AUDIT_BLOCKED + 1))
-        record_audit apt "$session_name" BLOCKED "host-infra:$blocked"
+        record_audit apt "$session_name" "$profile" BLOCKED "host-infra:$blocked"
         return 0
     fi
 
     AUDIT_SAFE=$((AUDIT_SAFE + 1))
-    record_audit apt "$session_name" SAFE packages-and-transaction
+    record_audit apt "$session_name" "$profile" SAFE packages-and-transaction
 }
 
 audit_apk_plan() {
     session_name=$1
-    shift
+    profile=$2
+    shift 2
+    case "$profile" in
+        minimal|full) ;;
+        *) fail "Unknown apk runtime profile: $profile" ;;
+    esac
+
     missing=''
     for package_name in "$@"; do
         if ! apk search -e "$package_name" >/dev/null 2>&1; then
@@ -184,7 +198,7 @@ audit_apk_plan() {
     done
     if [ -n "$missing" ]; then
         AUDIT_UNAVAILABLE=$((AUDIT_UNAVAILABLE + 1))
-        record_audit apk "$session_name" UNAVAILABLE "$missing"
+        record_audit apk "$session_name" "$profile" UNAVAILABLE "$missing"
         return 0
     fi
 
@@ -193,7 +207,7 @@ audit_apk_plan() {
         detail=$(compact_failure_detail "$simulation")
         rm -f "$simulation"
         AUDIT_UNRESOLVABLE=$((AUDIT_UNRESOLVABLE + 1))
-        record_audit apk "$session_name" UNRESOLVABLE "$detail"
+        record_audit apk "$session_name" "$profile" UNRESOLVABLE "$detail"
         return 0
     fi
 
@@ -201,12 +215,12 @@ audit_apk_plan() {
     rm -f "$simulation"
     if [ -n "$blocked" ]; then
         AUDIT_BLOCKED=$((AUDIT_BLOCKED + 1))
-        record_audit apk "$session_name" BLOCKED "host-infra:$blocked"
+        record_audit apk "$session_name" "$profile" BLOCKED "host-infra:$blocked"
         return 0
     fi
 
     AUDIT_SAFE=$((AUDIT_SAFE + 1))
-    record_audit apk "$session_name" SAFE packages-and-transaction
+    record_audit apk "$session_name" "$profile" SAFE packages-and-transaction
 }
 
 audit_catalog() {
@@ -217,23 +231,23 @@ audit_catalog() {
 
     AUDIT_REPORT=${ROOTFS_AUDIT_REPORT:-/tmp/rootfs-session-catalog.tsv}
     : > "$AUDIT_REPORT"
-    printf 'rootfs\tplatform\tsession\tstatus\tdetail\n' >> "$AUDIT_REPORT"
+    printf 'rootfs\tplatform\tsession\tprofile\tstatus\tdetail\n' >> "$AUDIT_REPORT"
 
     tab=$(printf '\t')
-    while IFS="$tab" read -r plan_platform session_name package_list; do
+    while IFS="$tab" read -r plan_platform session_name profile package_list; do
         [ -n "$plan_platform" ] || continue
         [ "$plan_platform" = "$family" ] || continue
         AUDIT_PROCESSED=$((AUDIT_PROCESSED + 1))
         set -- $package_list
         if [ "$family" = apt ]; then
-            audit_apt_plan "$session_name" "$@"
+            audit_apt_plan "$session_name" "$profile" "$@"
         else
-            audit_apk_plan "$session_name" "$@"
+            audit_apk_plan "$session_name" "$profile" "$@"
         fi
     done < "$catalog"
 
-    [ "$AUDIT_PROCESSED" -gt 0 ] || fail "No $family plans were found in the exported catalog"
-    info "Catalog audit: $AUDIT_SAFE safe, $AUDIT_UNAVAILABLE unavailable, $AUDIT_BLOCKED blocked, $AUDIT_UNRESOLVABLE unresolvable"
+    [ "$AUDIT_PROCESSED" -gt 0 ] || fail "No $family runtime profiles were found in the exported catalog"
+    info "Catalog profile audit: $AUDIT_SAFE safe, $AUDIT_UNAVAILABLE unavailable, $AUDIT_BLOCKED blocked, $AUDIT_UNRESOLVABLE unresolvable"
 }
 
 if command -v apk >/dev/null 2>&1; then
