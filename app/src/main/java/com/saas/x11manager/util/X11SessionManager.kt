@@ -211,21 +211,54 @@ object X11SessionManager {
         }
     }
 
+    private fun hasManagerSocketBind(bindMounts: String): Boolean {
+        return bindMounts.split(',')
+            .asSequence()
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .any { entry ->
+                val parts = entry.split(':')
+                parts.size >= 2 &&
+                    parts[0].trim() == Constants.X11_SOCK_DIR &&
+                    parts[1].trim() == "/usr/.X11-unix"
+            }
+    }
+
+    private fun isManagedGraphicSessionActive(containerName: String): Boolean {
+        val probe =
+            "if command -v systemctl >/dev/null 2>&1 && " +
+                "test -f /etc/systemd/system/x11-session.service; then " +
+                "systemctl is-active --quiet x11-session.service; " +
+                "elif command -v rc-service >/dev/null 2>&1 && " +
+                "test -x /etc/init.d/x11-session; then " +
+                "rc-service x11-session status >/dev/null 2>&1; " +
+                "else exit 1; fi"
+        val command =
+            "${Constants.DS_BINARY_PATH} --name=${shellQuote(containerName)} run " +
+                "sh -c ${shellQuote(probe)} 2>/dev/null"
+        return try {
+            Shell.cmd(command).exec().isSuccess
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private suspend fun activeOwnerConflict(containerName: String): String? {
         val persistedOwner = readOwner()
         if (!persistedOwner.isNullOrBlank() && persistedOwner != containerName) {
             val (ownerStatus, _) = ContainerManager.getContainerRuntimeStatePublic(persistedOwner)
             if (ownerStatus == ContainerStatus.RUNNING) return persistedOwner
-            clearOwner()
+            if (ownerStatus == ContainerStatus.STOPPED) clearOwner()
         }
 
         // Compatibility fallback for sessions started before the owner marker
-        // existed. A running container with the Manager socket bind is treated
-        // conservatively as the current :0 owner.
+        // existed. A mere bind is not ownership: require the Manager-provisioned
+        // x11-session service to be active inside the running container as well.
         val discovered = ContainerManager.listContainers().firstOrNull { container ->
             container.name != containerName &&
                 container.isRunning &&
-                container.bindMounts.contains(Constants.X11_SOCK_DIR)
+                hasManagerSocketBind(container.bindMounts) &&
+                isManagedGraphicSessionActive(container.name)
         }
         if (discovered != null) {
             writeOwner(discovered.name)
@@ -377,6 +410,20 @@ object X11SessionManager {
         logger?.i("[+] Rolled back integrated X11 server after failed session start")
     }
 
+    private suspend fun preserveOrClearOwnerAfterServerStop(logger: ContainerLogger? = null) {
+        val owner = readOwner() ?: return
+        val (ownerStatus, _) = ContainerManager.getContainerRuntimeStatePublic(owner)
+        when (ownerStatus) {
+            ContainerStatus.RUNNING -> logger?.i(
+                "[+] Preserving display owner $owner while its container remains running"
+            )
+            ContainerStatus.STOPPED -> clearOwner()
+            ContainerStatus.UNKNOWN -> logger?.w(
+                "[!] Display owner $owner could not be verified; preserving the lease conservatively"
+            )
+        }
+    }
+
     private suspend fun stopIntegratedServerLocked(logger: ContainerLogger? = null): Boolean {
         return try {
             val before = readServerProbe()
@@ -384,7 +431,7 @@ object X11SessionManager {
                 terminateServerPids(before.pids)
             }
             clearX11SocketFiles()
-            clearOwner()
+            preserveOrClearOwnerAfterServerStop(logger)
 
             val after = readServerProbe()
             val stopped = after.pids.isEmpty() && !after.socketPresent
@@ -599,6 +646,7 @@ object X11SessionManager {
                 for (container in containers) {
                     if (container.isRunning) ContainerManager.stopContainer(container.name, logger)
                 }
+                clearOwner()
                 logger?.i("[+] All stopped")
             } catch (e: Exception) {
                 logger?.e("[-] Error: ${e.message}")
