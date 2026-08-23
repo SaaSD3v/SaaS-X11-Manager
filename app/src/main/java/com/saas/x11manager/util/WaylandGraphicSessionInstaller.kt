@@ -310,7 +310,7 @@ object WaylandGraphicSessionInstaller {
         return AdditionalGraphicSessionRuntime.runStep(containerName, step, logger)
     }
 
-    private fun fail(logger: ContainerLogger?, message: String): Boolean {
+    private suspend fun fail(logger: ContainerLogger?, message: String): Boolean {
         logger?.e("[-] FAIL")
         logger?.e("[-] $message")
         return false
