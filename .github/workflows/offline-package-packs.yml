@@ -7,6 +7,11 @@ on:
       - feature/offline-package-packs
     paths:
       - .github/workflows/offline-package-packs.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/offline-package-packs.yml
 
 permissions:
   contents: read
@@ -71,8 +76,6 @@ jobs:
 
               mkdir -p /out/repo/packages /out/repo/keys
 
-              # Main applications plus qView runtime. --recursive stores all
-              # dependencies as separate APK files for offline installation.
               apk fetch --recursive --output /out/repo/packages \
                 nano \
                 vim \
@@ -87,8 +90,6 @@ jobs:
                 qt5-qtbase-x11 \
                 qt5-qtx11extras
 
-              # qView is not in the Alpine 3.23 repositories, so build a real
-              # Alpine package from the upstream stable tag.
               apk add --no-cache \
                 alpine-sdk \
                 sudo \
@@ -115,7 +116,7 @@ pkgver=${QVIEW_VERSION}
 pkgrel=0
 pkgdesc="Practical and minimal image viewer"
 url="https://interversehq.com/qview/"
-arch="all"
+arch="aarch64"
 license="GPL-3.0-only"
 depends="qt5-qtbase-x11 qt5-qtx11extras"
 makedepends="qt5-qtbase-dev qt5-qtx11extras-dev qt5-qttools-dev qt5-qtsvg-dev"
@@ -142,7 +143,7 @@ nano|Nano
 vim|Vim
 htop|htop
 openssh|OpenSSH
- tigervnc|TigerVNC
+tigervnc|TigerVNC
 fastfetch|Fastfetch
 kitty|Kitty
 mpv|MPV
@@ -150,7 +151,6 @@ qview|qView
 audacious|Audacious
 thunar|Thunar
 EOF
-              sed -i "s/^ tigervnc/tigervnc/" /out/repo/catalog.txt
 
               printf "Alpine 3.23\naarch64\n" > /out/repo/target.txt
               (cd /out/repo && sha256sum packages/*.apk APKINDEX.tar.gz > SHA256SUMS)
@@ -175,8 +175,6 @@ EOF
               cp /var/lib/dpkg/status /tmp/minimal-status
               mkdir -p /out/repo/packages/partial
 
-              # Build qView from upstream because it is not part of the normal
-              # Debian/Ubuntu repositories used by this pack.
               apt-get install -y --no-install-recommends \
                 ca-certificates \
                 git \
@@ -211,11 +209,6 @@ EOF
               dpkg-deb --build --root-owner-group /tmp/qview-pkg "/out/repo/packages/qview_${QVIEW_VERSION}-1_arm64.deb"
 
               cd /
-
-              # Resolve against the status captured from the original minimal
-              # image, not against the build dependencies installed above.
-              # This makes the resulting repository suitable for a minimal
-              # rootfs while avoiding downloading an entire distribution.
               apt-get \
                 -o Dir::State::status=/tmp/minimal-status \
                 -o Dir::Cache::archives=/out/repo/packages \
@@ -251,7 +244,7 @@ nano|Nano
 vim|Vim
 htop|htop
 openssh-server|OpenSSH
- tigervnc-standalone-server|TigerVNC
+tigervnc-standalone-server|TigerVNC
 fastfetch|Fastfetch
 kitty|Kitty
 mpv|MPV
@@ -259,7 +252,6 @@ qview|qView
 audacious|Audacious
 thunar|Thunar
 EOF
-              sed -i "s/^ tigervnc/tigervnc/" catalog.txt
 
               printf "%s\narm64\n" "${TARGET_ID}" > target.txt
               sha256sum packages/*.deb Packages.gz > SHA256SUMS
