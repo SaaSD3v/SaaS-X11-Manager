@@ -110,11 +110,12 @@ jobs:
               chown -R builder:builder /home/builder
 
               su builder -c "abuild-keygen -a -n"
+              cp /home/builder/.abuild/*.rsa.pub /etc/apk/keys/
               cp /home/builder/.abuild/*.rsa.pub /out/repo/keys/
 
-              cat > /home/builder/qview/APKBUILD <<EOF
+              cat > /home/builder/qview/APKBUILD <<'"'"'EOF'"'"'
           pkgname=qview
-          pkgver=${QVIEW_VERSION}
+          pkgver=7.1
           pkgrel=0
           pkgdesc="Practical and minimal image viewer"
           url="https://interversehq.com/qview/"
@@ -122,8 +123,8 @@ jobs:
           license="GPL-3.0-only"
           depends="qt5-qtbase-x11 qt5-qtx11extras"
           makedepends="qt5-qtbase-dev qt5-qtx11extras-dev qt5-qttools-dev qt5-qtsvg-dev"
-          source="qView-${QVIEW_VERSION}.tar.gz::https://github.com/jurplel/qView/archive/refs/tags/${QVIEW_VERSION}.tar.gz"
-          builddir="$srcdir/qView-${QVIEW_VERSION}"
+          source="qView-7.1.tar.gz::https://github.com/jurplel/qView/archive/refs/tags/7.1.tar.gz"
+          builddir="$srcdir/qView-7.1"
 
           build() {
             qmake-qt5 PREFIX=/usr CONFIG+=release qView.pro
