@@ -16,6 +16,7 @@ class DwmAlpineGraphicSessionTest {
             )
         )
 
+        // Repository classification is capability-based; no Alpine release is pinned by the app.
         assertEquals(RepositoryRequirement.APK_COMMUNITY, plan.repositoryRequirement)
         assertEquals(listOf("dwm", "xterm"), plan.packages)
         assertEquals(GraphicSession.DWM.startCommand, plan.verificationCommand)
