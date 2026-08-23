@@ -1,6 +1,19 @@
 package com.saas.x11manager.util
 
 /**
+ * Catalog scope selected by the guided Graphic Session setup.
+ *
+ * STABLE only exposes sessions whose package source is part of the normal
+ * supported repository path. EXPERIMENTAL is additive: it always includes the
+ * stable catalog and may also expose sessions that require explicitly
+ * experimental package sources.
+ */
+enum class GraphicSessionCatalogMode {
+    STABLE,
+    EXPERIMENTAL
+}
+
+/**
  * UI policy for the guided Graphic Session setup.
  *
  * Package availability belongs to the detected container package platform,
@@ -14,11 +27,39 @@ object GraphicSessionWizard {
         InitSystem.SYSTEMD -> ContainerPlatform.UBUNTU
     }
 
-    fun sessionsFor(platform: ContainerPlatform): List<GraphicSession> =
+    fun sessionsFor(
+        platform: ContainerPlatform,
+        catalogMode: GraphicSessionCatalogMode
+    ): List<GraphicSession> =
         GraphicSessionSupport.installableSessions.filter { session ->
-            GraphicSessionInstallPlans.forSelection(platform, session) != null
+            val plan = GraphicSessionInstallPlans.forSelection(platform, session)
+                ?: return@filter false
+            catalogMode == GraphicSessionCatalogMode.EXPERIMENTAL || isStable(plan)
         }
 
+    /**
+     * Keep callers that do not explicitly opt into experimental sources on the
+     * stable catalog. Experimental sessions must always be an explicit wizard
+     * choice.
+     */
+    fun sessionsFor(platform: ContainerPlatform): List<GraphicSession> =
+        sessionsFor(platform, GraphicSessionCatalogMode.STABLE)
+
     fun sessionsFor(initSystem: InitSystem): List<GraphicSession> =
-        sessionsFor(platformFor(initSystem))
+        sessionsFor(platformFor(initSystem), GraphicSessionCatalogMode.STABLE)
+
+    fun isExperimental(
+        platform: ContainerPlatform,
+        session: GraphicSession
+    ): Boolean {
+        val plan = GraphicSessionInstallPlans.forSelection(platform, session) ?: return false
+        return !isStable(plan)
+    }
+
+    private fun isStable(plan: GraphicSessionInstallPlan): Boolean =
+        when (plan.repositoryRequirement) {
+            RepositoryRequirement.APT_UNIVERSE,
+            RepositoryRequirement.APT_MULTIVERSE,
+            RepositoryRequirement.APK_COMMUNITY -> true
+        }
 }

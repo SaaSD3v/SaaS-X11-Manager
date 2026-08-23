@@ -46,4 +46,46 @@ class GraphicSessionWizardTest {
             assertTrue(GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, session) != null)
         }
     }
+
+    @Test
+    fun experimentalAlpineCatalogIsAdditive() {
+        val stable = GraphicSessionWizard.sessionsFor(
+            ContainerPlatform.ALPINE,
+            GraphicSessionCatalogMode.STABLE
+        )
+        val experimental = GraphicSessionWizard.sessionsFor(
+            ContainerPlatform.ALPINE,
+            GraphicSessionCatalogMode.EXPERIMENTAL
+        )
+
+        assertTrue(stable.isNotEmpty())
+        assertTrue(experimental.containsAll(stable))
+    }
+
+    @Test
+    fun experimentalDebCatalogIsAdditive() {
+        val stable = GraphicSessionWizard.sessionsFor(
+            ContainerPlatform.UBUNTU,
+            GraphicSessionCatalogMode.STABLE
+        )
+        val experimental = GraphicSessionWizard.sessionsFor(
+            ContainerPlatform.UBUNTU,
+            GraphicSessionCatalogMode.EXPERIMENTAL
+        )
+
+        assertTrue(stable.isNotEmpty())
+        assertTrue(experimental.containsAll(stable))
+    }
+
+    @Test
+    fun existingRepositoryPlansRemainStableUntilExplicitlyMarkedExperimental() {
+        ContainerPlatform.entries.forEach { platform ->
+            GraphicSessionWizard.sessionsFor(
+                platform,
+                GraphicSessionCatalogMode.EXPERIMENTAL
+            ).forEach { session ->
+                assertTrue(!GraphicSessionWizard.isExperimental(platform, session))
+            }
+        }
+    }
 }
