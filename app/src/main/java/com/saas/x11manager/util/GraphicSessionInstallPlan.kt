@@ -21,8 +21,26 @@ data class GraphicSessionInstallPlan(
     val packages: List<String>,
     val verificationCommand: String,
     val installRecommendedPackages: Boolean,
-    val repositoryPackages: Set<String> = emptySet()
-)
+    val repositoryPackages: Set<String> = emptySet(),
+    val supportedDistributions: Set<ContainerDistribution> = emptySet(),
+    val supportedArchitectures: Set<String> = emptySet()
+) {
+    fun supports(capabilities: ContainerCapabilities): Boolean {
+        if (capabilities.platform != platform) return false
+        if (
+            supportedDistributions.isNotEmpty() &&
+            capabilities.distribution !in supportedDistributions
+        ) {
+            return false
+        }
+        if (supportedArchitectures.isEmpty()) return true
+        val architecture = capabilities.architecture?.lowercase() ?: return false
+        val normalized = if (architecture == "aarch64") "arm64" else architecture
+        return normalized in supportedArchitectures.map { arch ->
+            if (arch.lowercase() == "aarch64") "arm64" else arch.lowercase()
+        }
+    }
+}
 
 internal fun GraphicSessionInstallPlan.installPackageArguments(): List<String> =
     packages.map { packageName ->
@@ -38,30 +56,41 @@ internal fun GraphicSessionInstallPlan.installPackageArguments(): List<String> =
     }
 
 /**
- * Package plans intentionally avoid display managers because Termux:X11 is the
- * X server and SaaS-X11-Manager starts the selected session directly.
+ * Package plans intentionally avoid display managers because the Manager starts
+ * the selected session directly. X11 sessions use the integrated X server;
+ * Wayland sessions use a compositor's X11/nested backend on that same transport.
  */
 object GraphicSessionInstallPlans {
+
+    private val debFamily = setOf(ContainerDistribution.DEBIAN, ContainerDistribution.UBUNTU)
+    private val alpineOnly = setOf(ContainerDistribution.ALPINE)
+    private val arm64 = setOf("arm64", "aarch64")
 
     private fun apt(
         session: GraphicSession,
         packages: List<String>,
         repositoryRequirement: RepositoryRequirement = RepositoryRequirement.APT_UNIVERSE,
-        installRecommendedPackages: Boolean = false
+        installRecommendedPackages: Boolean = false,
+        supportedDistributions: Set<ContainerDistribution> = emptySet(),
+        supportedArchitectures: Set<String> = emptySet()
     ) = GraphicSessionInstallPlan(
         platform = ContainerPlatform.UBUNTU,
         session = session,
         repositoryRequirement = repositoryRequirement,
         packages = packages,
         verificationCommand = session.startCommand,
-        installRecommendedPackages = installRecommendedPackages
+        installRecommendedPackages = installRecommendedPackages,
+        supportedDistributions = supportedDistributions,
+        supportedArchitectures = supportedArchitectures
     )
 
     private fun apk(
         session: GraphicSession,
         packages: List<String>,
         repositoryRequirement: RepositoryRequirement = RepositoryRequirement.APK_COMMUNITY,
-        repositoryPackages: Set<String>? = null
+        repositoryPackages: Set<String>? = null,
+        supportedDistributions: Set<ContainerDistribution> = emptySet(),
+        supportedArchitectures: Set<String> = emptySet()
     ) = GraphicSessionInstallPlan(
         platform = ContainerPlatform.ALPINE,
         session = session,
@@ -75,7 +104,9 @@ object GraphicSessionInstallPlans {
             packages.toSet()
         } else {
             emptySet()
-        }
+        },
+        supportedDistributions = supportedDistributions,
+        supportedArchitectures = supportedArchitectures
     )
 
     private val plans = listOf(
@@ -228,7 +259,71 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.EXWM, listOf("elpa-exwm", "emacs-gtk", "dbus-x11", "xterm")),
         apt(GraphicSession.GNUSTEP_GWORKSPACE, listOf("gworkspace.app", "wmaker", "dbus-x11", "xterm")),
         apt(GraphicSession.NWM, listOf("nwm")),
-        apt(GraphicSession.GNOME_KIOSK_X11, listOf("gnome-kiosk-script-session", "gnome-session-bin", "dbus-x11"))
+        apt(GraphicSession.GNOME_KIOSK_X11, listOf("gnome-kiosk-script-session", "gnome-session-bin", "dbus-x11")),
+
+        // Wayland on the Manager is nested on the existing integrated X11 transport.
+        apt(
+            GraphicSession.WESTON,
+            listOf("weston", "xwayland"),
+            supportedDistributions = debFamily,
+            supportedArchitectures = arm64
+        ),
+        apk(
+            GraphicSession.WESTON,
+            listOf("weston-desktop-x11"),
+            supportedDistributions = alpineOnly,
+            supportedArchitectures = arm64
+        ),
+        apt(
+            GraphicSession.LABWC,
+            listOf("labwc", "xwayland", "foot"),
+            supportedDistributions = debFamily,
+            supportedArchitectures = arm64
+        ),
+        apk(
+            GraphicSession.LABWC,
+            listOf("labwc", "xwayland", "foot"),
+            supportedDistributions = alpineOnly,
+            supportedArchitectures = arm64
+        ),
+        apt(
+            GraphicSession.SWAY,
+            listOf("sway", "xwayland", "foot"),
+            supportedDistributions = debFamily,
+            supportedArchitectures = arm64
+        ),
+        apk(
+            GraphicSession.SWAY,
+            listOf("sway", "xwayland", "foot"),
+            supportedDistributions = alpineOnly,
+            supportedArchitectures = arm64
+        ),
+        apt(
+            GraphicSession.CAGE,
+            listOf("cage", "xwayland", "foot"),
+            supportedDistributions = debFamily,
+            supportedArchitectures = arm64
+        ),
+        apk(
+            GraphicSession.CAGE,
+            listOf("cage", "xwayland", "foot"),
+            supportedDistributions = alpineOnly,
+            supportedArchitectures = arm64
+        ),
+        apt(
+            GraphicSession.WAYFIRE,
+            listOf("wayfire", "xwayland", "foot"),
+            supportedDistributions = debFamily,
+            supportedArchitectures = arm64
+        ),
+        apk(
+            GraphicSession.WAYFIRE,
+            listOf("wayfire", "xwayland", "foot"),
+            RepositoryRequirement.APK_EDGE_TESTING,
+            repositoryPackages = setOf("wayfire"),
+            supportedDistributions = alpineOnly,
+            supportedArchitectures = arm64
+        )
     )
 
     fun forSelection(
