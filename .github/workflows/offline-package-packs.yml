@@ -1,0 +1,297 @@
+name: Build Offline Package Packs
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/offline-package-packs
+    paths:
+      - .github/workflows/offline-package-packs.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offline-package-packs-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QVIEW_VERSION: "7.1"
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: alpine-3.23-aarch64
+            label: Alpine 3.23 aarch64
+            image: alpine:3.23
+            family: alpine
+          - id: debian-13-arm64
+            label: Debian 13 arm64
+            image: debian:13-slim
+            family: debian
+          - id: ubuntu-26.04-arm64
+            label: Ubuntu 26.04 arm64
+            image: ubuntu:26.04
+            family: debian
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable ARM64 emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Prepare output
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf out
+          mkdir -p out
+
+      - name: Build Alpine offline repository
+        if: matrix.family == 'alpine'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --platform linux/arm64 \
+            -e QVIEW_VERSION="${QVIEW_VERSION}" \
+            -v "$PWD/out:/out" \
+            "${{ matrix.image }}" /bin/sh -euxc '
+              echo "https://dl-cdn.alpinelinux.org/alpine/v3.23/main" > /etc/apk/repositories
+              echo "https://dl-cdn.alpinelinux.org/alpine/v3.23/community" >> /etc/apk/repositories
+              apk update
+
+              mkdir -p /out/repo/packages /out/repo/keys
+
+              # Main applications plus qView runtime. --recursive stores all
+              # dependencies as separate APK files for offline installation.
+              apk fetch --recursive --output /out/repo/packages \
+                nano \
+                vim \
+                htop \
+                openssh \
+                tigervnc \
+                fastfetch \
+                kitty \
+                mpv \
+                audacious \
+                thunar \
+                qt5-qtbase-x11 \
+                qt5-qtx11extras
+
+              # qView is not in the Alpine 3.23 repositories, so build a real
+              # Alpine package from the upstream stable tag.
+              apk add --no-cache \
+                alpine-sdk \
+                sudo \
+                git \
+                ca-certificates \
+                qt5-qtbase-dev \
+                qt5-qtx11extras-dev \
+                qt5-qttools-dev \
+                qt5-qtsvg-dev
+
+              adduser -D builder
+              addgroup builder abuild
+              echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+              mkdir -p /var/cache/distfiles /home/builder/qview
+              chmod 777 /var/cache/distfiles
+              chown -R builder:builder /home/builder
+
+              su builder -c "abuild-keygen -a -n"
+              cp /home/builder/.abuild/*.rsa.pub /out/repo/keys/
+
+              cat > /home/builder/qview/APKBUILD <<EOF
+pkgname=qview
+pkgver=${QVIEW_VERSION}
+pkgrel=0
+pkgdesc="Practical and minimal image viewer"
+url="https://interversehq.com/qview/"
+arch="all"
+license="GPL-3.0-only"
+depends="qt5-qtbase-x11 qt5-qtx11extras"
+makedepends="qt5-qtbase-dev qt5-qtx11extras-dev qt5-qttools-dev qt5-qtsvg-dev"
+source="qView-${QVIEW_VERSION}.tar.gz::https://github.com/jurplel/qView/archive/refs/tags/${QVIEW_VERSION}.tar.gz"
+builddir="\$srcdir/qView-${QVIEW_VERSION}"
+
+build() {
+  qmake-qt5 PREFIX=/usr CONFIG+=release qView.pro
+  make -j2
+}
+
+package() {
+  make INSTALL_ROOT="\$pkgdir" install
+}
+EOF
+              chown builder:builder /home/builder/qview/APKBUILD
+              su builder -c "cd /home/builder/qview && abuild checksum && abuild -r"
+              find /home/builder/packages -type f -name "qview-*.apk" -exec cp -f {} /out/repo/packages/ \;
+
+              apk index -o /out/repo/APKINDEX.tar.gz /out/repo/packages/*.apk
+
+              cat > /out/repo/catalog.txt <<EOF
+nano|Nano
+vim|Vim
+htop|htop
+openssh|OpenSSH
+ tigervnc|TigerVNC
+fastfetch|Fastfetch
+kitty|Kitty
+mpv|MPV
+qview|qView
+audacious|Audacious
+thunar|Thunar
+EOF
+              sed -i "s/^ tigervnc/tigervnc/" /out/repo/catalog.txt
+
+              printf "Alpine 3.23\naarch64\n" > /out/repo/target.txt
+              (cd /out/repo && sha256sum packages/*.apk APKINDEX.tar.gz > SHA256SUMS)
+              apk --version > /out/repo/builder-version.txt
+            '
+
+          tar --zstd -C out/repo -cf "out/Droidspaces-Offline-${{ matrix.id }}.tar.zst" .
+          du -h "out/Droidspaces-Offline-${{ matrix.id }}.tar.zst"
+
+      - name: Build Debian or Ubuntu offline repository
+        if: matrix.family == 'debian'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --platform linux/arm64 \
+            -e DEBIAN_FRONTEND=noninteractive \
+            -e QVIEW_VERSION="${QVIEW_VERSION}" \
+            -e TARGET_ID="${{ matrix.id }}" \
+            -v "$PWD/out:/out" \
+            "${{ matrix.image }}" /bin/bash -euxc '
+              apt-get update
+              cp /var/lib/dpkg/status /tmp/minimal-status
+              mkdir -p /out/repo/packages/partial
+
+              # Build qView from upstream because it is not part of the normal
+              # Debian/Ubuntu repositories used by this pack.
+              apt-get install -y --no-install-recommends \
+                ca-certificates \
+                git \
+                build-essential \
+                dpkg-dev \
+                qtbase5-dev \
+                qttools5-dev-tools \
+                libqt5svg5-dev \
+                qt5-image-formats-plugins \
+                libqt5x11extras5-dev
+
+              git clone --depth 1 --branch "${QVIEW_VERSION}" https://github.com/jurplel/qView.git /tmp/qview
+              cd /tmp/qview
+              qmake PREFIX=/usr CONFIG+=release qView.pro
+              make -j2
+
+              rm -rf /tmp/qview-pkg
+              mkdir -p /tmp/qview-pkg/DEBIAN
+              make INSTALL_ROOT=/tmp/qview-pkg install
+
+              cat > /tmp/qview-pkg/DEBIAN/control <<EOF
+Package: qview
+Version: ${QVIEW_VERSION}-1
+Section: graphics
+Priority: optional
+Architecture: arm64
+Maintainer: Droidspaces Offline Pack <noreply@droidspaces.local>
+Depends: libc6, libgcc-s1, libqt5core5t64, libqt5gui5t64, libqt5network5t64, libqt5widgets5t64, libqt5x11extras5, libstdc++6, libx11-6
+Description: Practical and minimal image viewer
+ qView packaged for the Droidspaces offline ARM64 repository.
+EOF
+              dpkg-deb --build --root-owner-group /tmp/qview-pkg "/out/repo/packages/qview_${QVIEW_VERSION}-1_arm64.deb"
+
+              cd /
+
+              # Resolve against the status captured from the original minimal
+              # image, not against the build dependencies installed above.
+              # This makes the resulting repository suitable for a minimal
+              # rootfs while avoiding downloading an entire distribution.
+              apt-get \
+                -o Dir::State::status=/tmp/minimal-status \
+                -o Dir::Cache::archives=/out/repo/packages \
+                --download-only \
+                --no-install-recommends \
+                -y install \
+                nano \
+                vim \
+                htop \
+                openssh-server \
+                openssh-client \
+                tigervnc-standalone-server \
+                tigervnc-tools \
+                fastfetch \
+                kitty \
+                mpv \
+                audacious \
+                thunar \
+                libqt5core5t64 \
+                libqt5gui5t64 \
+                libqt5network5t64 \
+                libqt5widgets5t64 \
+                libqt5x11extras5 \
+                libx11-6
+
+              rm -rf /out/repo/packages/partial
+              cd /out/repo
+              dpkg-scanpackages packages /dev/null > Packages
+              gzip -9c Packages > Packages.gz
+
+              cat > catalog.txt <<EOF
+nano|Nano
+vim|Vim
+htop|htop
+openssh-server|OpenSSH
+ tigervnc-standalone-server|TigerVNC
+fastfetch|Fastfetch
+kitty|Kitty
+mpv|MPV
+qview|qView
+audacious|Audacious
+thunar|Thunar
+EOF
+              sed -i "s/^ tigervnc/tigervnc/" catalog.txt
+
+              printf "%s\narm64\n" "${TARGET_ID}" > target.txt
+              sha256sum packages/*.deb Packages.gz > SHA256SUMS
+              dpkg --print-architecture > builder-architecture.txt
+            '
+
+          tar --zstd -C out/repo -cf "out/Droidspaces-Offline-${{ matrix.id }}.tar.zst" .
+          du -h "out/Droidspaces-Offline-${{ matrix.id }}.tar.zst"
+
+      - name: Validate pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "out/Droidspaces-Offline-${{ matrix.id }}.tar.zst"
+          mkdir -p /tmp/check-pack
+          tar --zstd -xf "out/Droidspaces-Offline-${{ matrix.id }}.tar.zst" -C /tmp/check-pack
+          test -s /tmp/check-pack/catalog.txt
+          test -s /tmp/check-pack/SHA256SUMS
+          if [[ "${{ matrix.family }}" == "alpine" ]]; then
+            test -s /tmp/check-pack/APKINDEX.tar.gz
+            test -n "$(find /tmp/check-pack/packages -name "*.apk" -print -quit)"
+          else
+            test -s /tmp/check-pack/Packages.gz
+            test -n "$(find /tmp/check-pack/packages -name "*.deb" -print -quit)"
+          fi
+          du -sh /tmp/check-pack
+
+      - name: Upload final pack
+        uses: actions/upload-artifact@v4
+        with:
+          name: Droidspaces-Offline-${{ matrix.id }}
+          path: out/Droidspaces-Offline-${{ matrix.id }}.tar.zst
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
