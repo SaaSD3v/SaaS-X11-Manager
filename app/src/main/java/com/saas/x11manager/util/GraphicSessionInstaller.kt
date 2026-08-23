@@ -169,7 +169,8 @@ object GraphicSessionInstaller {
         val component = when (plan.repositoryRequirement) {
             RepositoryRequirement.APT_UNIVERSE -> "universe"
             RepositoryRequirement.APT_MULTIVERSE -> "multiverse"
-            RepositoryRequirement.APK_COMMUNITY -> return null
+            RepositoryRequirement.APK_COMMUNITY,
+            RepositoryRequirement.APK_EDGE_TESTING -> return null
         }
         val fallbackDescription = when (plan.repositoryRequirement) {
             RepositoryRequirement.APT_MULTIVERSE -> "Multiverse/non-free"
