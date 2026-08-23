@@ -5,10 +5,13 @@ on:
     branches: [ "main", "master", "agent/structural-fixes", "agent/integrated-x11", "agent/multi-display" ]
     paths:
       - "ci/rootfs-compatibility.sh"
+      - "ci/wayland-arm64-compatibility.sh"
       - "ci/debian-apt-component-probe.sh"
       - "ci/export-graphic-session-plans.py"
       - "app/src/main/java/com/saas/x11manager/util/GraphicSessionInstallPlan.kt"
       - "app/src/main/java/com/saas/x11manager/util/AdditionalGraphicSessionInstaller.kt"
+      - "app/src/main/java/com/saas/x11manager/util/WaylandGraphicSessionInstaller.kt"
+      - "app/src/main/java/com/saas/x11manager/util/WaylandGraphicSessionSupport.kt"
       - "app/src/main/java/com/saas/x11manager/util/DebianAptComponentSource.kt"
       - "app/src/main/java/com/saas/x11manager/util/AptTransactionSafety.kt"
       - "app/src/main/java/com/saas/x11manager/util/ApkTransactionSafety.kt"
@@ -17,10 +20,13 @@ on:
     branches: [ "main", "master" ]
     paths:
       - "ci/rootfs-compatibility.sh"
+      - "ci/wayland-arm64-compatibility.sh"
       - "ci/debian-apt-component-probe.sh"
       - "ci/export-graphic-session-plans.py"
       - "app/src/main/java/com/saas/x11manager/util/GraphicSessionInstallPlan.kt"
       - "app/src/main/java/com/saas/x11manager/util/AdditionalGraphicSessionInstaller.kt"
+      - "app/src/main/java/com/saas/x11manager/util/WaylandGraphicSessionInstaller.kt"
+      - "app/src/main/java/com/saas/x11manager/util/WaylandGraphicSessionSupport.kt"
       - "app/src/main/java/com/saas/x11manager/util/DebianAptComponentSource.kt"
       - "app/src/main/java/com/saas/x11manager/util/AptTransactionSafety.kt"
       - "app/src/main/java/com/saas/x11manager/util/ApkTransactionSafety.kt"
@@ -54,8 +60,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The exporter schema includes repository requirement and scoped packages,
-      # so experimental sources are audited exactly as the app will request them.
       - name: Export graphic session plan catalog
         run: |
           python3 -m py_compile ci/export-graphic-session-plans.py
@@ -68,6 +72,7 @@ jobs:
       - name: Validate compatibility probe syntax
         run: |
           sh -n ci/rootfs-compatibility.sh
+          sh -n ci/wayland-arm64-compatibility.sh
           sh -n ci/debian-apt-component-probe.sh
 
       - name: Validate current rootfs package compatibility
@@ -102,10 +107,44 @@ jobs:
           if-no-files-found: warn
           path: ${{ runner.temp }}/rootfs-audit/${{ matrix.slug }}.tsv
 
+  wayland-arm64:
+    name: Wayland ARM64 · ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Alpine current
+            image: alpine:latest
+          - name: Debian stable
+            image: debian:stable-slim
+          - name: Ubuntu current
+            image: ubuntu:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable ARM64 container emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Validate ARM64 Wayland probe syntax
+        run: sh -n ci/wayland-arm64-compatibility.sh
+
+      - name: Verify current ARM64 Wayland package set
+        run: |
+          docker run --rm \
+            --platform linux/arm64 \
+            -v "${GITHUB_WORKSPACE}:/workspace:ro" \
+            -w /workspace \
+            "${{ matrix.image }}" \
+            sh ci/wayland-arm64-compatibility.sh
+
   publish-status:
     name: Publish compatibility status
     if: ${{ always() && github.event_name == 'push' }}
-    needs: [rootfs-compatibility]
+    needs: [rootfs-compatibility, wayland-arm64]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -115,7 +154,9 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const succeeded = '${{ needs.rootfs-compatibility.result }}' === 'success';
+            const rootfsSucceeded = '${{ needs.rootfs-compatibility.result }}' === 'success';
+            const arm64Succeeded = '${{ needs.wayland-arm64.result }}' === 'success';
+            const succeeded = rootfsSucceeded && arm64Succeeded;
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -123,7 +164,7 @@ jobs:
               state: succeeded ? 'success' : 'failure',
               context: 'rootfs-compatibility',
               description: succeeded
-                ? 'Current rootfs probes and catalog audits passed'
-                : 'A current rootfs compatibility probe failed',
+                ? 'Current rootfs and ARM64 Wayland package audits passed'
+                : 'A rootfs or ARM64 Wayland compatibility probe failed',
               target_url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
             });
