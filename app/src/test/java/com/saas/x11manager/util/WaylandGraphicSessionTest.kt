@@ -40,15 +40,20 @@ class WaylandGraphicSessionTest {
         assertTrue(stable.contains(GraphicSession.SWAY))
         assertTrue(stable.contains(GraphicSession.CAGE))
         assertFalse(stable.contains(GraphicSession.WAYFIRE))
-        assertTrue(experimental.containsAll(stable))
         assertTrue(experimental.contains(GraphicSession.WAYFIRE))
+        assertTrue(stable.intersect(experimental.toSet()).isEmpty())
     }
 
     @Test
-    fun debianArm64StableCatalogIncludesNormalRepositoryWaylandSessions() {
+    fun debianArm64StableAndExperimentalWaylandCatalogsAreSeparated() {
         val stable = GraphicSessionWizard.sessionsFor(
             debianArm64,
             GraphicSessionCatalogMode.STABLE,
+            GraphicProtocol.WAYLAND
+        )
+        val experimental = GraphicSessionWizard.sessionsFor(
+            debianArm64,
+            GraphicSessionCatalogMode.EXPERIMENTAL,
             GraphicProtocol.WAYLAND
         )
 
@@ -56,19 +61,27 @@ class WaylandGraphicSessionTest {
         assertTrue(stable.contains(GraphicSession.LABWC))
         assertTrue(stable.contains(GraphicSession.SWAY))
         assertTrue(stable.contains(GraphicSession.CAGE))
-        assertTrue(stable.contains(GraphicSession.WAYFIRE))
+        assertFalse(stable.contains(GraphicSession.WAYFIRE))
+        assertTrue(experimental.contains(GraphicSession.WAYFIRE))
+        assertTrue(stable.intersect(experimental.toSet()).isEmpty())
     }
 
     @Test
     fun unvalidatedArchitectureDoesNotExposeWaylandCatalog() {
         val amd64 = debianArm64.copy(architecture = "x86_64")
-        val sessions = GraphicSessionWizard.sessionsFor(
+        val stable = GraphicSessionWizard.sessionsFor(
+            amd64,
+            GraphicSessionCatalogMode.STABLE,
+            GraphicProtocol.WAYLAND
+        )
+        val experimental = GraphicSessionWizard.sessionsFor(
             amd64,
             GraphicSessionCatalogMode.EXPERIMENTAL,
             GraphicProtocol.WAYLAND
         )
 
-        assertTrue(sessions.isEmpty())
+        assertTrue(stable.isEmpty())
+        assertTrue(experimental.isEmpty())
     }
 
     @Test
