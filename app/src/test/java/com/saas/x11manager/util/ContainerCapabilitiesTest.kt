@@ -58,7 +58,9 @@ class ContainerCapabilitiesTest {
                 "@@SAAS_PACKAGE=deb@@",
                 "@@SAAS_OPENRC=0@@",
                 "@@SAAS_SYSTEMD=1@@",
+                "@@SAAS_ARCH=aarch64@@",
                 "@@SAAS_OS_RELEASE_BEGIN@@",
+                "PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"",
                 "NAME=Debian GNU/Linux",
                 "ID=debian",
                 "ID_LIKE=debian",
@@ -69,10 +71,33 @@ class ContainerCapabilitiesTest {
         assertEquals(ContainerPlatform.UBUNTU, probe.platform)
         assertFalse(probe.hasOpenRc)
         assertTrue(probe.hasSystemd)
+        assertEquals("aarch64", probe.architecture)
         assertEquals(
-            listOf("NAME=Debian GNU/Linux", "ID=debian", "ID_LIKE=debian"),
+            listOf(
+                "PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"",
+                "NAME=Debian GNU/Linux",
+                "ID=debian",
+                "ID_LIKE=debian"
+            ),
             probe.osReleaseLines
         )
+    }
+
+    @Test
+    fun detectedPrettyNameAndArchitectureAreExposedForWizard() {
+        val capabilities = ContainerCapabilitiesDetector.fromProbeResults(
+            platform = ContainerPlatform.UBUNTU,
+            osReleaseLines = listOf(
+                "PRETTY_NAME=\"Ubuntu 26.04 LTS\"",
+                "ID=ubuntu"
+            ),
+            hasOpenRc = false,
+            hasSystemd = true,
+            architecture = "aarch64"
+        )
+
+        assertEquals("Ubuntu 26.04 LTS", capabilities.distributionDisplayName)
+        assertEquals("arm64", capabilities.architectureDisplayName)
     }
 
     @Test
@@ -84,6 +109,7 @@ class ContainerCapabilitiesTest {
         assertTrue(command.contains("command -v dpkg"))
         assertTrue(command.contains("command -v openrc-run"))
         assertTrue(command.contains("command -v systemctl"))
+        assertTrue(command.contains("uname -m"))
         assertTrue(command.contains("cat /etc/os-release"))
         assertFalse(command.contains("VERSION_ID="))
     }
