@@ -29,7 +29,7 @@ object GraphicSessionWizard {
         GraphicSessionRegistry.installableSessions.filter { session ->
             if (session.protocol != protocol) return@filter false
             val platform = capabilities.platform ?: return@filter false
-            val plan = GraphicSessionInstallPlans.forSelection(platform, session)
+            val plan = GraphicSessionPlanResolver.forSelection(platform, session)
                 ?: return@filter false
             if (!plan.supports(capabilities)) return@filter false
             belongsToCatalog(plan, catalogMode)
@@ -42,7 +42,7 @@ object GraphicSessionWizard {
     ): List<GraphicSession> =
         GraphicSessionRegistry.installableSessions.filter { session ->
             if (session.protocol != protocol) return@filter false
-            val plan = GraphicSessionInstallPlans.forSelection(platform, session)
+            val plan = GraphicSessionPlanResolver.forSelection(platform, session)
                 ?: return@filter false
             belongsToCatalog(plan, catalogMode)
         }
@@ -73,7 +73,7 @@ object GraphicSessionWizard {
         session: GraphicSession
     ): Boolean {
         val platform = capabilities.platform ?: return false
-        val plan = GraphicSessionInstallPlans.forSelection(platform, session) ?: return false
+        val plan = GraphicSessionPlanResolver.forSelection(platform, session) ?: return false
         if (!plan.supports(capabilities)) return false
         return GraphicSessionCatalogPolicy.isExperimental(plan)
     }
@@ -82,7 +82,7 @@ object GraphicSessionWizard {
         platform: ContainerPlatform,
         session: GraphicSession
     ): Boolean {
-        val plan = GraphicSessionInstallPlans.forSelection(platform, session) ?: return false
+        val plan = GraphicSessionPlanResolver.forSelection(platform, session) ?: return false
         return GraphicSessionCatalogPolicy.isExperimental(plan)
     }
 
