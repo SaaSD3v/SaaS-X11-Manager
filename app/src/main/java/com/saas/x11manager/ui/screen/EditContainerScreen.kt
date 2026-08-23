@@ -27,6 +27,7 @@ import com.saas.x11manager.util.AptInstallRecommendationOverride
 import com.saas.x11manager.util.ContainerPlatform
 import com.saas.x11manager.util.ContainerStatus
 import com.saas.x11manager.util.GraphicSession
+import com.saas.x11manager.util.GraphicSessionCatalogMode
 import com.saas.x11manager.util.InitSystem
 import com.saas.x11manager.util.X11SessionManager
 import kotlinx.coroutines.launch
@@ -215,9 +216,10 @@ fun EditContainerScreen(
                                     "To apply the change safely, the container will be stopped before you continue."
                             )
                             Text(
-                                "Next you will choose one of the init backends detected in this container and then " +
-                                    "a graphic session available for its detected package manager. Sessions that are " +
-                                    "already installed can be selected without downloading packages again, or reinstalled."
+                                "Next you will choose one of the init backends detected in this container, choose " +
+                                    "the Stable or Experimental session catalog, and then choose a graphic session " +
+                                    "available for its detected package manager. Sessions that are already installed " +
+                                    "can be selected without downloading packages again, or reinstalled."
                             )
                         }
                     }
@@ -261,11 +263,10 @@ fun EditContainerScreen(
 
         aptRecommendationSession != null -> {
             val session = requireNotNull(aptRecommendationSession)
-            val selectedInit = viewModel.pendingWizardInitSystem ?: initSystem
             AlertDialog(
                 onDismissRequest = {
                     aptRecommendationSession = null
-                    viewModel.selectWizardInitSystem(selectedInit)
+                    viewModel.returnToWizardSessionSelection()
                 },
                 title = { Text("APT package options") },
                 text = {
@@ -285,7 +286,7 @@ fun EditContainerScreen(
                     TextButton(
                         onClick = {
                             aptRecommendationSession = null
-                            viewModel.selectWizardInitSystem(selectedInit)
+                            viewModel.returnToWizardSessionSelection()
                         }
                     ) {
                         Text("Back")
@@ -320,11 +321,10 @@ fun EditContainerScreen(
 
         alpineProfileSession != null -> {
             val session = requireNotNull(alpineProfileSession)
-            val selectedInit = viewModel.pendingWizardInitSystem ?: initSystem
             AlertDialog(
                 onDismissRequest = {
                     alpineProfileSession = null
-                    viewModel.selectWizardInitSystem(selectedInit)
+                    viewModel.returnToWizardSessionSelection()
                 },
                 title = { Text("Alpine package options") },
                 text = {
@@ -344,7 +344,7 @@ fun EditContainerScreen(
                     TextButton(
                         onClick = {
                             alpineProfileSession = null
-                            viewModel.selectWizardInitSystem(selectedInit)
+                            viewModel.returnToWizardSessionSelection()
                         }
                     ) {
                         Text("Back")
@@ -383,7 +383,7 @@ fun EditContainerScreen(
             AlertDialog(
                 onDismissRequest = {
                     installedActionSession = null
-                    viewModel.selectWizardInitSystem(selectedInit)
+                    viewModel.returnToWizardSessionSelection()
                 },
                 title = { Text(session.label) },
                 text = {
@@ -397,7 +397,7 @@ fun EditContainerScreen(
                     TextButton(
                         onClick = {
                             installedActionSession = null
-                            viewModel.selectWizardInitSystem(selectedInit)
+                            viewModel.returnToWizardSessionSelection()
                         }
                     ) {
                         Text("Back")
@@ -531,6 +531,42 @@ fun EditContainerScreen(
             }
         }
 
+        viewModel.wizardStage == ConfigurationWizardStage.CATALOG_SELECTION -> {
+            val selectedInit = viewModel.pendingWizardInitSystem ?: initSystem
+            val platformLabel = when (viewModel.containerCapabilities?.platform) {
+                ContainerPlatform.ALPINE -> "Alpine/apk"
+                ContainerPlatform.UBUNTU -> "Debian-family apt/dpkg"
+                null -> "package platform unavailable"
+            }
+            WizardChoiceDialog(
+                title = "Choose session catalog",
+                subtitle = "${if (selectedInit == InitSystem.OPENRC) "OpenRC" else "systemd"} selected · $platformLabel",
+                onDismiss = { viewModel.dismissConfigurationWizard() },
+                secondaryActionLabel = "Back",
+                onSecondaryAction = { viewModel.backToWizardInitSelection() }
+            ) {
+                WizardChoice(
+                    title = "Stable",
+                    subtitle = "Only sessions using the normal supported repository path.",
+                    selected = viewModel.pendingWizardCatalogMode == GraphicSessionCatalogMode.STABLE,
+                    installed = false,
+                    onClick = {
+                        viewModel.selectWizardCatalogMode(GraphicSessionCatalogMode.STABLE)
+                    }
+                )
+                Spacer(Modifier.height(10.dp))
+                WizardChoice(
+                    title = "Experimental",
+                    subtitle = "Stable sessions plus options that may require testing or other experimental repositories.",
+                    selected = viewModel.pendingWizardCatalogMode == GraphicSessionCatalogMode.EXPERIMENTAL,
+                    installed = false,
+                    onClick = {
+                        viewModel.selectWizardCatalogMode(GraphicSessionCatalogMode.EXPERIMENTAL)
+                    }
+                )
+            }
+        }
+
         viewModel.wizardStage == ConfigurationWizardStage.SESSION_SELECTION -> {
             val selectedInit = viewModel.pendingWizardInitSystem ?: initSystem
             val packageLabel = when (viewModel.containerCapabilities?.platform) {
@@ -538,22 +574,30 @@ fun EditContainerScreen(
                 ContainerPlatform.UBUNTU -> "Debian-family apt/dpkg catalog"
                 null -> "package catalog unavailable"
             }
+            val catalogLabel = when (viewModel.pendingWizardCatalogMode) {
+                GraphicSessionCatalogMode.STABLE -> "Stable"
+                GraphicSessionCatalogMode.EXPERIMENTAL -> "Experimental"
+            }
             WizardChoiceDialog(
                 title = "Choose graphic session",
-                subtitle = "${if (selectedInit == InitSystem.OPENRC) "OpenRC" else "systemd"} selected · $packageLabel",
+                subtitle = "${if (selectedInit == InitSystem.OPENRC) "OpenRC" else "systemd"} selected · $catalogLabel · $packageLabel",
                 onDismiss = { viewModel.dismissConfigurationWizard() },
                 secondaryActionLabel = "Back",
-                onSecondaryAction = { viewModel.backToWizardInitSelection() }
+                onSecondaryAction = { viewModel.backToWizardCatalogSelection() }
             ) {
                 val sessions = viewModel.wizardSessions()
                 sessions.forEachIndexed { index, session ->
                     if (index > 0) Spacer(Modifier.height(10.dp))
                     val installed = viewModel.isSessionInstalled(session)
+                    val experimental = viewModel.isWizardSessionExperimental(session)
                     WizardChoice(
                         title = session.label,
                         subtitle = when {
+                            installed && graphicSession == session && experimental -> "Installed · Current default · Experimental"
                             installed && graphicSession == session -> "Installed · Current default"
+                            installed && experimental -> "Installed · Experimental · tap for Select or Reinstall"
                             installed -> "Installed · tap for Select or Reinstall"
+                            experimental -> "Experimental · tap to install and apply"
                             else -> "Tap to install and apply"
                         },
                         selected = graphicSession == session,

@@ -15,6 +15,7 @@ import com.saas.x11manager.util.ContainerManager
 import com.saas.x11manager.util.ContainerSettingsManager
 import com.saas.x11manager.util.ContainerStatus
 import com.saas.x11manager.util.GraphicSession
+import com.saas.x11manager.util.GraphicSessionCatalogMode
 import com.saas.x11manager.util.GraphicSessionInstaller
 import com.saas.x11manager.util.GraphicSessionSupport
 import com.saas.x11manager.util.GraphicSessionWizard
@@ -30,6 +31,7 @@ enum class ConfigurationWizardStage {
     HIDDEN,
     RUNNING_WARNING,
     INIT_SELECTION,
+    CATALOG_SELECTION,
     SESSION_SELECTION
 }
 
@@ -74,6 +76,8 @@ class EditContainerViewModel : ViewModel() {
     var wizardStage by mutableStateOf(ConfigurationWizardStage.HIDDEN)
         private set
     var pendingWizardInitSystem by mutableStateOf<InitSystem?>(null)
+        private set
+    var pendingWizardCatalogMode by mutableStateOf(GraphicSessionCatalogMode.STABLE)
         private set
     var isPreparingWizard by mutableStateOf(false)
         private set
@@ -125,6 +129,7 @@ class EditContainerViewModel : ViewModel() {
             installResult = null
             installResultSession = null
             wizardError = null
+            pendingWizardCatalogMode = GraphicSessionCatalogMode.STABLE
             canStartX11FromInstall = false
             quickStartCompleted = false
         }
@@ -135,6 +140,7 @@ class EditContainerViewModel : ViewModel() {
         wizardStarted = true
         wizardStage = ConfigurationWizardStage.HIDDEN
         wizardError = null
+        pendingWizardCatalogMode = GraphicSessionCatalogMode.STABLE
         isPreparingWizard = true
 
         viewModelScope.launch {
@@ -220,6 +226,12 @@ class EditContainerViewModel : ViewModel() {
             return
         }
         pendingWizardInitSystem = system
+        wizardStage = ConfigurationWizardStage.CATALOG_SELECTION
+    }
+
+    fun selectWizardCatalogMode(mode: GraphicSessionCatalogMode) {
+        if (isPreparingWizard || isInstallingSession) return
+        pendingWizardCatalogMode = mode
         wizardStage = ConfigurationWizardStage.SESSION_SELECTION
     }
 
@@ -228,8 +240,25 @@ class EditContainerViewModel : ViewModel() {
         wizardStage = ConfigurationWizardStage.INIT_SELECTION
     }
 
+    fun backToWizardCatalogSelection() {
+        if (isPreparingWizard || isInstallingSession) return
+        wizardStage = ConfigurationWizardStage.CATALOG_SELECTION
+    }
+
+    fun returnToWizardSessionSelection() {
+        if (isPreparingWizard || isInstallingSession) return
+        wizardStage = ConfigurationWizardStage.SESSION_SELECTION
+    }
+
     fun wizardSessions(): List<GraphicSession> =
-        containerCapabilities?.platform?.let(GraphicSessionWizard::sessionsFor).orEmpty()
+        containerCapabilities?.platform?.let { platform ->
+            GraphicSessionWizard.sessionsFor(platform, pendingWizardCatalogMode)
+        }.orEmpty()
+
+    fun isWizardSessionExperimental(session: GraphicSession): Boolean =
+        containerCapabilities?.platform?.let { platform ->
+            GraphicSessionWizard.isExperimental(platform, session)
+        } == true
 
     fun configureWizardSession(session: GraphicSession) {
         if (isPreparingWizard || isInstallingSession || isSaving) return
@@ -244,7 +273,7 @@ class EditContainerViewModel : ViewModel() {
             wizardError = "${selectedInit.name.lowercase()} is not available in this container."
             return
         }
-        if (session !in GraphicSessionWizard.sessionsFor(platform)) {
+        if (session !in GraphicSessionWizard.sessionsFor(platform, pendingWizardCatalogMode)) {
             wizardError = "${session.label} is not available for the detected ${platform.label} package platform."
             return
         }
