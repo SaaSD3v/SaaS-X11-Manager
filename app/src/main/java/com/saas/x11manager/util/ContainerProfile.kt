@@ -94,5 +94,15 @@ enum class GraphicSession(
     GNUSTEP_GWORKSPACE("GNUstep + GWorkspace", "saas-gnustep-gworkspace-session"),
     NWM("nwm", "nwm"),
     GNOME_KIOSK_X11("GNOME Kiosk X11", "saas-gnome-kiosk-x11-session"),
+
+    // Wayland sessions are real Wayland compositors. Their outer presentation
+    // backend is the Manager's integrated X11 transport so they do not require
+    // DRM/KMS, logind or a second Android renderer.
+    WESTON("Weston", "saas-weston-wayland-session", GraphicProtocol.WAYLAND),
+    LABWC("Labwc", "saas-labwc-wayland-session", GraphicProtocol.WAYLAND),
+    SWAY("Sway", "saas-sway-wayland-session", GraphicProtocol.WAYLAND),
+    CAGE("Cage (Kiosk)", "saas-cage-wayland-session", GraphicProtocol.WAYLAND),
+    WAYFIRE("Wayfire", "saas-wayfire-wayland-session", GraphicProtocol.WAYLAND),
+
     NONE("None", "")
 }
