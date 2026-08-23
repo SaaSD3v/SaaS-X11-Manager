@@ -24,7 +24,7 @@ internal object WaylandGraphicSessionSupport {
             session = GraphicSession.SWAY,
             executable = "sway",
             desktopName = "sway",
-            body = wlrootsBody("sway")
+            body = swayBody()
         ),
         GraphicSession.CAGE to compositorSpec(
             session = GraphicSession.CAGE,
@@ -142,6 +142,43 @@ fi
 echo "Weston accelerated renderer did not become ready; retrying with Pixman" >&2
 exec weston --backend=x11 --socket="${'$'}SOCKET" --fullscreen ${'$'}XWAYLAND_ARG --renderer=pixman
 """.trim()
+
+    /**
+     * Sway intentionally searches i3 configuration paths when no Sway config is
+     * present. Newer i3 releases can contain directives that older/current Sway
+     * parsers do not understand (for example i3's multi-argument tiling_drag).
+     * Select and validate a Sway-specific config explicitly so installing i3 in
+     * the same container cannot silently break the managed Wayland session.
+     */
+    private fun swayBody(): String {
+        val swayCommand = "sway -c \"${'$'}SWAY_CONFIG\""
+        return """
+SWAY_CONFIG=""
+for candidate in \
+    "${'$'}HOME/.sway/config" \
+    "${'$'}{XDG_CONFIG_HOME:-${'$'}HOME/.config}/sway/config" \
+    /etc/sway/config; do
+    if [ -r "${'$'}candidate" ]; then
+        SWAY_CONFIG="${'$'}candidate"
+        break
+    fi
+done
+
+if [ -z "${'$'}SWAY_CONFIG" ]; then
+    echo "No Sway-specific configuration was found; refusing fallback to an i3 config" >&2
+    exit 1
+fi
+export SWAY_CONFIG
+
+echo "Using Sway config: ${'$'}SWAY_CONFIG" >&2
+if ! sway -C -c "${'$'}SWAY_CONFIG"; then
+    echo "Sway configuration validation failed: ${'$'}SWAY_CONFIG" >&2
+    exit 1
+fi
+
+${wlrootsBody(swayCommand)}
+""".trim()
+    }
 
     /**
      * wlroots compositors can select the X11 backend through environment
