@@ -75,7 +75,7 @@ class WaylandGraphicSessionTest {
     fun waylandSessionLauncherKeepsDynamicX11TransportAndWaylandIdentity() {
         val script = GraphicSessionInitFiles.sessionScript(GraphicSession.WESTON, "/bin/sh")
 
-        assertTrue(script.contains("export DISPLAY=:$X11_DISPLAY_NUMBER".replace("$X11_DISPLAY_NUMBER", "\\$X11_DISPLAY_NUMBER")))
+        assertTrue(script.contains("export DISPLAY=:\$X11_DISPLAY_NUMBER"))
         assertTrue(script.contains("export XDG_SESSION_TYPE=wayland"))
         assertTrue(script.contains("export SAAS_WAYLAND_SOCKET=wayland-0"))
         assertTrue(script.contains("unset WAYLAND_DISPLAY"))
