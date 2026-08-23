@@ -114,18 +114,14 @@ fun EditContainerScreen(
     DisposableEffect(activeAptRecommendationOverrideSession) {
         val session = activeAptRecommendationOverrideSession
         onDispose {
-            if (session != null) {
-                AptInstallRecommendationOverride.clear(session)
-            }
+            if (session != null) AptInstallRecommendationOverride.clear(session)
         }
     }
 
     DisposableEffect(activeAlpineProfileOverrideSession) {
         val session = activeAlpineProfileOverrideSession
         onDispose {
-            if (session != null) {
-                AlpineInstallProfileOverride.clear(session)
-            }
+            if (session != null) AlpineInstallProfileOverride.clear(session)
         }
     }
 
@@ -163,13 +159,13 @@ fun EditContainerScreen(
                 },
                 onClear = { viewModel.clearInstallLogs() },
                 isBlocking = isInstalling,
-                primaryActionLabel = if (viewModel.canStartX11FromInstall) {
+                primaryActionLabel = if (viewModel.canStartGraphicSessionFromInstall) {
                     "Start ${graphicSession.protocol.label}"
                 } else {
                     null
                 },
-                onPrimaryAction = if (viewModel.canStartX11FromInstall) {
-                    { viewModel.quickStartX11() }
+                onPrimaryAction = if (viewModel.canStartGraphicSessionFromInstall) {
+                    { viewModel.quickStartGraphicSession() }
                 } else {
                     null
                 },
@@ -182,11 +178,7 @@ fun EditContainerScreen(
                 onDismissRequest = onDismiss,
                 title = { Text("Configuration stopped") },
                 text = { Text(viewModel.wizardError ?: "Configuration could not continue.") },
-                confirmButton = {
-                    Button(onClick = onDismiss) {
-                        Text("OK")
-                    }
-                }
+                confirmButton = { Button(onClick = onDismiss) { Text("OK") } }
             )
         }
 
@@ -217,14 +209,12 @@ fun EditContainerScreen(
                             Text("Continue to Edit Container?")
                         } else {
                             Text(
-                                "You are about to replace the current graphic session or change its init setup. " +
-                                    "To apply the change safely, the container will be stopped before you continue."
+                                "The distribution has been detected. To safely change the init backend, protocol " +
+                                    "or graphic session, the container will be stopped before continuing."
                             )
                             Text(
-                                "Next you will choose an init backend, choose X11 or Wayland, choose the Stable or " +
-                                    "Experimental catalog, and then choose a session available for the detected " +
-                                    "package manager. Installed sessions can be selected without downloading packages " +
-                                    "again, or reinstalled."
+                                "Next you will choose the init backend, X11 or Wayland, Stable or Experimental, " +
+                                    "and then a session compatible with the detected distro and architecture."
                             )
                         }
                     }
@@ -254,10 +244,7 @@ fun EditContainerScreen(
                         enabled = !viewModel.isPreparingWizard
                     ) {
                         if (!isEntryWarning && viewModel.isPreparingWizard) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp
-                            )
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                             Spacer(Modifier.width(8.dp))
                         }
                         Text(if (isEntryWarning) "Edit anyway" else "Advance")
@@ -281,44 +268,24 @@ fun EditContainerScreen(
                             "Recommended lets APT include packages marked as recommended by the selected packages. " +
                                 "This can install a larger desktop stack."
                         )
-                        Text(
-                            "No recommends installs the explicit session plan and required dependencies only."
-                        )
+                        Text("No recommends installs the explicit session plan and required dependencies only.")
                         Text("This choice applies only to this installation or reinstall.")
                     }
                 },
                 dismissButton = {
-                    TextButton(
-                        onClick = {
-                            aptRecommendationSession = null
-                            viewModel.returnToWizardSessionSelection()
-                        }
-                    ) {
-                        Text("Back")
-                    }
+                    TextButton(onClick = {
+                        aptRecommendationSession = null
+                        viewModel.returnToWizardSessionSelection()
+                    }) { Text("Back") }
                 },
                 confirmButton = {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = {
-                                startAptInstall(
-                                    session = session,
-                                    installRecommendedPackages = false
-                                )
-                            }
-                        ) {
-                            Text("No recommends")
-                        }
-                        Button(
-                            onClick = {
-                                startAptInstall(
-                                    session = session,
-                                    installRecommendedPackages = true
-                                )
-                            }
-                        ) {
-                            Text("Recommended")
-                        }
+                        OutlinedButton(onClick = {
+                            startAptInstall(session, installRecommendedPackages = false)
+                        }) { Text("No recommends") }
+                        Button(onClick = {
+                            startAptInstall(session, installRecommendedPackages = true)
+                        }) { Text("Recommended") }
                     }
                 }
             )
@@ -335,9 +302,7 @@ fun EditContainerScreen(
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("Choose how apk should install ${session.label}.")
-                        Text(
-                            "Minimal keeps the current session package plan exactly as defined."
-                        )
+                        Text("Minimal keeps the current session package plan exactly as defined.")
                         Text(
                             "Full installs the same session plan plus common desktop integration: " +
                                 "D-Bus support, XDG utilities, fonts and icon themes."
@@ -346,37 +311,19 @@ fun EditContainerScreen(
                     }
                 },
                 dismissButton = {
-                    TextButton(
-                        onClick = {
-                            alpineProfileSession = null
-                            viewModel.returnToWizardSessionSelection()
-                        }
-                    ) {
-                        Text("Back")
-                    }
+                    TextButton(onClick = {
+                        alpineProfileSession = null
+                        viewModel.returnToWizardSessionSelection()
+                    }) { Text("Back") }
                 },
                 confirmButton = {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = {
-                                startAlpineInstall(
-                                    session = session,
-                                    profile = AlpineInstallProfile.MINIMAL
-                                )
-                            }
-                        ) {
-                            Text("Minimal")
-                        }
-                        Button(
-                            onClick = {
-                                startAlpineInstall(
-                                    session = session,
-                                    profile = AlpineInstallProfile.FULL
-                                )
-                            }
-                        ) {
-                            Text("Full")
-                        }
+                        OutlinedButton(onClick = {
+                            startAlpineInstall(session, AlpineInstallProfile.MINIMAL)
+                        }) { Text("Minimal") }
+                        Button(onClick = {
+                            startAlpineInstall(session, AlpineInstallProfile.FULL)
+                        }) { Text("Full") }
                     }
                 }
             )
@@ -395,43 +342,31 @@ fun EditContainerScreen(
                     Text(
                         "${session.label} is already installed for ${session.protocol.label}. Select changes only " +
                             "the default graphic session and ${selectedInit.name.lowercase()} startup configuration, " +
-                            "without running apk/apt or downloading packages. Reinstall runs the full installer again."
+                            "without running apk/apt again. Reinstall runs the full installer."
                     )
                 },
                 dismissButton = {
-                    TextButton(
-                        onClick = {
-                            installedActionSession = null
-                            viewModel.returnToWizardSessionSelection()
-                        }
-                    ) {
-                        Text("Back")
-                    }
+                    TextButton(onClick = {
+                        installedActionSession = null
+                        viewModel.returnToWizardSessionSelection()
+                    }) { Text("Back") }
                 },
                 confirmButton = {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = {
-                                installedActionSession = null
-                                requestSessionInstall(session)
+                        OutlinedButton(onClick = {
+                            installedActionSession = null
+                            requestSessionInstall(session)
+                        }) { Text("Reinstall") }
+                        Button(onClick = {
+                            installedActionSession = null
+                            viewModel.selectInitSystem(selectedInit)
+                            if (viewModel.graphicSession != session) {
+                                viewModel.toggleSessionSelection(session)
                             }
-                        ) {
-                            Text("Reinstall")
-                        }
-                        Button(
-                            onClick = {
-                                installedActionSession = null
-                                viewModel.selectInitSystem(selectedInit)
-                                if (viewModel.graphicSession != session) {
-                                    viewModel.toggleSessionSelection(session)
-                                }
-                                viewModel.dismissConfigurationWizard()
-                                selectingInstalledSession = session
-                                viewModel.save()
-                            }
-                        ) {
-                            Text("Select")
-                        }
+                            viewModel.dismissConfigurationWizard()
+                            selectingInstalledSession = session
+                            viewModel.save()
+                        }) { Text("Select") }
                     }
                 }
             )
@@ -443,9 +378,7 @@ fun EditContainerScreen(
             val selectionFailed = !isSaving && saveError != null && !selectionSucceeded
             AlertDialog(
                 onDismissRequest = {
-                    if (!isSaving && !quickStartingSelectedSession) {
-                        selectingInstalledSession = null
-                    }
+                    if (!isSaving && !quickStartingSelectedSession) selectingInstalledSession = null
                 },
                 title = { Text("Selecting ${session.label}") },
                 text = {
@@ -454,7 +387,7 @@ fun EditContainerScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                             Text("Applying the existing installation without downloading packages...")
                         }
 
@@ -471,9 +404,7 @@ fun EditContainerScreen(
                         TextButton(
                             onClick = { selectingInstalledSession = null },
                             enabled = !quickStartingSelectedSession
-                        ) {
-                            Text("Done")
-                        }
+                        ) { Text("Done") }
                     }
                 } else {
                     {}
@@ -485,6 +416,8 @@ fun EditContainerScreen(
                                 quickStartingSelectedSession = true
                                 scope.launch {
                                     try {
+                                        // The outer integrated X11 server is also the host
+                                        // transport used by nested Wayland sessions.
                                         X11SessionManager.startX11Session(containerName = containerName)
                                         onDismiss()
                                     } finally {
@@ -495,7 +428,7 @@ fun EditContainerScreen(
                             enabled = !quickStartingSelectedSession
                         ) {
                             if (quickStartingSelectedSession) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                                 Spacer(Modifier.width(8.dp))
                             }
                             Text("Start ${session.protocol.label}")
@@ -509,6 +442,29 @@ fun EditContainerScreen(
             )
         }
 
+        viewModel.wizardStage == ConfigurationWizardStage.DISTRIBUTION_SELECTION -> {
+            val capabilities = viewModel.containerCapabilities
+            val packageLabel = when (capabilities?.platform) {
+                ContainerPlatform.ALPINE -> "apk"
+                ContainerPlatform.UBUNTU -> "apt/dpkg"
+                null -> "unknown package manager"
+            }
+            WizardChoiceDialog(
+                title = "Detected distribution",
+                subtitle = "Detected from the running container. Confirm to continue with its package and session catalog.",
+                onDismiss = { viewModel.dismissConfigurationWizard() }
+            ) {
+                WizardChoice(
+                    title = capabilities?.distributionDisplayName ?: "Unknown distribution",
+                    subtitle = "${capabilities?.distribution?.label ?: "Unknown"} · " +
+                        "${capabilities?.architectureDisplayName ?: "unknown arch"} · $packageLabel",
+                    selected = true,
+                    installed = false,
+                    onClick = { viewModel.confirmDetectedDistribution() }
+                )
+            }
+        }
+
         viewModel.wizardStage == ConfigurationWizardStage.INIT_SELECTION -> {
             val capabilities = viewModel.containerCapabilities
             val packageLabel = when (capabilities?.platform) {
@@ -520,8 +476,11 @@ fun EditContainerScreen(
             val pendingInit = viewModel.pendingWizardInitSystem ?: initSystem
             WizardChoiceDialog(
                 title = "Choose init system",
-                subtitle = "$packageLabel package platform detected. Only init backends found in this container are shown.",
-                onDismiss = { viewModel.dismissConfigurationWizard() }
+                subtitle = "${capabilities?.distributionDisplayName ?: "Container"} · $packageLabel · " +
+                    "${capabilities?.architectureDisplayName ?: "unknown arch"}. Only detected init backends are shown.",
+                onDismiss = { viewModel.dismissConfigurationWizard() },
+                secondaryActionLabel = "Back",
+                onSecondaryAction = { viewModel.backToWizardDistributionSelection() }
             ) {
                 initSystems.forEachIndexed { index, system ->
                     if (index > 0) Spacer(Modifier.height(10.dp))
@@ -538,14 +497,12 @@ fun EditContainerScreen(
 
         viewModel.wizardStage == ConfigurationWizardStage.PROTOCOL_SELECTION -> {
             val selectedInit = viewModel.pendingWizardInitSystem ?: initSystem
-            val platformLabel = when (viewModel.containerCapabilities?.platform) {
-                ContainerPlatform.ALPINE -> "Alpine/apk"
-                ContainerPlatform.UBUNTU -> "Debian-family apt/dpkg"
-                null -> "package platform unavailable"
-            }
+            val capabilities = viewModel.containerCapabilities
             WizardChoiceDialog(
                 title = "Choose graphic protocol",
-                subtitle = "${if (selectedInit == InitSystem.OPENRC) "OpenRC" else "systemd"} selected · $platformLabel",
+                subtitle = "${if (selectedInit == InitSystem.OPENRC) "OpenRC" else "systemd"} · " +
+                    "${capabilities?.distributionDisplayName ?: "container"} · " +
+                    "${capabilities?.architectureDisplayName ?: "unknown arch"}",
                 onDismiss = { viewModel.dismissConfigurationWizard() },
                 secondaryActionLabel = "Back",
                 onSecondaryAction = { viewModel.backToWizardInitSelection() }
@@ -560,7 +517,7 @@ fun EditContainerScreen(
                 Spacer(Modifier.height(10.dp))
                 WizardChoice(
                     title = "Wayland",
-                    subtitle = "Wayland compositors and sessions hosted through the Manager graphical runtime.",
+                    subtitle = "Native Wayland compositors using the integrated X11 display only as the outer Android transport.",
                     selected = viewModel.pendingWizardProtocol == GraphicProtocol.WAYLAND,
                     installed = false,
                     onClick = { viewModel.selectWizardProtocol(GraphicProtocol.WAYLAND) }
@@ -570,72 +527,82 @@ fun EditContainerScreen(
 
         viewModel.wizardStage == ConfigurationWizardStage.CATALOG_SELECTION -> {
             val selectedInit = viewModel.pendingWizardInitSystem ?: initSystem
-            val platformLabel = when (viewModel.containerCapabilities?.platform) {
-                ContainerPlatform.ALPINE -> "Alpine/apk"
-                ContainerPlatform.UBUNTU -> "Debian-family apt/dpkg"
-                null -> "package platform unavailable"
-            }
+            val capabilities = viewModel.containerCapabilities
             WizardChoiceDialog(
                 title = "Choose session catalog",
-                subtitle = "${if (selectedInit == InitSystem.OPENRC) "OpenRC" else "systemd"} selected · ${viewModel.pendingWizardProtocol.label} · $platformLabel",
+                subtitle = "${if (selectedInit == InitSystem.OPENRC) "OpenRC" else "systemd"} · " +
+                    "${viewModel.pendingWizardProtocol.label} · ${capabilities?.distributionDisplayName ?: "container"}",
                 onDismiss = { viewModel.dismissConfigurationWizard() },
                 secondaryActionLabel = "Back",
                 onSecondaryAction = { viewModel.backToWizardProtocolSelection() }
             ) {
                 WizardChoice(
                     title = "Stable",
-                    subtitle = "Only sessions using the normal supported repository path.",
+                    subtitle = "Sessions using normal supported repositories for the detected distro.",
                     selected = viewModel.pendingWizardCatalogMode == GraphicSessionCatalogMode.STABLE,
                     installed = false,
-                    onClick = {
-                        viewModel.selectWizardCatalogMode(GraphicSessionCatalogMode.STABLE)
-                    }
+                    onClick = { viewModel.selectWizardCatalogMode(GraphicSessionCatalogMode.STABLE) }
                 )
                 Spacer(Modifier.height(10.dp))
                 WizardChoice(
                     title = "Experimental",
-                    subtitle = "Stable sessions plus options that may require testing or other experimental repositories.",
+                    subtitle = "Stable sessions plus options that may require testing or experimental repositories.",
                     selected = viewModel.pendingWizardCatalogMode == GraphicSessionCatalogMode.EXPERIMENTAL,
                     installed = false,
-                    onClick = {
-                        viewModel.selectWizardCatalogMode(GraphicSessionCatalogMode.EXPERIMENTAL)
-                    }
+                    onClick = { viewModel.selectWizardCatalogMode(GraphicSessionCatalogMode.EXPERIMENTAL) }
                 )
             }
         }
 
         viewModel.wizardStage == ConfigurationWizardStage.SESSION_SELECTION -> {
             val selectedInit = viewModel.pendingWizardInitSystem ?: initSystem
-            val packageLabel = when (viewModel.containerCapabilities?.platform) {
-                ContainerPlatform.ALPINE -> "Alpine/apk catalog"
-                ContainerPlatform.UBUNTU -> "Debian-family apt/dpkg catalog"
-                null -> "package catalog unavailable"
-            }
+            val capabilities = viewModel.containerCapabilities
             val catalogLabel = when (viewModel.pendingWizardCatalogMode) {
                 GraphicSessionCatalogMode.STABLE -> "Stable"
                 GraphicSessionCatalogMode.EXPERIMENTAL -> "Experimental"
             }
             WizardChoiceDialog(
                 title = "Choose graphic session",
-                subtitle = "${if (selectedInit == InitSystem.OPENRC) "OpenRC" else "systemd"} selected · ${viewModel.pendingWizardProtocol.label} · $catalogLabel · $packageLabel",
+                subtitle = "${if (selectedInit == InitSystem.OPENRC) "OpenRC" else "systemd"} · " +
+                    "${viewModel.pendingWizardProtocol.label} · $catalogLabel · " +
+                    "${capabilities?.distributionDisplayName ?: "container"} · " +
+                    "${capabilities?.architectureDisplayName ?: "unknown arch"}",
                 onDismiss = { viewModel.dismissConfigurationWizard() },
                 secondaryActionLabel = "Back",
                 onSecondaryAction = { viewModel.backToWizardCatalogSelection() }
             ) {
                 val sessions = viewModel.wizardSessions()
+                if (sessions.isEmpty()) {
+                    Text(
+                        "No ${viewModel.pendingWizardProtocol.label} sessions are enabled for this distro, " +
+                            "architecture and catalog.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 sessions.forEachIndexed { index, session ->
                     if (index > 0) Spacer(Modifier.height(10.dp))
                     val installed = viewModel.isSessionInstalled(session)
                     val experimental = viewModel.isWizardSessionExperimental(session)
+                    val transport = if (session.protocol == GraphicProtocol.WAYLAND) {
+                        " · nested on integrated X11 transport"
+                    } else {
+                        ""
+                    }
                     WizardChoice(
                         title = session.label,
                         subtitle = when {
-                            installed && graphicSession == session && experimental -> "Installed · Current default · Experimental"
-                            installed && graphicSession == session -> "Installed · Current default"
-                            installed && experimental -> "Installed · Experimental · tap for Select or Reinstall"
-                            installed -> "Installed · tap for Select or Reinstall"
-                            experimental -> "Experimental · tap to install and apply"
-                            else -> "Tap to install and apply"
+                            installed && graphicSession == session && experimental ->
+                                "Installed · Current default · Experimental$transport"
+                            installed && graphicSession == session ->
+                                "Installed · Current default$transport"
+                            installed && experimental ->
+                                "Installed · Experimental · tap for Select or Reinstall$transport"
+                            installed ->
+                                "Installed · tap for Select or Reinstall$transport"
+                            experimental ->
+                                "Experimental · tap to install and apply$transport"
+                            else -> "Tap to install and apply$transport"
                         },
                         selected = graphicSession == session,
                         installed = installed,
@@ -701,13 +668,17 @@ fun EditContainerScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            "Use the guided flow to change the init system, graphical protocol or graphic session. " +
+                            "Detect the container first, then choose init system, graphical protocol, catalog and session. " +
                                 "Installed sessions can be selected again without reinstalling packages.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp
                         )
                         HorizontalDivider()
                         SummaryRow("Status", statusLabel(status))
+                        viewModel.containerCapabilities?.let {
+                            SummaryRow("Distribution", it.distributionDisplayName)
+                            SummaryRow("Architecture", it.architectureDisplayName)
+                        }
                         SummaryRow("Init system", initSystem.name.lowercase())
                         SummaryRow("Protocol", graphicSession.protocol.label)
                         SummaryRow("Graphic session", graphicSession.label)
@@ -722,10 +693,7 @@ fun EditContainerScreen(
                             enabled = !isInstalling && !viewModel.isPreparingWizard && !isSaving
                         ) {
                             if (viewModel.isPreparingWizard) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp
-                                )
+                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                                 Spacer(Modifier.width(8.dp))
                                 Text("Detecting container...")
                             } else {
@@ -763,9 +731,7 @@ private fun WizardChoiceDialog(
                 MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
             )
         ) {
-            Column(
-                modifier = Modifier.padding(20.dp)
-            ) {
+            Column(modifier = Modifier.padding(20.dp)) {
                 Text(
                     title,
                     style = MaterialTheme.typography.titleLarge,
@@ -791,14 +757,10 @@ private fun WizardChoiceDialog(
                     horizontalArrangement = Arrangement.End
                 ) {
                     if (secondaryActionLabel != null && onSecondaryAction != null) {
-                        TextButton(onClick = onSecondaryAction) {
-                            Text(secondaryActionLabel)
-                        }
+                        TextButton(onClick = onSecondaryAction) { Text(secondaryActionLabel) }
                         Spacer(Modifier.width(8.dp))
                     }
-                    TextButton(onClick = onDismiss) {
-                        Text("Cancel")
-                    }
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
                 }
             }
         }
@@ -825,21 +787,15 @@ private fun WizardChoice(
         },
         border = BorderStroke(
             1.dp,
-            if (selected) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-            }
+            if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
         )
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            RadioButton(
-                selected = selected,
-                onClick = onClick
-            )
+            RadioButton(selected = selected, onClick = onClick)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -873,16 +829,8 @@ private fun SummaryRow(label: String, value: String) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            label,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 12.sp
-        )
-        Text(
-            value,
-            fontWeight = FontWeight.Medium,
-            fontSize = 12.sp
-        )
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+        Text(value, fontWeight = FontWeight.Medium, fontSize = 12.sp)
     }
 }
 
