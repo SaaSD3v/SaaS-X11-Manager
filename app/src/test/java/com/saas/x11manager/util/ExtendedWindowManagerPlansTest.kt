@@ -34,7 +34,8 @@ class ExtendedWindowManagerPlansTest {
             listOf("amiwm", "xterm"),
             RepositoryRequirement.APT_MULTIVERSE
         )
-        assertAptOnly(GraphicSession.DWM, listOf("dwm", "xterm"))
+        assertPlan(ContainerPlatform.UBUNTU, GraphicSession.DWM, listOf("dwm", "xterm"))
+        assertPlan(ContainerPlatform.ALPINE, GraphicSession.DWM, listOf("dwm", "xterm"))
         assertAptOnly(GraphicSession.FLWM, listOf("flwm", "xterm"))
         assertAptOnly(GraphicSession.LWM, listOf("lwm", "xterm"))
         assertAptOnly(GraphicSession.MIWM, listOf("miwm", "xterm"))

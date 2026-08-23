@@ -145,6 +145,7 @@ object GraphicSessionInstallPlans {
             RepositoryRequirement.APT_MULTIVERSE
         ),
         apt(GraphicSession.DWM, listOf("dwm", "xterm")),
+        apk(GraphicSession.DWM, listOf("dwm", "xterm")),
         apt(GraphicSession.FLWM, listOf("flwm", "xterm")),
         apt(GraphicSession.LWM, listOf("lwm", "xterm")),
         apt(GraphicSession.MIWM, listOf("miwm", "xterm")),
