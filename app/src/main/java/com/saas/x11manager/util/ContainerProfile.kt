@@ -103,6 +103,11 @@ enum class GraphicSession(
     SWAY("Sway", "saas-sway-wayland-session", GraphicProtocol.WAYLAND),
     CAGE("Cage (Kiosk)", "saas-cage-wayland-session", GraphicProtocol.WAYLAND),
     WAYFIRE("Wayfire", "saas-wayfire-wayland-session", GraphicProtocol.WAYLAND),
+    WLMAKER("WLMaker", "saas-wlmaker-wayland-session", GraphicProtocol.WAYLAND),
+    RIVER("River", "saas-river-wayland-session", GraphicProtocol.WAYLAND),
+    PHOC("Phoc", "saas-phoc-wayland-session", GraphicProtocol.WAYLAND),
+    MUTTER_WAYLAND("Mutter Nested", "saas-mutter-wayland-session", GraphicProtocol.WAYLAND),
+    QTILE_WAYLAND("Qtile Wayland", "saas-qtile-wayland-session", GraphicProtocol.WAYLAND),
 
     NONE("None", "")
 }
