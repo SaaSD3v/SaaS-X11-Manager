@@ -61,5 +61,6 @@ object GraphicSessionWizard {
             RepositoryRequirement.APT_UNIVERSE,
             RepositoryRequirement.APT_MULTIVERSE,
             RepositoryRequirement.APK_COMMUNITY -> true
+            RepositoryRequirement.APK_EDGE_TESTING -> false
         }
 }

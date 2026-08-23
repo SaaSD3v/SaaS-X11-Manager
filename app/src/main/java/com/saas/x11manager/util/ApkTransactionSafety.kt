@@ -18,7 +18,7 @@ internal object ApkTransactionSafety {
     fun stepFor(plan: GraphicSessionInstallPlan): GraphicSessionInstallStep? {
         if (plan.platform != ContainerPlatform.ALPINE || plan.packages.isEmpty()) return null
 
-        val packageList = plan.packages.joinToString(" ")
+        val packageList = plan.installPackageArguments().joinToString(" ")
         val command =
             "simulation=\$(mktemp) || exit 1; " +
                 "cleanup() { rm -f \"\$simulation\"; }; " +

@@ -8,8 +8,11 @@ package com.saas.x11manager.util
 enum class RepositoryRequirement {
     APT_UNIVERSE,
     APT_MULTIVERSE,
-    APK_COMMUNITY
+    APK_COMMUNITY,
+    APK_EDGE_TESTING
 }
+
+internal const val APK_EDGE_TESTING_TAG = "saas_testing"
 
 data class GraphicSessionInstallPlan(
     val platform: ContainerPlatform,
@@ -17,8 +20,22 @@ data class GraphicSessionInstallPlan(
     val repositoryRequirement: RepositoryRequirement,
     val packages: List<String>,
     val verificationCommand: String,
-    val installRecommendedPackages: Boolean
+    val installRecommendedPackages: Boolean,
+    val repositoryPackages: Set<String> = emptySet()
 )
+
+internal fun GraphicSessionInstallPlan.installPackageArguments(): List<String> =
+    packages.map { packageName ->
+        if (
+            platform == ContainerPlatform.ALPINE &&
+            repositoryRequirement == RepositoryRequirement.APK_EDGE_TESTING &&
+            packageName in repositoryPackages
+        ) {
+            "$packageName@$APK_EDGE_TESTING_TAG"
+        } else {
+            packageName
+        }
+    }
 
 /**
  * Package plans intentionally avoid display managers because Termux:X11 is the
@@ -42,14 +59,20 @@ object GraphicSessionInstallPlans {
 
     private fun apk(
         session: GraphicSession,
-        packages: List<String>
+        packages: List<String>,
+        repositoryRequirement: RepositoryRequirement = RepositoryRequirement.APK_COMMUNITY
     ) = GraphicSessionInstallPlan(
         platform = ContainerPlatform.ALPINE,
         session = session,
-        repositoryRequirement = RepositoryRequirement.APK_COMMUNITY,
+        repositoryRequirement = repositoryRequirement,
         packages = packages,
         verificationCommand = session.startCommand,
-        installRecommendedPackages = true
+        installRecommendedPackages = true,
+        repositoryPackages = if (repositoryRequirement == RepositoryRequirement.APK_EDGE_TESTING) {
+            packages.toSet()
+        } else {
+            emptySet()
+        }
     )
 
     private val plans = listOf(

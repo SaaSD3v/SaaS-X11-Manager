@@ -18,11 +18,12 @@ object AdditionalGraphicSessionInstaller {
                 alpineRepositoryPreparationStep(plan)?.let(::add)
                 add(GraphicSessionInstallStep("Refreshing package index", "apk update"))
                 ApkTransactionSafety.stepFor(plan)?.let(::add)
-                if (plan.packages.isNotEmpty()) {
+                val packageArguments = plan.installPackageArguments()
+                if (packageArguments.isNotEmpty()) {
                     add(
                         GraphicSessionInstallStep(
                             "Installing ${plan.session.label} packages",
-                            "apk add ${plan.packages.joinToString(" ")}"
+                            "apk add ${packageArguments.joinToString(" ")}"
                         )
                     )
                 }
@@ -280,26 +281,50 @@ object AdditionalGraphicSessionInstaller {
 
     private fun alpineRepositoryPreparationStep(
         plan: GraphicSessionInstallPlan
-    ): GraphicSessionInstallStep? {
-        if (plan.repositoryRequirement != RepositoryRequirement.APK_COMMUNITY) return null
+    ): GraphicSessionInstallStep? = when (plan.repositoryRequirement) {
+        RepositoryRequirement.APK_COMMUNITY -> {
+            val command =
+                "if grep -Eq '^[[:space:]]*[^#[:space:]].*/community([[:space:]]|$)' " +
+                    "/etc/apk/repositories 2>/dev/null; then :; " +
+                    "elif command -v setup-apkrepos >/dev/null 2>&1; then " +
+                    "setup-apkrepos -c; " +
+                    "elif grep -Eq '^[[:space:]]*#[[:space:]]*[^#[:space:]].*/community([[:space:]]|$)' " +
+                    "/etc/apk/repositories 2>/dev/null; then " +
+                    "sed -i -E 's|^[[:space:]]*#[[:space:]]*([^[:space:]]*/community)[[:space:]]*$|\\1|' " +
+                    "/etc/apk/repositories; " +
+                    "else main_repo=\$(awk '/^[[:space:]]*#/ {next} /\\/main([[:space:]]*)$/ {print; exit}' " +
+                    "/etc/apk/repositories 2>/dev/null); " +
+                    "if [ -z \"\$main_repo\" ]; then " +
+                    "echo 'Could not derive Alpine community repository from the configured main repository.' >&2; " +
+                    "exit 1; fi; " +
+                    "printf '%s\\n' \"\${main_repo%/main}/community\" >> /etc/apk/repositories; fi"
 
-        val command =
-            "if grep -Eq '^[[:space:]]*[^#[:space:]].*/community([[:space:]]|$)' " +
-                "/etc/apk/repositories 2>/dev/null; then :; " +
-                "elif command -v setup-apkrepos >/dev/null 2>&1; then " +
-                "setup-apkrepos -c; " +
-                "elif grep -Eq '^[[:space:]]*#[[:space:]]*[^#[:space:]].*/community([[:space:]]|$)' " +
-                "/etc/apk/repositories 2>/dev/null; then " +
-                "sed -i -E 's|^[[:space:]]*#[[:space:]]*([^[:space:]]*/community)[[:space:]]*$|\\1|' " +
-                "/etc/apk/repositories; " +
-                "else main_repo=\$(awk '/^[[:space:]]*#/ {next} /\\/main([[:space:]]*)$/ {print; exit}' " +
-                "/etc/apk/repositories 2>/dev/null); " +
-                "if [ -z \"\$main_repo\" ]; then " +
-                "echo 'Could not derive Alpine community repository from the configured main repository.' >&2; " +
-                "exit 1; fi; " +
-                "printf '%s\\n' \"\${main_repo%/main}/community\" >> /etc/apk/repositories; fi"
+            GraphicSessionInstallStep("Preparing Alpine community repository", command)
+        }
 
-        return GraphicSessionInstallStep("Preparing Alpine community repository", command)
+        RepositoryRequirement.APK_EDGE_TESTING -> {
+            val command =
+                "repo_file=/etc/apk/repositories; " +
+                    "if grep -Eq '^[[:space:]]*@$APK_EDGE_TESTING_TAG[[:space:]]+[^#[:space:]]+/edge/testing/?[[:space:]]*$' " +
+                    "\"\$repo_file\" 2>/dev/null; then :; else " +
+                    "remote_repo=\$(grep -E '^[[:space:]]*(@[^[:space:]]+[[:space:]]+)?https?://[^[:space:]]+/(main|community)/?[[:space:]]*$' " +
+                    "\"\$repo_file\" 2>/dev/null | head -n 1 | " +
+                    "sed -E 's/^[[:space:]]*(@[^[:space:]]+[[:space:]]+)?//'); " +
+                    "if [ -z \"\$remote_repo\" ]; then " +
+                    "echo 'Could not derive Alpine edge/testing mirror from the configured main/community repository.' >&2; " +
+                    "exit 1; fi; " +
+                    "base_repo=\$(printf '%s\\n' \"\$remote_repo\" | " +
+                    "sed -E 's#/[^/]+/(main|community)/?$##'); " +
+                    "if [ -z \"\$base_repo\" ]; then " +
+                    "echo 'Could not derive Alpine repository base for edge/testing.' >&2; exit 1; fi; " +
+                    "testing_repo=\"\${base_repo%/}/edge/testing\"; " +
+                    "printf '%s\\n' '@$APK_EDGE_TESTING_TAG '\"\$testing_repo\" >> \"\$repo_file\"; fi"
+
+            GraphicSessionInstallStep("Preparing Alpine edge/testing repository", command)
+        }
+
+        RepositoryRequirement.APT_UNIVERSE,
+        RepositoryRequirement.APT_MULTIVERSE -> null
     }
 
     private fun aptRepositoryPreparationStep(
@@ -309,7 +334,8 @@ object AdditionalGraphicSessionInstaller {
         val component = when (plan.repositoryRequirement) {
             RepositoryRequirement.APT_UNIVERSE -> "universe"
             RepositoryRequirement.APT_MULTIVERSE -> "multiverse"
-            RepositoryRequirement.APK_COMMUNITY -> return null
+            RepositoryRequirement.APK_COMMUNITY,
+            RepositoryRequirement.APK_EDGE_TESTING -> return null
         }
         val fallbackDescription = when (plan.repositoryRequirement) {
             RepositoryRequirement.APT_MULTIVERSE -> "Multiverse/non-free"
