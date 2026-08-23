@@ -36,7 +36,7 @@ object WaylandGraphicSessionInstaller {
                 platform,
                 logger
             ) ?: return@withContext false
-            val plan = GraphicSessionInstallPlans.forSelection(resolvedPlatform, session)
+            val plan = GraphicSessionPlanResolver.forSelection(resolvedPlatform, session)
                 ?: return@withContext fail(logger, "${session.label} has no install plan for ${resolvedPlatform.label}")
 
             if (!runStep(containerName, architectureStep(), logger)) return@withContext false
@@ -126,7 +126,7 @@ object WaylandGraphicSessionInstaller {
                 platform,
                 logger
             ) ?: return@withContext false
-            val plan = GraphicSessionInstallPlans.forSelection(resolvedPlatform, session)
+            val plan = GraphicSessionPlanResolver.forSelection(resolvedPlatform, session)
                 ?: return@withContext false
 
             val checks = buildList {
