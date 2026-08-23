@@ -60,7 +60,7 @@ jobs:
           python3 ci/export-graphic-session-plans.py \
             --output "${RUNNER_TEMP}/graphic-session-plans.tsv"
           test -s "${RUNNER_TEMP}/graphic-session-plans.tsv"
-          awk -F '\t' 'NF != 3 { exit 1 } END { if (NR < 1) exit 1 }' \
+          awk -F '\t' 'NF != 5 { exit 1 } END { if (NR < 1) exit 1 }' \
             "${RUNNER_TEMP}/graphic-session-plans.tsv"
 
       - name: Validate compatibility probe syntax
