@@ -84,8 +84,10 @@ jobs:
                 tigervnc \
                 fastfetch \
                 kitty \
+                kitty-x11 \
                 mpv \
                 audacious \
+                audacious-plugins \
                 thunar \
                 qt5-qtbase-x11 \
                 qt5-qtx11extras
@@ -226,6 +228,7 @@ EOF
                 kitty \
                 mpv \
                 audacious \
+                audacious-plugins \
                 thunar \
                 libqt5core5t64 \
                 libqt5gui5t64 \
