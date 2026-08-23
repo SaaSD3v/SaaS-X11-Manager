@@ -8,10 +8,8 @@ import kotlinx.coroutines.withContext
  * Controls only the graphical session process inside an already-running
  * DroidSpaces container. It never starts or stops the container itself.
  *
- * Runtime service discovery is capability-driven: whichever Manager-provisioned
- * x11-session backend actually exists (systemd or OpenRC) is used. This keeps a
- * monitor restart independent from distro names, graphical session names, fixed
- * platform versions, and X11 display numbers.
+ * The service names remain backward-compatible with the original X11 manager,
+ * while protocol health checks are selected from the configured session.
  */
 internal object GraphicSessionRuntimeController {
 
@@ -19,26 +17,23 @@ internal object GraphicSessionRuntimeController {
     private const val ACTION_MARKER = "__SAAS_X11_ACTION__="
     private const val DIAG_MARKER = "__SAAS_X11_DIAG__="
 
-    internal fun buildStartCommand(displaySlot: X11DisplaySlot): String {
+    internal fun buildStartCommand(
+        displaySlot: X11DisplaySlot,
+        requireWaylandSocket: Boolean = false
+    ): String {
         val expectedSocket = "/tmp/.X11-unix/X${displaySlot.number}"
-        return "expected=${shellQuote(expectedSocket)}; " +
+        val requireWayland = if (requireWaylandSocket) "1" else "0"
+        return "expected=${shellQuote(expectedSocket)}; require_wayland=$requireWayland; " +
+            "{ " +
             "if command -v systemctl >/dev/null 2>&1 && " +
             "test -f /etc/systemd/system/x11-session.service; then " +
             "printf '%s\\n' '${INIT_MARKER}systemd'; " +
-            // setup-x11-socket is a prerequisite diagnostic, not a reason to
-            // short-circuit before we inspect the session service itself. A
-            // healthy session may already be active when the Manager arrives.
             "setup_exit=0; " +
             "systemctl start setup-x11-socket.service >/dev/null 2>&1 || setup_exit=\$?; " +
             "printf '%s\\n' \"${ACTION_MARKER}socket-setup-exit=\$setup_exit\"; " +
             "if test -S \"\$expected\"; then " +
             "printf '%s\\n' '${ACTION_MARKER}socket-visible'; " +
             "else printf '%s\\n' '${ACTION_MARKER}socket-not-visible'; fi; " +
-            "{ " +
-            // The init system may already have launched the configured session
-            // while the container was booting. Restarting an already-running WM
-            // creates an avoidable race and can briefly report a false failure.
-            // Preserve a healthy session and only start it when it is not active.
             "ready=0; " +
             "if systemctl is-active --quiet x11-session.service; then " +
             "printf '%s\\n' '${ACTION_MARKER}already-active'; ready=1; " +
@@ -47,8 +42,6 @@ internal object GraphicSessionRuntimeController {
             "{ systemctl reset-failed x11-session.service >/dev/null 2>&1 || true; }; " +
             "systemctl start x11-session.service >/dev/null 2>&1 || true; " +
             "fi; " +
-            // A fast first launch can fail while systemd schedules the unit's
-            // configured Restart=on-failure retry. Wait for the unit to settle.
             "attempt=0; " +
             "while [ \"\$ready\" -eq 0 ] && [ \"\$attempt\" -lt 10 ]; do " +
             "if systemctl is-active --quiet x11-session.service; then ready=1; break; fi; " +
@@ -64,7 +57,6 @@ internal object GraphicSessionRuntimeController {
             "if command -v journalctl >/dev/null 2>&1; then " +
             "journalctl -u x11-session.service -n 24 --no-pager >&2 || true; fi; " +
             "false; fi; " +
-            "}; " +
             "elif command -v rc-service >/dev/null 2>&1 && " +
             "test -x /etc/init.d/x11-session; then " +
             "printf '%s\\n' '${INIT_MARKER}openrc'; " +
@@ -74,7 +66,6 @@ internal object GraphicSessionRuntimeController {
             "if test -S \"\$expected\"; then " +
             "printf '%s\\n' '${ACTION_MARKER}socket-visible'; " +
             "else printf '%s\\n' '${ACTION_MARKER}socket-not-visible'; fi; " +
-            "{ " +
             "ready=0; " +
             "if rc-service x11-session status >/dev/null 2>&1; then " +
             "printf '%s\\n' '${ACTION_MARKER}already-active'; ready=1; " +
@@ -93,8 +84,20 @@ internal object GraphicSessionRuntimeController {
             "printf '%s\\n' \"${DIAG_MARKER}expected socket: \$expected\" >&2; " +
             "printf '%s\\n' \"${DIAG_MARKER}socket visible: \$(test -S \"\$expected\" && echo yes || echo no)\" >&2; " +
             "rc-service x11-session status >&2 || true; false; fi; " +
-            "}; " +
-            "else echo 'No Manager x11-session service is provisioned' >&2; exit 127; fi"
+            "else echo 'No Manager x11-session service is provisioned' >&2; exit 127; fi; " +
+            "}; service_rc=\$?; [ \"\$service_rc\" -eq 0 ] || exit \"\$service_rc\"; " +
+            "if [ \"\$require_wayland\" -eq 1 ]; then " +
+            "wayland_ready=0; attempt=0; " +
+            "while [ \"\$attempt\" -lt 10 ]; do " +
+            "for wl in /tmp/runtime-root/wayland-*; do " +
+            "if [ -S \"\$wl\" ]; then wayland_ready=1; break; fi; done; " +
+            "[ \"\$wayland_ready\" -eq 1 ] && break; " +
+            "attempt=\$((attempt + 1)); sleep 1; done; " +
+            "if [ \"\$wayland_ready\" -eq 1 ]; then " +
+            "printf '%s\\n' '${ACTION_MARKER}wayland-visible'; " +
+            "else printf '%s\\n' '${ACTION_MARKER}wayland-not-visible'; " +
+            "printf '%s\\n' '${DIAG_MARKER}Wayland compositor service is active but no socket appeared in /tmp/runtime-root' >&2; " +
+            "exit 1; fi; fi"
     }
 
     internal fun buildStopCommand(): String =
@@ -121,7 +124,8 @@ internal object GraphicSessionRuntimeController {
         logger?.i("--- Graphic Session Synchronization ---")
         logger?.i("[CTX] Container: $containerName")
         logger?.i("[CTX] Monitor: ${displaySlot.monitorNumber}")
-        logger?.i("[CTX] Display: ${displaySlot.displayName}")
+        logger?.i("[CTX] Host display: ${displaySlot.displayName}")
+        logger?.i("[CTX] Host transport: Integrated X11")
         logger?.i("[CTX] Expected container socket: /tmp/.X11-unix/X${displaySlot.number}")
         logger?.i("[CTX] Container lifecycle: unchanged")
 
@@ -132,18 +136,31 @@ internal object GraphicSessionRuntimeController {
             return@withContext true
         }
 
+        logger?.i("[CTX] Protocol: ${configuredSession.protocol.label}")
         logger?.i("[CTX] Configured graphic session: ${configuredSession.label}")
         logger?.i("[CTX] Session command: ${configuredSession.startCommand}")
+        if (configuredSession.protocol == GraphicProtocol.WAYLAND) {
+            logger?.i("[CTX] Wayland runtime: /tmp/runtime-root")
+        }
         logger?.i("[*] Ensuring ${configuredSession.label} session on ${displaySlot.describe()}...")
         val startedAt = System.nanoTime()
-        val result = runContainerCommand(containerName, buildStartCommand(displaySlot))
+        val result = runContainerCommand(
+            containerName,
+            buildStartCommand(
+                displaySlot = displaySlot,
+                requireWaylandSocket = configuredSession.protocol == GraphicProtocol.WAYLAND
+            )
+        )
         val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L
         logRuntimeMarkers(result.out, logger)
         logger?.i("[CTX] Controller exit code: ${result.code}")
         logger?.i("[CTX] Synchronization duration: ${elapsedMs}ms")
 
         if (result.isSuccess) {
-            logger?.i("[+] ${configuredSession.label} session active on ${displaySlot.describe()}")
+            logger?.i(
+                "[+] ${configuredSession.label} ${configuredSession.protocol.label} session active on " +
+                    displaySlot.describe()
+            )
             true
         } else {
             logger?.w(
@@ -173,6 +190,7 @@ internal object GraphicSessionRuntimeController {
             return@withContext true
         }
 
+        logger?.i("[CTX] Protocol: ${configuredSession.protocol.label}")
         logger?.i("[CTX] Configured graphic session: ${configuredSession.label}")
         logger?.i("[CTX] Session command: ${configuredSession.startCommand}")
         logger?.i("[*] Stopping ${configuredSession.label} graphic session only...")
@@ -222,11 +240,15 @@ internal object GraphicSessionRuntimeController {
         for (action in actions) {
             when {
                 action == "socket-not-visible" ->
-                    logger?.w("[!] Container X11 socket was not visible during the prerequisite check")
+                    logger?.w("[!] Container X11 transport socket was not visible during the prerequisite check")
                 action.startsWith("socket-setup-exit=") && action != "socket-setup-exit=0" ->
-                    logger?.w("[!] X11 socket setup service returned ${action.substringAfter('=')}")
+                    logger?.w("[!] X11 transport socket setup service returned ${action.substringAfter('=')}")
                 action == "socket-visible" ->
-                    logger?.i("[+] Expected container X11 socket is visible")
+                    logger?.i("[+] Expected container X11 transport socket is visible")
+                action == "wayland-visible" ->
+                    logger?.i("[+] Wayland compositor socket is visible")
+                action == "wayland-not-visible" ->
+                    logger?.w("[!] Wayland compositor socket did not appear")
                 action == "already-active" ->
                     logger?.i("[+] Graphic session service was already active; preserving it")
                 action == "start-requested" ->
