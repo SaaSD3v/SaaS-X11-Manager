@@ -20,7 +20,8 @@ enum class ContainerPlatform(
  */
 enum class GraphicSession(
     val label: String,
-    val startCommand: String
+    val startCommand: String,
+    val protocol: GraphicProtocol = GraphicProtocol.X11
 ) {
     XFCE("XFCE", "startxfce4"),
     LXQT("LXQt", "startlxqt"),

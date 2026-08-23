@@ -17,9 +17,9 @@ enum class GraphicSessionCatalogMode {
  * UI policy for the guided Graphic Session setup.
  *
  * Package availability belongs to the detected container package platform,
- * while init-system selection remains independent. The legacy overload is kept
- * for callers/tests that still need the old presentation mapping during the
- * migration.
+ * while init-system and graphical-protocol selection remain independent. The
+ * legacy overload is kept for callers/tests that still need the old presentation
+ * mapping during the migration.
  */
 object GraphicSessionWizard {
     fun platformFor(initSystem: InitSystem): ContainerPlatform = when (initSystem) {
@@ -29,24 +29,36 @@ object GraphicSessionWizard {
 
     fun sessionsFor(
         platform: ContainerPlatform,
-        catalogMode: GraphicSessionCatalogMode
+        catalogMode: GraphicSessionCatalogMode,
+        protocol: GraphicProtocol
     ): List<GraphicSession> =
         GraphicSessionSupport.installableSessions.filter { session ->
+            if (session.protocol != protocol) return@filter false
             val plan = GraphicSessionInstallPlans.forSelection(platform, session)
                 ?: return@filter false
             catalogMode == GraphicSessionCatalogMode.EXPERIMENTAL || isStable(plan)
         }
 
+    fun sessionsFor(
+        platform: ContainerPlatform,
+        catalogMode: GraphicSessionCatalogMode
+    ): List<GraphicSession> =
+        sessionsFor(platform, catalogMode, GraphicProtocol.X11)
+
     /**
      * Keep callers that do not explicitly opt into experimental sources on the
-     * stable catalog. Experimental sessions must always be an explicit wizard
-     * choice.
+     * stable X11 catalog. Experimental and Wayland sessions must always be an
+     * explicit wizard choice.
      */
     fun sessionsFor(platform: ContainerPlatform): List<GraphicSession> =
-        sessionsFor(platform, GraphicSessionCatalogMode.STABLE)
+        sessionsFor(platform, GraphicSessionCatalogMode.STABLE, GraphicProtocol.X11)
 
     fun sessionsFor(initSystem: InitSystem): List<GraphicSession> =
-        sessionsFor(platformFor(initSystem), GraphicSessionCatalogMode.STABLE)
+        sessionsFor(
+            platformFor(initSystem),
+            GraphicSessionCatalogMode.STABLE,
+            GraphicProtocol.X11
+        )
 
     fun isExperimental(
         platform: ContainerPlatform,

@@ -111,4 +111,29 @@ class GraphicSessionWizardTest {
         assertTrue(debStable.contains(GraphicSession.QTILE))
         assertFalse(GraphicSessionWizard.isExperimental(ContainerPlatform.UBUNTU, GraphicSession.QTILE))
     }
+
+    @Test
+    fun legacyCatalogOverloadsRemainX11Only() {
+        ContainerPlatform.entries.forEach { platform ->
+            val sessions = GraphicSessionWizard.sessionsFor(platform)
+            assertTrue(sessions.isNotEmpty())
+            sessions.forEach { session ->
+                assertEquals(GraphicProtocol.X11, session.protocol)
+            }
+        }
+    }
+
+    @Test
+    fun explicitProtocolFilterDoesNotLeakX11IntoWaylandCatalog() {
+        ContainerPlatform.entries.forEach { platform ->
+            val wayland = GraphicSessionWizard.sessionsFor(
+                platform,
+                GraphicSessionCatalogMode.EXPERIMENTAL,
+                GraphicProtocol.WAYLAND
+            )
+            wayland.forEach { session ->
+                assertEquals(GraphicProtocol.WAYLAND, session.protocol)
+            }
+        }
+    }
 }
