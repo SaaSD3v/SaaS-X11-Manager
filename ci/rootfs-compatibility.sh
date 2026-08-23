@@ -22,6 +22,7 @@ ROOTFS_ID=${ID:-unknown}
 
 APT_BLOCKED='xorg|xserver-xorg.*|gdm3|lightdm|sddm|lxdm|xdm|slim|nodm|pulseaudio|pipewire-pulse|pipewire-audio'
 APK_BLOCKED='(^|[[:space:](])(xorg-server|lightdm|sddm|gdm|lxdm|xdm|slim|nodm|pulseaudio|pipewire-pulse)(-[0-9][^[:space:]]*)?([[:space:])]|$)'
+APK_EDGE_TESTING_TAG=saas_testing
 
 apt_package_available() {
     LC_ALL=C apt-cache policy "$1" | \
@@ -89,6 +90,36 @@ simulate_apk() {
     rm -f "$simulation"
     trap - EXIT HUP INT TERM
     info "$session_name apk transaction is available and safe"
+}
+
+prepare_apk_edge_testing_repository() {
+    repo_file=/etc/apk/repositories
+    if grep -Eq "^[[:space:]]*@$APK_EDGE_TESTING_TAG[[:space:]]+[^#[:space:]]+/edge/testing/?[[:space:]]*$" \
+        "$repo_file" 2>/dev/null; then
+        return 0
+    fi
+
+    remote_repo=$(grep -E '^[[:space:]]*(@[^[:space:]]+[[:space:]]+)?https?://[^[:space:]]+/(main|community)/?[[:space:]]*$' \
+        "$repo_file" 2>/dev/null | head -n 1 | \
+        sed -E 's/^[[:space:]]*(@[^[:space:]]+[[:space:]]+)?//')
+    [ -n "$remote_repo" ] || fail "Could not derive Alpine edge/testing mirror from configured repositories"
+
+    base_repo=$(printf '%s\n' "$remote_repo" | sed -E 's#/[^/]+/(main|community)/?$##')
+    [ -n "$base_repo" ] || fail "Could not derive Alpine repository base for edge/testing"
+
+    testing_repo="${base_repo%/}/edge/testing"
+    printf '@%s %s\n' "$APK_EDGE_TESTING_TAG" "$testing_repo" >> "$repo_file"
+    apk update >/dev/null
+    info "Prepared tagged Alpine edge/testing repository: @$APK_EDGE_TESTING_TAG"
+}
+
+is_repository_package() {
+    package_name=$1
+    repository_package_list=$2
+    case " $repository_package_list " in
+        *" $package_name "*) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 AUDIT_SAFE=0
@@ -175,11 +206,28 @@ audit_apt_plan() {
 
 audit_apk_plan() {
     session_name=$1
-    shift
+    requirement=$2
+    repository_package_list=$3
+    package_list=$4
+
+    [ "$repository_package_list" != "-" ] || repository_package_list=''
+    case "$requirement" in
+        APK_COMMUNITY) ;;
+        APK_EDGE_TESTING) prepare_apk_edge_testing_repository ;;
+        *) fail "Unsupported apk repository requirement in catalog: $requirement" ;;
+    esac
+
     missing=''
-    for package_name in "$@"; do
-        if ! apk search -e "$package_name" >/dev/null 2>&1; then
-            missing="${missing}${missing:+,}$package_name"
+    install_arguments=''
+    for package_name in $package_list; do
+        if [ "$requirement" = APK_EDGE_TESTING ] && \
+            is_repository_package "$package_name" "$repository_package_list"; then
+            install_arguments="$install_arguments $package_name@$APK_EDGE_TESTING_TAG"
+        else
+            if ! apk search -e "$package_name" >/dev/null 2>&1; then
+                missing="${missing}${missing:+,}$package_name"
+            fi
+            install_arguments="$install_arguments $package_name"
         fi
     done
     if [ -n "$missing" ]; then
@@ -188,6 +236,7 @@ audit_apk_plan() {
         return 0
     fi
 
+    set -- $install_arguments
     simulation=$(mktemp)
     if ! LC_ALL=C apk --simulate add "$@" >"$simulation" 2>&1; then
         detail=$(compact_failure_detail "$simulation")
@@ -206,7 +255,7 @@ audit_apk_plan() {
     fi
 
     AUDIT_SAFE=$((AUDIT_SAFE + 1))
-    record_audit apk "$session_name" SAFE packages-and-transaction
+    record_audit apk "$session_name" SAFE "packages-and-transaction:$requirement"
 }
 
 audit_catalog() {
@@ -220,15 +269,19 @@ audit_catalog() {
     printf 'rootfs\tplatform\tsession\tstatus\tdetail\n' >> "$AUDIT_REPORT"
 
     tab=$(printf '\t')
-    while IFS="$tab" read -r plan_platform session_name package_list; do
+    while IFS="$tab" read -r plan_platform session_name requirement repository_package_list package_list; do
         [ -n "$plan_platform" ] || continue
         [ "$plan_platform" = "$family" ] || continue
         AUDIT_PROCESSED=$((AUDIT_PROCESSED + 1))
-        set -- $package_list
         if [ "$family" = apt ]; then
+            case "$requirement" in
+                APT_UNIVERSE|APT_MULTIVERSE) ;;
+                *) fail "Unsupported apt repository requirement in catalog: $requirement" ;;
+            esac
+            set -- $package_list
             audit_apt_plan "$session_name" "$@"
         else
-            audit_apk_plan "$session_name" "$@"
+            audit_apk_plan "$session_name" "$requirement" "$repository_package_list" "$package_list"
         fi
     done < "$catalog"
 
