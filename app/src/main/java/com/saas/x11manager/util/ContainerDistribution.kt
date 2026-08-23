@@ -1,12 +1,13 @@
 package com.saas.x11manager.util
 
 enum class ContainerDistribution(
+    val label: String,
     val suggestedPlatform: ContainerPlatform?
 ) {
-    ALPINE(ContainerPlatform.ALPINE),
-    UBUNTU(ContainerPlatform.UBUNTU),
-    DEBIAN(ContainerPlatform.UBUNTU),
-    UNKNOWN(null)
+    ALPINE("Alpine Linux", ContainerPlatform.ALPINE),
+    UBUNTU("Ubuntu", ContainerPlatform.UBUNTU),
+    DEBIAN("Debian", ContainerPlatform.UBUNTU),
+    UNKNOWN("Unknown distribution", null)
 }
 
 /**
@@ -16,20 +17,28 @@ enum class ContainerDistribution(
 internal object ContainerDistributionParser {
 
     fun parse(lines: List<String>): ContainerDistribution {
-        val values = buildMap<String, String> {
-            lines.forEach { raw ->
-                val line = raw.trim()
-                if (line.isEmpty() || line.startsWith("#") || '=' !in line) return@forEach
-
-                val key = line.substringBefore('=').trim()
-                if (key.isEmpty()) return@forEach
-
-                val value = unquote(line.substringAfter('=').trim())
-                put(key, value)
-            }
-        }
-
+        val values = values(lines)
         return classify(values["ID"], values["ID_LIKE"])
+    }
+
+    fun prettyName(lines: List<String>): String? {
+        val values = values(lines)
+        return values["PRETTY_NAME"]
+            ?.takeIf { it.isNotBlank() }
+            ?: values["NAME"]?.takeIf { it.isNotBlank() }
+    }
+
+    private fun values(lines: List<String>): Map<String, String> = buildMap {
+        lines.forEach { raw ->
+            val line = raw.trim()
+            if (line.isEmpty() || line.startsWith("#") || '=' !in line) return@forEach
+
+            val key = line.substringBefore('=').trim()
+            if (key.isEmpty()) return@forEach
+
+            val value = unquote(line.substringAfter('=').trim())
+            put(key, value)
+        }
     }
 
     private fun classify(id: String?, idLike: String?): ContainerDistribution {
