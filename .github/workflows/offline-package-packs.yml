@@ -113,27 +113,27 @@ jobs:
               cp /home/builder/.abuild/*.rsa.pub /out/repo/keys/
 
               cat > /home/builder/qview/APKBUILD <<EOF
-pkgname=qview
-pkgver=${QVIEW_VERSION}
-pkgrel=0
-pkgdesc="Practical and minimal image viewer"
-url="https://interversehq.com/qview/"
-arch="aarch64"
-license="GPL-3.0-only"
-depends="qt5-qtbase-x11 qt5-qtx11extras"
-makedepends="qt5-qtbase-dev qt5-qtx11extras-dev qt5-qttools-dev qt5-qtsvg-dev"
-source="qView-${QVIEW_VERSION}.tar.gz::https://github.com/jurplel/qView/archive/refs/tags/${QVIEW_VERSION}.tar.gz"
-builddir="\$srcdir/qView-${QVIEW_VERSION}"
+          pkgname=qview
+          pkgver=${QVIEW_VERSION}
+          pkgrel=0
+          pkgdesc="Practical and minimal image viewer"
+          url="https://interversehq.com/qview/"
+          arch="aarch64"
+          license="GPL-3.0-only"
+          depends="qt5-qtbase-x11 qt5-qtx11extras"
+          makedepends="qt5-qtbase-dev qt5-qtx11extras-dev qt5-qttools-dev qt5-qtsvg-dev"
+          source="qView-${QVIEW_VERSION}.tar.gz::https://github.com/jurplel/qView/archive/refs/tags/${QVIEW_VERSION}.tar.gz"
+          builddir="$srcdir/qView-${QVIEW_VERSION}"
 
-build() {
-  qmake-qt5 PREFIX=/usr CONFIG+=release qView.pro
-  make -j2
-}
+          build() {
+            qmake-qt5 PREFIX=/usr CONFIG+=release qView.pro
+            make -j2
+          }
 
-package() {
-  make INSTALL_ROOT="\$pkgdir" install
-}
-EOF
+          package() {
+            make INSTALL_ROOT="$pkgdir" install
+          }
+          EOF
               chown builder:builder /home/builder/qview/APKBUILD
               su builder -c "cd /home/builder/qview && abuild checksum && abuild -r"
               find /home/builder/packages -type f -name "qview-*.apk" -exec cp -f {} /out/repo/packages/ \;
@@ -141,18 +141,18 @@ EOF
               apk index -o /out/repo/APKINDEX.tar.gz /out/repo/packages/*.apk
 
               cat > /out/repo/catalog.txt <<EOF
-nano|Nano
-vim|Vim
-htop|htop
-openssh|OpenSSH
-tigervnc|TigerVNC
-fastfetch|Fastfetch
-kitty|Kitty
-mpv|MPV
-qview|qView
-audacious|Audacious
-thunar|Thunar
-EOF
+          nano|Nano
+          vim|Vim
+          htop|htop
+          openssh|OpenSSH
+          tigervnc|TigerVNC
+          fastfetch|Fastfetch
+          kitty|Kitty
+          mpv|MPV
+          qview|qView
+          audacious|Audacious
+          thunar|Thunar
+          EOF
 
               printf "Alpine 3.23\naarch64\n" > /out/repo/target.txt
               (cd /out/repo && sha256sum packages/*.apk APKINDEX.tar.gz > SHA256SUMS)
@@ -198,16 +198,16 @@ EOF
               make INSTALL_ROOT=/tmp/qview-pkg install
 
               cat > /tmp/qview-pkg/DEBIAN/control <<EOF
-Package: qview
-Version: ${QVIEW_VERSION}-1
-Section: graphics
-Priority: optional
-Architecture: arm64
-Maintainer: Droidspaces Offline Pack <noreply@droidspaces.local>
-Depends: libc6, libgcc-s1, libqt5core5t64, libqt5gui5t64, libqt5network5t64, libqt5widgets5t64, libqt5x11extras5, libstdc++6, libx11-6
-Description: Practical and minimal image viewer
- qView packaged for the Droidspaces offline ARM64 repository.
-EOF
+          Package: qview
+          Version: ${QVIEW_VERSION}-1
+          Section: graphics
+          Priority: optional
+          Architecture: arm64
+          Maintainer: Droidspaces Offline Pack <noreply@droidspaces.local>
+          Depends: libc6, libgcc-s1, libqt5core5t64, libqt5gui5t64, libqt5network5t64, libqt5widgets5t64, libqt5x11extras5, libstdc++6, libx11-6
+          Description: Practical and minimal image viewer
+           qView packaged for the Droidspaces offline ARM64 repository.
+          EOF
               dpkg-deb --build --root-owner-group /tmp/qview-pkg "/out/repo/packages/qview_${QVIEW_VERSION}-1_arm64.deb"
 
               cd /
@@ -243,18 +243,18 @@ EOF
               gzip -9c Packages > Packages.gz
 
               cat > catalog.txt <<EOF
-nano|Nano
-vim|Vim
-htop|htop
-openssh-server|OpenSSH
-tigervnc-standalone-server|TigerVNC
-fastfetch|Fastfetch
-kitty|Kitty
-mpv|MPV
-qview|qView
-audacious|Audacious
-thunar|Thunar
-EOF
+          nano|Nano
+          vim|Vim
+          htop|htop
+          openssh-server|OpenSSH
+          tigervnc-standalone-server|TigerVNC
+          fastfetch|Fastfetch
+          kitty|Kitty
+          mpv|MPV
+          qview|qView
+          audacious|Audacious
+          thunar|Thunar
+          EOF
 
               printf "%s\narm64\n" "${TARGET_ID}" > target.txt
               sha256sum packages/*.deb Packages.gz > SHA256SUMS
