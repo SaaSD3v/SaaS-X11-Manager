@@ -1,6 +1,6 @@
 package com.saas.x11manager.util
 
-/** Pure templates for init-owned X11 session files. */
+/** Pure templates for init-owned graphical session files on the integrated X11 transport. */
 internal object GraphicSessionInitFiles {
 
     private fun dynamicDisplayEnvironment(): String =
@@ -21,9 +21,20 @@ internal object GraphicSessionInitFiles {
             "case \"\$X11_DISPLAY_NUMBER\" in\n" +
             "    ''|*[!0-9]*) echo \"Invalid X11 socket name: \$X11_SOCKET\" >&2; exit 1 ;;\n" +
             "esac\n" +
-            "export DISPLAY=:\$X11_DISPLAY_NUMBER\n"
+            "export DISPLAY=:\$X11_DISPLAY_NUMBER\n" +
+            "export SAAS_HOST_DISPLAY=\$DISPLAY\n"
 
     fun sessionScript(session: GraphicSession, shell: String): String {
+        val sessionType = if (session.protocol == GraphicProtocol.WAYLAND) "wayland" else "x11"
+        val protocolEnvironment = if (session.protocol == GraphicProtocol.WAYLAND) {
+            "export XDG_SESSION_TYPE=wayland\n" +
+                "export SAAS_WAYLAND_SOCKET=wayland-0\n" +
+                // Do not export WAYLAND_DISPLAY here: the selected compositor is the
+                // Wayland server, not a client of another Wayland compositor.
+                "unset WAYLAND_DISPLAY\n"
+        } else {
+            "export XDG_SESSION_TYPE=x11\n"
+        }
         val launch = if (session == GraphicSession.NONE) {
             "exit 0\n"
         } else {
@@ -35,7 +46,8 @@ internal object GraphicSessionInitFiles {
             "export HOME=/root\n" +
             "export USER=root\n" +
             "export SHELL=$shell\n" +
-            "export XDG_SESSION_TYPE=x11\n" +
+            protocolEnvironment +
+            "export SAAS_GRAPHIC_PROTOCOL=$sessionType\n" +
             "export XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
             "mkdir -p \"\$XDG_RUNTIME_DIR\" && chmod 700 \"\$XDG_RUNTIME_DIR\"\n" +
             launch
@@ -43,12 +55,12 @@ internal object GraphicSessionInitFiles {
 
     fun openRcSetupService(): String =
         "#!/sbin/openrc-run\n\n" +
-            "description=\"Setup Manager X11 socket directory and bind mount\"\n\n" +
+            "description=\"Setup Manager X11 transport socket directory and bind mount\"\n\n" +
             "depend() {\n" +
             "    before x11-session\n" +
             "}\n\n" +
             "start() {\n" +
-            "    ebegin \"Setting up X11 socket\"\n" +
+            "    ebegin \"Setting up Manager X11 transport socket\"\n" +
             "    if [ ! -d /usr/.X11-unix ]; then\n" +
             "        eerror \"X11 source socket directory /usr/.X11-unix is missing\"\n" +
             "        eend 1\n" +
@@ -66,7 +78,7 @@ internal object GraphicSessionInitFiles {
             "    return \$rc\n" +
             "}\n\n" +
             "stop() {\n" +
-            "    ebegin \"Unmounting X11 socket\"\n" +
+            "    ebegin \"Unmounting Manager X11 transport socket\"\n" +
             "    if mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n" +
             "        umount /tmp/.X11-unix\n" +
             "        rc=$?\n" +
@@ -78,7 +90,7 @@ internal object GraphicSessionInitFiles {
 
     fun openRcSessionService(session: GraphicSession): String =
         "#!/sbin/openrc-run\n\n" +
-            "description=\"X11 ${session.label} Session on SaaS X11\"\n" +
+            "description=\"${session.protocol.label} ${session.label} Session on Manager X11 transport\"\n" +
             "command=\"/usr/local/bin/x11-session.sh\"\n" +
             "command_background=\"yes\"\n" +
             "pidfile=\"/run/x11-session.pid\"\n" +
@@ -89,7 +101,7 @@ internal object GraphicSessionInitFiles {
 
     fun systemdSocketService(): String =
         "[Unit]\n" +
-            "Description=Setup Manager X11 socket directory\n" +
+            "Description=Setup Manager X11 transport socket directory\n" +
             "Before=x11-session.service\n\n" +
             "[Service]\n" +
             "Type=oneshot\n" +
@@ -104,9 +116,10 @@ internal object GraphicSessionInitFiles {
             "[Install]\n" +
             "WantedBy=multi-user.target\n"
 
-    fun systemdSessionService(session: GraphicSession): String =
-        "[Unit]\n" +
-            "Description=X11 ${session.label} Session on SaaS X11\n" +
+    fun systemdSessionService(session: GraphicSession): String {
+        val sessionType = if (session.protocol == GraphicProtocol.WAYLAND) "wayland" else "x11"
+        return "[Unit]\n" +
+            "Description=${session.protocol.label} ${session.label} Session on Manager X11 transport\n" +
             "After=network.target setup-x11-socket.service\n" +
             "Requires=setup-x11-socket.service\n\n" +
             "[Service]\n" +
@@ -114,7 +127,7 @@ internal object GraphicSessionInitFiles {
             "Environment=HOME=/root\n" +
             "Environment=USER=root\n" +
             "Environment=SHELL=/bin/bash\n" +
-            "Environment=XDG_SESSION_TYPE=x11\n" +
+            "Environment=XDG_SESSION_TYPE=$sessionType\n" +
             "Environment=XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
             "ExecStart=/usr/local/bin/x11-session.sh\n" +
             "Restart=on-failure\n" +
@@ -125,4 +138,5 @@ internal object GraphicSessionInitFiles {
             // still start this service on demand, but installing it in multi-user
             // makes automatic startup match the container's real boot target.
             "WantedBy=multi-user.target\n"
+    }
 }
