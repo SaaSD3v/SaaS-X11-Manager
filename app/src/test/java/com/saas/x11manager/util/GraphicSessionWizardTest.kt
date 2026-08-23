@@ -49,7 +49,7 @@ class GraphicSessionWizardTest {
     }
 
     @Test
-    fun experimentalAlpineCatalogIsAdditive() {
+    fun alpineStableAndExperimentalCatalogsAreDisjoint() {
         val stable = GraphicSessionWizard.sessionsFor(
             ContainerPlatform.ALPINE,
             GraphicSessionCatalogMode.STABLE
@@ -60,11 +60,12 @@ class GraphicSessionWizardTest {
         )
 
         assertTrue(stable.isNotEmpty())
-        assertTrue(experimental.containsAll(stable))
+        assertTrue(experimental.isNotEmpty())
+        assertTrue(stable.intersect(experimental.toSet()).isEmpty())
     }
 
     @Test
-    fun experimentalDebCatalogIsAdditive() {
+    fun debStableAndExperimentalCatalogsAreDisjoint() {
         val stable = GraphicSessionWizard.sessionsFor(
             ContainerPlatform.UBUNTU,
             GraphicSessionCatalogMode.STABLE
@@ -75,17 +76,24 @@ class GraphicSessionWizardTest {
         )
 
         assertTrue(stable.isNotEmpty())
-        assertTrue(experimental.containsAll(stable))
+        assertTrue(experimental.isNotEmpty())
+        assertTrue(stable.intersect(experimental.toSet()).isEmpty())
     }
 
     @Test
-    fun stableCatalogNeverContainsExperimentalSessions() {
+    fun catalogMembershipMatchesExperimentalFlag() {
         ContainerPlatform.entries.forEach { platform ->
             GraphicSessionWizard.sessionsFor(
                 platform,
                 GraphicSessionCatalogMode.STABLE
             ).forEach { session ->
                 assertFalse(GraphicSessionWizard.isExperimental(platform, session))
+            }
+            GraphicSessionWizard.sessionsFor(
+                platform,
+                GraphicSessionCatalogMode.EXPERIMENTAL
+            ).forEach { session ->
+                assertTrue(GraphicSessionWizard.isExperimental(platform, session))
             }
         }
     }
@@ -126,13 +134,15 @@ class GraphicSessionWizardTest {
     @Test
     fun explicitProtocolFilterDoesNotLeakX11IntoWaylandCatalog() {
         ContainerPlatform.entries.forEach { platform ->
-            val wayland = GraphicSessionWizard.sessionsFor(
-                platform,
-                GraphicSessionCatalogMode.EXPERIMENTAL,
-                GraphicProtocol.WAYLAND
-            )
-            wayland.forEach { session ->
-                assertEquals(GraphicProtocol.WAYLAND, session.protocol)
+            GraphicSessionCatalogMode.entries.forEach { catalog ->
+                val wayland = GraphicSessionWizard.sessionsFor(
+                    platform,
+                    catalog,
+                    GraphicProtocol.WAYLAND
+                )
+                wayland.forEach { session ->
+                    assertEquals(GraphicProtocol.WAYLAND, session.protocol)
+                }
             }
         }
     }
