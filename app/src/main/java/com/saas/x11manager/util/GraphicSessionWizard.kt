@@ -11,6 +11,9 @@ enum class GraphicSessionCatalogMode {
  * Package availability belongs to the detected container package platform,
  * while init-system and graphical-protocol selection remain independent. The
  * capability-aware overload also filters distro/architecture constraints.
+ *
+ * Stable and Experimental are intentionally exclusive catalogs. Selecting
+ * Experimental must never repeat entries already visible in Stable.
  */
 object GraphicSessionWizard {
     fun platformFor(initSystem: InitSystem): ContainerPlatform = when (initSystem) {
@@ -29,7 +32,7 @@ object GraphicSessionWizard {
             val plan = GraphicSessionInstallPlans.forSelection(platform, session)
                 ?: return@filter false
             if (!plan.supports(capabilities)) return@filter false
-            catalogMode == GraphicSessionCatalogMode.EXPERIMENTAL || isStable(plan)
+            belongsToCatalog(plan, catalogMode)
         }
 
     fun sessionsFor(
@@ -41,7 +44,7 @@ object GraphicSessionWizard {
             if (session.protocol != protocol) return@filter false
             val plan = GraphicSessionInstallPlans.forSelection(platform, session)
                 ?: return@filter false
-            catalogMode == GraphicSessionCatalogMode.EXPERIMENTAL || isStable(plan)
+            belongsToCatalog(plan, catalogMode)
         }
 
     fun sessionsFor(
@@ -72,7 +75,7 @@ object GraphicSessionWizard {
         val platform = capabilities.platform ?: return false
         val plan = GraphicSessionInstallPlans.forSelection(platform, session) ?: return false
         if (!plan.supports(capabilities)) return false
-        return !isStable(plan)
+        return GraphicSessionCatalogPolicy.isExperimental(plan)
     }
 
     fun isExperimental(
@@ -80,14 +83,14 @@ object GraphicSessionWizard {
         session: GraphicSession
     ): Boolean {
         val plan = GraphicSessionInstallPlans.forSelection(platform, session) ?: return false
-        return !isStable(plan)
+        return GraphicSessionCatalogPolicy.isExperimental(plan)
     }
 
-    private fun isStable(plan: GraphicSessionInstallPlan): Boolean =
-        when (plan.repositoryRequirement) {
-            RepositoryRequirement.APT_UNIVERSE,
-            RepositoryRequirement.APT_MULTIVERSE,
-            RepositoryRequirement.APK_COMMUNITY -> true
-            RepositoryRequirement.APK_EDGE_TESTING -> false
-        }
+    private fun belongsToCatalog(
+        plan: GraphicSessionInstallPlan,
+        catalogMode: GraphicSessionCatalogMode
+    ): Boolean = when (catalogMode) {
+        GraphicSessionCatalogMode.STABLE -> GraphicSessionCatalogPolicy.isStable(plan)
+        GraphicSessionCatalogMode.EXPERIMENTAL -> GraphicSessionCatalogPolicy.isExperimental(plan)
+    }
 }
