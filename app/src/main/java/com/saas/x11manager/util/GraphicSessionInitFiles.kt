@@ -88,9 +88,14 @@ internal object GraphicSessionInitFiles {
             "    eend 0\n" +
             "}\n"
 
-    fun openRcSessionService(session: GraphicSession): String =
-        "#!/sbin/openrc-run\n\n" +
-            "description=\"${session.protocol.label} ${session.label} Session on Manager X11 transport\"\n" +
+    fun openRcSessionService(session: GraphicSession): String {
+        val description = if (session.protocol == GraphicProtocol.WAYLAND) {
+            "Wayland ${session.label} Session on SaaS X11 transport"
+        } else {
+            "X11 ${session.label} Session - SaaS X11"
+        }
+        return "#!/sbin/openrc-run\n\n" +
+            "description=\"$description\"\n" +
             "command=\"/usr/local/bin/x11-session.sh\"\n" +
             "command_background=\"yes\"\n" +
             "pidfile=\"/run/x11-session.pid\"\n" +
@@ -98,6 +103,7 @@ internal object GraphicSessionInitFiles {
             "depend() {\n" +
             "    need x11-setup\n" +
             "}\n"
+    }
 
     fun systemdSocketService(): String =
         "[Unit]\n" +
@@ -118,8 +124,13 @@ internal object GraphicSessionInitFiles {
 
     fun systemdSessionService(session: GraphicSession): String {
         val sessionType = if (session.protocol == GraphicProtocol.WAYLAND) "wayland" else "x11"
+        val description = if (session.protocol == GraphicProtocol.WAYLAND) {
+            "Wayland ${session.label} Session on Manager X11 transport"
+        } else {
+            "X11 ${session.label} Session"
+        }
         return "[Unit]\n" +
-            "Description=${session.protocol.label} ${session.label} Session on Manager X11 transport\n" +
+            "Description=$description\n" +
             "After=network.target setup-x11-socket.service\n" +
             "Requires=setup-x11-socket.service\n\n" +
             "[Service]\n" +
