@@ -37,6 +37,48 @@ internal object WaylandGraphicSessionSupport {
             executable = "wayfire",
             desktopName = "Wayfire",
             body = wlrootsBody("wayfire")
+        ),
+        GraphicSession.WLMAKER to compositorSpec(
+            session = GraphicSession.WLMAKER,
+            executable = "wlmaker",
+            desktopName = "WLMaker",
+            body = wlrootsBody("wlmaker")
+        ),
+        GraphicSession.RIVER to compositorSpec(
+            session = GraphicSession.RIVER,
+            executable = "river",
+            desktopName = "river",
+            body = wlrootsBody("river")
+        ),
+        GraphicSession.PHOC to compositorSpec(
+            session = GraphicSession.PHOC,
+            executable = "phoc",
+            desktopName = "Phoc",
+            body = wlrootsBody("phoc -X -E foot")
+        ),
+        GraphicSession.MUTTER_WAYLAND to compositorSpec(
+            session = GraphicSession.MUTTER_WAYLAND,
+            executable = "mutter",
+            desktopName = "Mutter",
+            body = mutterBody(),
+            additionalVerificationCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    title = "Checking Mutter nested session helper",
+                    command = "command -v dbus-run-session >/dev/null"
+                )
+            )
+        ),
+        GraphicSession.QTILE_WAYLAND to compositorSpec(
+            session = GraphicSession.QTILE_WAYLAND,
+            executable = "qtile",
+            desktopName = "Qtile",
+            body = wlrootsBody("qtile start -b wayland"),
+            additionalVerificationCommands = listOf(
+                GraphicSessionProvisionCommand(
+                    title = "Checking Qtile Wayland backend",
+                    command = "python3 -c 'from libqtile.backend import wayland' >/dev/null 2>&1"
+                )
+            )
         )
     )
 
@@ -49,7 +91,8 @@ internal object WaylandGraphicSessionSupport {
         session: GraphicSession,
         executable: String,
         desktopName: String,
-        body: String
+        body: String,
+        additionalVerificationCommands: List<GraphicSessionProvisionCommand> = emptyList()
     ): GraphicSessionSupportSpec {
         val launcher = "/usr/local/bin/${session.startCommand}"
         val script = """#!/bin/sh
@@ -93,7 +136,7 @@ $body
                     title = "Checking ${session.label} Wayland launcher",
                     command = "test -x $launcher && /bin/sh -n $launcher"
                 )
-            )
+            ) + additionalVerificationCommands
         )
     }
 
@@ -179,6 +222,29 @@ fi
 ${wlrootsBody(swayCommand)}
 """.trim()
     }
+
+    /**
+     * Mutter changed its supported nested-development switch over time. Detect
+     * the capability from the installed executable instead of tying the Manager
+     * to a distro/version. DISPLAY remains the outer X11 host in either mode.
+     */
+    private fun mutterBody(): String = """
+if ! command -v dbus-run-session >/dev/null 2>&1; then
+    echo "dbus-run-session is required for nested Mutter" >&2
+    exit 1
+fi
+
+MUTTER_HELP="${'$'}(LC_ALL=C mutter --help-all 2>&1 || LC_ALL=C mutter --help 2>&1 || true)"
+if printf '%s\n' "${'$'}MUTTER_HELP" | grep -q -- '--devkit'; then
+    exec dbus-run-session -- mutter --wayland --devkit -- foot
+fi
+if printf '%s\n' "${'$'}MUTTER_HELP" | grep -q -- '--nested'; then
+    exec dbus-run-session -- mutter --wayland --nested foot
+fi
+
+echo "Installed Mutter does not advertise a supported nested mode" >&2
+exit 1
+""".trim()
 
     /**
      * wlroots compositors can select the X11 backend through environment
