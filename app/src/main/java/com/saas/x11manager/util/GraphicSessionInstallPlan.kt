@@ -60,7 +60,8 @@ object GraphicSessionInstallPlans {
     private fun apk(
         session: GraphicSession,
         packages: List<String>,
-        repositoryRequirement: RepositoryRequirement = RepositoryRequirement.APK_COMMUNITY
+        repositoryRequirement: RepositoryRequirement = RepositoryRequirement.APK_COMMUNITY,
+        repositoryPackages: Set<String>? = null
     ) = GraphicSessionInstallPlan(
         platform = ContainerPlatform.ALPINE,
         session = session,
@@ -68,7 +69,9 @@ object GraphicSessionInstallPlans {
         packages = packages,
         verificationCommand = session.startCommand,
         installRecommendedPackages = true,
-        repositoryPackages = if (repositoryRequirement == RepositoryRequirement.APK_EDGE_TESTING) {
+        repositoryPackages = repositoryPackages ?: if (
+            repositoryRequirement == RepositoryRequirement.APK_EDGE_TESTING
+        ) {
             packages.toSet()
         } else {
             emptySet()
@@ -168,6 +171,12 @@ object GraphicSessionInstallPlans {
         apt(GraphicSession.CLFSWM, listOf("clfswm", "xterm")),
         apt(GraphicSession.FVWM_CRYSTAL, listOf("fvwm-crystal", "xterm")),
         apt(GraphicSession.QTILE, listOf("qtile", "xterm")),
+        apk(
+            GraphicSession.QTILE,
+            listOf("qtile", "xterm"),
+            RepositoryRequirement.APK_EDGE_TESTING,
+            repositoryPackages = setOf("qtile")
+        ),
         apt(GraphicSession.MUFFIN, listOf("muffin", "dbus-x11", "xterm")),
         apt(GraphicSession.MUTTER, listOf("mutter", "dbus-x11", "xterm")),
         apk(GraphicSession.MUTTER, listOf("mutter", "dbus", "xterm")),

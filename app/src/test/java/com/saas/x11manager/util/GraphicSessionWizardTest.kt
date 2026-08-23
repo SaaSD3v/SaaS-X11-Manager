@@ -1,6 +1,7 @@
 package com.saas.x11manager.util
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -78,14 +79,36 @@ class GraphicSessionWizardTest {
     }
 
     @Test
-    fun existingRepositoryPlansRemainStableUntilExplicitlyMarkedExperimental() {
+    fun stableCatalogNeverContainsExperimentalSessions() {
         ContainerPlatform.entries.forEach { platform ->
             GraphicSessionWizard.sessionsFor(
                 platform,
-                GraphicSessionCatalogMode.EXPERIMENTAL
+                GraphicSessionCatalogMode.STABLE
             ).forEach { session ->
-                assertTrue(!GraphicSessionWizard.isExperimental(platform, session))
+                assertFalse(GraphicSessionWizard.isExperimental(platform, session))
             }
         }
+    }
+
+    @Test
+    fun qtileIsExperimentalOnlyOnAlpine() {
+        val alpineStable = GraphicSessionWizard.sessionsFor(
+            ContainerPlatform.ALPINE,
+            GraphicSessionCatalogMode.STABLE
+        )
+        val alpineExperimental = GraphicSessionWizard.sessionsFor(
+            ContainerPlatform.ALPINE,
+            GraphicSessionCatalogMode.EXPERIMENTAL
+        )
+        val debStable = GraphicSessionWizard.sessionsFor(
+            ContainerPlatform.UBUNTU,
+            GraphicSessionCatalogMode.STABLE
+        )
+
+        assertFalse(alpineStable.contains(GraphicSession.QTILE))
+        assertTrue(alpineExperimental.contains(GraphicSession.QTILE))
+        assertTrue(GraphicSessionWizard.isExperimental(ContainerPlatform.ALPINE, GraphicSession.QTILE))
+        assertTrue(debStable.contains(GraphicSession.QTILE))
+        assertFalse(GraphicSessionWizard.isExperimental(ContainerPlatform.UBUNTU, GraphicSession.QTILE))
     }
 }
