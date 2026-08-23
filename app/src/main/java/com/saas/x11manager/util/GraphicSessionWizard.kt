@@ -23,7 +23,7 @@ object GraphicSessionWizard {
         catalogMode: GraphicSessionCatalogMode,
         protocol: GraphicProtocol
     ): List<GraphicSession> =
-        GraphicSessionSupport.installableSessions.filter { session ->
+        GraphicSessionRegistry.installableSessions.filter { session ->
             if (session.protocol != protocol) return@filter false
             val platform = capabilities.platform ?: return@filter false
             val plan = GraphicSessionInstallPlans.forSelection(platform, session)
@@ -37,7 +37,7 @@ object GraphicSessionWizard {
         catalogMode: GraphicSessionCatalogMode,
         protocol: GraphicProtocol
     ): List<GraphicSession> =
-        GraphicSessionSupport.installableSessions.filter { session ->
+        GraphicSessionRegistry.installableSessions.filter { session ->
             if (session.protocol != protocol) return@filter false
             val plan = GraphicSessionInstallPlans.forSelection(platform, session)
                 ?: return@filter false
