@@ -15,7 +15,8 @@ class FourthWindowManagerBatchTest {
         )
         assertAptOnly(GraphicSession.CLFSWM, listOf("clfswm", "xterm"))
         assertAptOnly(GraphicSession.FVWM_CRYSTAL, listOf("fvwm-crystal", "xterm"))
-        assertAptOnly(GraphicSession.QTILE, listOf("qtile", "xterm"))
+        assertPlan(ContainerPlatform.UBUNTU, GraphicSession.QTILE, listOf("qtile", "xterm"))
+        assertPlan(ContainerPlatform.ALPINE, GraphicSession.QTILE, listOf("qtile", "xterm"))
         assertAptOnly(GraphicSession.MUFFIN, listOf("muffin", "dbus-x11", "xterm"))
         assertPlan(
             ContainerPlatform.UBUNTU,
