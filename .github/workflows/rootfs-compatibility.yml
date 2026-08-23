@@ -54,6 +54,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The exporter schema includes repository requirement and scoped packages,
+      # so experimental sources are audited exactly as the app will request them.
       - name: Export graphic session plan catalog
         run: |
           python3 -m py_compile ci/export-graphic-session-plans.py
