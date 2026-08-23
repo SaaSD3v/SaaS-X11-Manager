@@ -6,9 +6,21 @@ import com.topjohnwu.superuser.Shell
 data class ContainerCapabilities(
     val platform: ContainerPlatform?,
     val distribution: ContainerDistribution,
-    val availableInitSystems: Set<InitSystem>
+    val availableInitSystems: Set<InitSystem>,
+    val distributionName: String? = null,
+    val architecture: String? = null
 ) {
     fun supports(initSystem: InitSystem): Boolean = initSystem in availableInitSystems
+
+    val distributionDisplayName: String
+        get() = distributionName?.takeIf { it.isNotBlank() } ?: distribution.label
+
+    val architectureDisplayName: String
+        get() = when (architecture?.lowercase()) {
+            "aarch64", "arm64" -> "arm64"
+            null, "" -> "unknown arch"
+            else -> architecture
+        }
 }
 
 internal object ContainerCapabilitiesDetector {
@@ -16,6 +28,7 @@ internal object ContainerCapabilitiesDetector {
     private const val PACKAGE_MARKER = "@@SAAS_PACKAGE="
     private const val OPENRC_MARKER = "@@SAAS_OPENRC="
     private const val SYSTEMD_MARKER = "@@SAAS_SYSTEMD="
+    private const val ARCH_MARKER = "@@SAAS_ARCH="
     private const val OS_RELEASE_BEGIN = "@@SAAS_OS_RELEASE_BEGIN@@"
     private const val OS_RELEASE_END = "@@SAAS_OS_RELEASE_END@@"
 
@@ -23,7 +36,8 @@ internal object ContainerCapabilitiesDetector {
         val platform: ContainerPlatform?,
         val osReleaseLines: List<String>,
         val hasOpenRc: Boolean,
-        val hasSystemd: Boolean
+        val hasSystemd: Boolean,
+        val architecture: String? = null
     )
 
     suspend fun detect(
@@ -51,12 +65,16 @@ internal object ContainerCapabilitiesDetector {
                 )
             }
 
-            fromProbeResults(
+            val capabilities = fromProbeResults(
                 platform = probe.platform,
                 osReleaseLines = probe.osReleaseLines,
                 hasOpenRc = probe.hasOpenRc,
-                hasSystemd = probe.hasSystemd
+                hasSystemd = probe.hasSystemd,
+                architecture = probe.architecture
             )
+            logger?.i("[+] Distribution: ${capabilities.distributionDisplayName}")
+            logger?.i("[+] Architecture: ${capabilities.architectureDisplayName}")
+            capabilities
         } finally {
             AdditionalGraphicSessionRuntime.release(containerName, lease, logger)
         }
@@ -66,14 +84,17 @@ internal object ContainerCapabilitiesDetector {
         platform: ContainerPlatform?,
         osReleaseLines: List<String>,
         hasOpenRc: Boolean,
-        hasSystemd: Boolean
+        hasSystemd: Boolean,
+        architecture: String? = null
     ): ContainerCapabilities = ContainerCapabilities(
         platform = platform,
         distribution = ContainerDistributionParser.parse(osReleaseLines),
         availableInitSystems = buildSet {
             if (hasOpenRc) add(InitSystem.OPENRC)
             if (hasSystemd) add(InitSystem.SYSTEMD)
-        }
+        },
+        distributionName = ContainerDistributionParser.prettyName(osReleaseLines),
+        architecture = architecture?.trim()?.takeIf { it.isNotEmpty() }
     )
 
     /**
@@ -85,6 +106,7 @@ internal object ContainerCapabilitiesDetector {
         var packageKind: String? = null
         var hasOpenRc = false
         var hasSystemd = false
+        var architecture: String? = null
         var inOsRelease = false
         val osRelease = mutableListOf<String>()
 
@@ -100,6 +122,8 @@ internal object ContainerCapabilitiesDetector {
                     hasOpenRc = line.removePrefix(OPENRC_MARKER).removeSuffix("@@").trim() == "1"
                 line.startsWith(SYSTEMD_MARKER) ->
                     hasSystemd = line.removePrefix(SYSTEMD_MARKER).removeSuffix("@@").trim() == "1"
+                line.startsWith(ARCH_MARKER) ->
+                    architecture = line.removePrefix(ARCH_MARKER).removeSuffix("@@").trim().ifEmpty { null }
             }
         }
 
@@ -113,7 +137,8 @@ internal object ContainerCapabilitiesDetector {
             platform = platform,
             osReleaseLines = osRelease,
             hasOpenRc = hasOpenRc,
-            hasSystemd = hasSystemd
+            hasSystemd = hasSystemd,
+            architecture = architecture
         )
     }
 
@@ -138,6 +163,7 @@ internal object ContainerCapabilitiesDetector {
             "then echo '$OPENRC_MARKER" + "1@@'; else echo '$OPENRC_MARKER" + "0@@'; fi",
         "if command -v systemctl >/dev/null 2>&1 && test -d /etc/systemd/system; " +
             "then echo '$SYSTEMD_MARKER" + "1@@'; else echo '$SYSTEMD_MARKER" + "0@@'; fi",
+        "printf '%s%s%s\\n' '$ARCH_MARKER' \"\$(uname -m 2>/dev/null || true)\" '@@'",
         "echo '$OS_RELEASE_BEGIN'",
         "cat /etc/os-release 2>/dev/null || true",
         "echo '$OS_RELEASE_END'"
