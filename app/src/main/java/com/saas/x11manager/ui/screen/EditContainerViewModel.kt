@@ -14,6 +14,7 @@ import com.saas.x11manager.util.ContainerCapabilitiesDetector
 import com.saas.x11manager.util.ContainerManager
 import com.saas.x11manager.util.ContainerSettingsManager
 import com.saas.x11manager.util.ContainerStatus
+import com.saas.x11manager.util.GraphicProtocol
 import com.saas.x11manager.util.GraphicSession
 import com.saas.x11manager.util.GraphicSessionCatalogMode
 import com.saas.x11manager.util.GraphicSessionInstaller
@@ -31,6 +32,7 @@ enum class ConfigurationWizardStage {
     HIDDEN,
     RUNNING_WARNING,
     INIT_SELECTION,
+    PROTOCOL_SELECTION,
     CATALOG_SELECTION,
     SESSION_SELECTION
 }
@@ -76,6 +78,8 @@ class EditContainerViewModel : ViewModel() {
     var wizardStage by mutableStateOf(ConfigurationWizardStage.HIDDEN)
         private set
     var pendingWizardInitSystem by mutableStateOf<InitSystem?>(null)
+        private set
+    var pendingWizardProtocol by mutableStateOf(GraphicProtocol.X11)
         private set
     var pendingWizardCatalogMode by mutableStateOf(GraphicSessionCatalogMode.STABLE)
         private set
@@ -129,6 +133,7 @@ class EditContainerViewModel : ViewModel() {
             installResult = null
             installResultSession = null
             wizardError = null
+            pendingWizardProtocol = graphicSession.protocol
             pendingWizardCatalogMode = GraphicSessionCatalogMode.STABLE
             canStartX11FromInstall = false
             quickStartCompleted = false
@@ -140,6 +145,7 @@ class EditContainerViewModel : ViewModel() {
         wizardStarted = true
         wizardStage = ConfigurationWizardStage.HIDDEN
         wizardError = null
+        pendingWizardProtocol = graphicSession.protocol
         pendingWizardCatalogMode = GraphicSessionCatalogMode.STABLE
         isPreparingWizard = true
 
@@ -226,6 +232,12 @@ class EditContainerViewModel : ViewModel() {
             return
         }
         pendingWizardInitSystem = system
+        wizardStage = ConfigurationWizardStage.PROTOCOL_SELECTION
+    }
+
+    fun selectWizardProtocol(protocol: GraphicProtocol) {
+        if (isPreparingWizard || isInstallingSession) return
+        pendingWizardProtocol = protocol
         wizardStage = ConfigurationWizardStage.CATALOG_SELECTION
     }
 
@@ -240,6 +252,11 @@ class EditContainerViewModel : ViewModel() {
         wizardStage = ConfigurationWizardStage.INIT_SELECTION
     }
 
+    fun backToWizardProtocolSelection() {
+        if (isPreparingWizard || isInstallingSession) return
+        wizardStage = ConfigurationWizardStage.PROTOCOL_SELECTION
+    }
+
     fun backToWizardCatalogSelection() {
         if (isPreparingWizard || isInstallingSession) return
         wizardStage = ConfigurationWizardStage.CATALOG_SELECTION
@@ -252,7 +269,11 @@ class EditContainerViewModel : ViewModel() {
 
     fun wizardSessions(): List<GraphicSession> =
         containerCapabilities?.platform?.let { platform ->
-            GraphicSessionWizard.sessionsFor(platform, pendingWizardCatalogMode)
+            GraphicSessionWizard.sessionsFor(
+                platform,
+                pendingWizardCatalogMode,
+                pendingWizardProtocol
+            )
         }.orEmpty()
 
     fun isWizardSessionExperimental(session: GraphicSession): Boolean =
@@ -273,8 +294,14 @@ class EditContainerViewModel : ViewModel() {
             wizardError = "${selectedInit.name.lowercase()} is not available in this container."
             return
         }
-        if (session !in GraphicSessionWizard.sessionsFor(platform, pendingWizardCatalogMode)) {
-            wizardError = "${session.label} is not available for the detected ${platform.label} package platform."
+        if (
+            session !in GraphicSessionWizard.sessionsFor(
+                platform,
+                pendingWizardCatalogMode,
+                pendingWizardProtocol
+            )
+        ) {
+            wizardError = "${session.label} is not available for the detected ${platform.label} package platform and ${pendingWizardProtocol.label} protocol."
             return
         }
         wizardStage = ConfigurationWizardStage.HIDDEN

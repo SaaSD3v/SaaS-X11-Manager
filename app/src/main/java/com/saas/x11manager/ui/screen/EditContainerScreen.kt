@@ -26,6 +26,7 @@ import com.saas.x11manager.util.AlpineInstallProfileOverride
 import com.saas.x11manager.util.AptInstallRecommendationOverride
 import com.saas.x11manager.util.ContainerPlatform
 import com.saas.x11manager.util.ContainerStatus
+import com.saas.x11manager.util.GraphicProtocol
 import com.saas.x11manager.util.GraphicSession
 import com.saas.x11manager.util.GraphicSessionCatalogMode
 import com.saas.x11manager.util.InitSystem
@@ -162,7 +163,11 @@ fun EditContainerScreen(
                 },
                 onClear = { viewModel.clearInstallLogs() },
                 isBlocking = isInstalling,
-                primaryActionLabel = if (viewModel.canStartX11FromInstall) "Start X11" else null,
+                primaryActionLabel = if (viewModel.canStartX11FromInstall) {
+                    "Start ${graphicSession.protocol.label}"
+                } else {
+                    null
+                },
                 onPrimaryAction = if (viewModel.canStartX11FromInstall) {
                     { viewModel.quickStartX11() }
                 } else {
@@ -216,10 +221,10 @@ fun EditContainerScreen(
                                     "To apply the change safely, the container will be stopped before you continue."
                             )
                             Text(
-                                "Next you will choose one of the init backends detected in this container, choose " +
-                                    "the Stable or Experimental session catalog, and then choose a graphic session " +
-                                    "available for its detected package manager. Sessions that are already installed " +
-                                    "can be selected without downloading packages again, or reinstalled."
+                                "Next you will choose an init backend, choose X11 or Wayland, choose the Stable or " +
+                                    "Experimental catalog, and then choose a session available for the detected " +
+                                    "package manager. Installed sessions can be selected without downloading packages " +
+                                    "again, or reinstalled."
                             )
                         }
                     }
@@ -335,7 +340,7 @@ fun EditContainerScreen(
                         )
                         Text(
                             "Full installs the same session plan plus common desktop integration: " +
-                                "D-Bus X11 support, XDG utilities, fonts and icon themes."
+                                "D-Bus support, XDG utilities, fonts and icon themes."
                         )
                         Text("This choice applies only to this installation or reinstall.")
                     }
@@ -388,9 +393,9 @@ fun EditContainerScreen(
                 title = { Text(session.label) },
                 text = {
                     Text(
-                        "${session.label} is already installed. Select changes only the default graphic session " +
-                            "and ${selectedInit.name.lowercase()} startup configuration, without running apk/apt or " +
-                            "downloading packages. Reinstall runs the full installer again."
+                        "${session.label} is already installed for ${session.protocol.label}. Select changes only " +
+                            "the default graphic session and ${selectedInit.name.lowercase()} startup configuration, " +
+                            "without running apk/apt or downloading packages. Reinstall runs the full installer again."
                     )
                 },
                 dismissButton = {
@@ -493,7 +498,7 @@ fun EditContainerScreen(
                                 CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                                 Spacer(Modifier.width(8.dp))
                             }
-                            Text("Start X11")
+                            Text("Start ${session.protocol.label}")
                         }
 
                         selectionFailed -> Button(onClick = { selectingInstalledSession = null }) {
@@ -531,6 +536,38 @@ fun EditContainerScreen(
             }
         }
 
+        viewModel.wizardStage == ConfigurationWizardStage.PROTOCOL_SELECTION -> {
+            val selectedInit = viewModel.pendingWizardInitSystem ?: initSystem
+            val platformLabel = when (viewModel.containerCapabilities?.platform) {
+                ContainerPlatform.ALPINE -> "Alpine/apk"
+                ContainerPlatform.UBUNTU -> "Debian-family apt/dpkg"
+                null -> "package platform unavailable"
+            }
+            WizardChoiceDialog(
+                title = "Choose graphic protocol",
+                subtitle = "${if (selectedInit == InitSystem.OPENRC) "OpenRC" else "systemd"} selected · $platformLabel",
+                onDismiss = { viewModel.dismissConfigurationWizard() },
+                secondaryActionLabel = "Back",
+                onSecondaryAction = { viewModel.backToWizardInitSelection() }
+            ) {
+                WizardChoice(
+                    title = "X11",
+                    subtitle = "Direct X11 window managers and desktop sessions on the Manager display.",
+                    selected = viewModel.pendingWizardProtocol == GraphicProtocol.X11,
+                    installed = false,
+                    onClick = { viewModel.selectWizardProtocol(GraphicProtocol.X11) }
+                )
+                Spacer(Modifier.height(10.dp))
+                WizardChoice(
+                    title = "Wayland",
+                    subtitle = "Wayland compositors and sessions hosted through the Manager graphical runtime.",
+                    selected = viewModel.pendingWizardProtocol == GraphicProtocol.WAYLAND,
+                    installed = false,
+                    onClick = { viewModel.selectWizardProtocol(GraphicProtocol.WAYLAND) }
+                )
+            }
+        }
+
         viewModel.wizardStage == ConfigurationWizardStage.CATALOG_SELECTION -> {
             val selectedInit = viewModel.pendingWizardInitSystem ?: initSystem
             val platformLabel = when (viewModel.containerCapabilities?.platform) {
@@ -540,10 +577,10 @@ fun EditContainerScreen(
             }
             WizardChoiceDialog(
                 title = "Choose session catalog",
-                subtitle = "${if (selectedInit == InitSystem.OPENRC) "OpenRC" else "systemd"} selected · $platformLabel",
+                subtitle = "${if (selectedInit == InitSystem.OPENRC) "OpenRC" else "systemd"} selected · ${viewModel.pendingWizardProtocol.label} · $platformLabel",
                 onDismiss = { viewModel.dismissConfigurationWizard() },
                 secondaryActionLabel = "Back",
-                onSecondaryAction = { viewModel.backToWizardInitSelection() }
+                onSecondaryAction = { viewModel.backToWizardProtocolSelection() }
             ) {
                 WizardChoice(
                     title = "Stable",
@@ -580,7 +617,7 @@ fun EditContainerScreen(
             }
             WizardChoiceDialog(
                 title = "Choose graphic session",
-                subtitle = "${if (selectedInit == InitSystem.OPENRC) "OpenRC" else "systemd"} selected · $catalogLabel · $packageLabel",
+                subtitle = "${if (selectedInit == InitSystem.OPENRC) "OpenRC" else "systemd"} selected · ${viewModel.pendingWizardProtocol.label} · $catalogLabel · $packageLabel",
                 onDismiss = { viewModel.dismissConfigurationWizard() },
                 secondaryActionLabel = "Back",
                 onSecondaryAction = { viewModel.backToWizardCatalogSelection() }
@@ -664,7 +701,7 @@ fun EditContainerScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            "Use the guided flow to change the init system or graphic session. " +
+                            "Use the guided flow to change the init system, graphical protocol or graphic session. " +
                                 "Installed sessions can be selected again without reinstalling packages.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp
@@ -672,6 +709,7 @@ fun EditContainerScreen(
                         HorizontalDivider()
                         SummaryRow("Status", statusLabel(status))
                         SummaryRow("Init system", initSystem.name.lowercase())
+                        SummaryRow("Protocol", graphicSession.protocol.label)
                         SummaryRow("Graphic session", graphicSession.label)
                         Spacer(Modifier.height(6.dp))
                         Button(
