@@ -1,13 +1,5 @@
 package com.saas.x11manager.util
 
-/**
- * Catalog scope selected by the guided Graphic Session setup.
- *
- * STABLE only exposes sessions whose package source is part of the normal
- * supported repository path. EXPERIMENTAL is additive: it always includes the
- * stable catalog and may also expose sessions that require explicitly
- * experimental package sources.
- */
 enum class GraphicSessionCatalogMode {
     STABLE,
     EXPERIMENTAL
@@ -18,14 +10,27 @@ enum class GraphicSessionCatalogMode {
  *
  * Package availability belongs to the detected container package platform,
  * while init-system and graphical-protocol selection remain independent. The
- * legacy overload is kept for callers/tests that still need the old presentation
- * mapping during the migration.
+ * capability-aware overload also filters distro/architecture constraints.
  */
 object GraphicSessionWizard {
     fun platformFor(initSystem: InitSystem): ContainerPlatform = when (initSystem) {
         InitSystem.OPENRC -> ContainerPlatform.ALPINE
         InitSystem.SYSTEMD -> ContainerPlatform.UBUNTU
     }
+
+    fun sessionsFor(
+        capabilities: ContainerCapabilities,
+        catalogMode: GraphicSessionCatalogMode,
+        protocol: GraphicProtocol
+    ): List<GraphicSession> =
+        GraphicSessionSupport.installableSessions.filter { session ->
+            if (session.protocol != protocol) return@filter false
+            val platform = capabilities.platform ?: return@filter false
+            val plan = GraphicSessionInstallPlans.forSelection(platform, session)
+                ?: return@filter false
+            if (!plan.supports(capabilities)) return@filter false
+            catalogMode == GraphicSessionCatalogMode.EXPERIMENTAL || isStable(plan)
+        }
 
     fun sessionsFor(
         platform: ContainerPlatform,
@@ -59,6 +64,16 @@ object GraphicSessionWizard {
             GraphicSessionCatalogMode.STABLE,
             GraphicProtocol.X11
         )
+
+    fun isExperimental(
+        capabilities: ContainerCapabilities,
+        session: GraphicSession
+    ): Boolean {
+        val platform = capabilities.platform ?: return false
+        val plan = GraphicSessionInstallPlans.forSelection(platform, session) ?: return false
+        if (!plan.supports(capabilities)) return false
+        return !isStable(plan)
+    }
 
     fun isExperimental(
         platform: ContainerPlatform,
