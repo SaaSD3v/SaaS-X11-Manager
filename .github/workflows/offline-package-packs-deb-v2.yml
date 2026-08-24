@@ -1,0 +1,190 @@
+name: Build Debian Ubuntu Offline Packs v2
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/offline-package-packs
+    paths:
+      - .github/workflows/offline-package-packs-deb-v2.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offline-deb-v2-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QVIEW_VERSION: "7.1"
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: debian-13-arm64
+            label: Debian 13 arm64
+            image: debian:13-slim
+          - id: ubuntu-26.04-arm64
+            label: Ubuntu 26.04 arm64
+            image: ubuntu:26.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable ARM64 emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Prepare output
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf out
+          mkdir -p out
+
+      - name: Build offline repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --platform linux/arm64 \
+            -e DEBIAN_FRONTEND=noninteractive \
+            -e QVIEW_VERSION="${QVIEW_VERSION}" \
+            -e TARGET_ID="${{ matrix.id }}" \
+            -v "$PWD/out:/out" \
+            "${{ matrix.image }}" /bin/bash -euxc '
+              # Ubuntu packages used here live in universe. Make the component
+              # explicit instead of depending on the current container image defaults.
+              if [ -f /etc/os-release ] && grep -q "^ID=ubuntu$" /etc/os-release; then
+                if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+                  sed -i "s/^Components:.*/Components: main universe restricted multiverse/" /etc/apt/sources.list.d/ubuntu.sources
+                fi
+              fi
+
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                ca-certificates git wget build-essential dpkg-dev \
+                qtbase5-dev qttools5-dev-tools libqt5svg5-dev \
+                qt5-image-formats-plugins libqt5x11extras5-dev
+
+              rm -rf /out/repo /tmp/qview /tmp/qview-pkg
+              mkdir -p /out/repo/packages /tmp/qview-pkg/DEBIAN
+
+              # qView 7.1 is not assumed to exist in either distro repository.
+              # Build it inside the exact target ARM64 userspace.
+              git clone --depth 1 --branch "${QVIEW_VERSION}" https://github.com/jurplel/qView.git /tmp/qview
+              cd /tmp/qview
+              qmake PREFIX=/usr CONFIG+=release qView.pro
+              make -j2
+              make INSTALL_ROOT=/tmp/qview-pkg install
+
+              # Derive qView runtime package names from the libraries linked by the
+              # actual ARM64 binary. This avoids hard-coding Debian/Ubuntu t64 names.
+              ldd /tmp/qview-pkg/usr/bin/qview \
+                | awk "{ if (\$2 == \"=>\" && \$3 ~ /^\//) print \$3; else if (\$1 ~ /^\//) print \$1 }" \
+                | sort -u > /tmp/qview.libs
+              : > /tmp/qview.dep.pkgs
+              while IFS= read -r lib; do
+                dpkg-query -S "$lib" 2>/dev/null | head -n1 | cut -d: -f1 >> /tmp/qview.dep.pkgs || true
+              done < /tmp/qview.libs
+              sort -u /tmp/qview.dep.pkgs -o /tmp/qview.dep.pkgs
+              test -s /tmp/qview.dep.pkgs
+              QVIEW_DEPS="$(tr "\n" " " < /tmp/qview.dep.pkgs)"
+              QVIEW_CONTROL_DEPS="$(paste -sd, /tmp/qview.dep.pkgs | sed "s/,/, /g")"
+
+              cat > /tmp/qview-pkg/DEBIAN/control <<EOF
+          Package: qview
+          Version: ${QVIEW_VERSION}-1
+          Section: graphics
+          Priority: optional
+          Architecture: arm64
+          Maintainer: Droidspaces Offline Pack <noreply@droidspaces.local>
+          Depends: ${QVIEW_CONTROL_DEPS}
+          Description: Practical and minimal image viewer
+           qView packaged for the Droidspaces offline ARM64 repository.
+          EOF
+              dpkg-deb --build --root-owner-group /tmp/qview-pkg "/out/repo/packages/qview_${QVIEW_VERSION}-1_arm64.deb"
+
+              # Resolve against an empty package status so build dependencies already
+              # installed in this builder cannot silently disappear from the closure.
+              : > /tmp/offline-status
+              apt-get \
+                -o Dir::State::status=/tmp/offline-status \
+                --print-uris \
+                --download-only \
+                --no-install-recommends \
+                -y install \
+                nano vim htop \
+                openssh-server openssh-client \
+                tigervnc-standalone-server tigervnc-tools \
+                fastfetch kitty mpv audacious audacious-plugins thunar \
+                ${QVIEW_DEPS} \
+                > /tmp/apt-uris.txt
+
+              sed -n "s/^'\''\([^'\'']*\.deb\)'\''.*/\1/p" /tmp/apt-uris.txt | sort -u > /tmp/urls.txt
+              test -s /tmp/urls.txt
+              wget -nv -c -P /out/repo/packages -i /tmp/urls.txt
+
+              cd /out/repo
+              dpkg-scanpackages packages /dev/null > Packages
+              gzip -9c Packages > Packages.gz
+
+              cat > catalog.txt <<EOF
+          nano|Nano
+          vim|Vim
+          htop|htop
+          openssh-server|OpenSSH
+          tigervnc-standalone-server|TigerVNC
+          fastfetch|Fastfetch
+          kitty|Kitty
+          mpv|MPV
+          qview|qView
+          audacious|Audacious
+          thunar|Thunar
+          EOF
+              printf "%s\narm64\n" "${TARGET_ID}" > target.txt
+              sha256sum packages/*.deb Packages.gz > SHA256SUMS
+              dpkg --print-architecture > builder-architecture.txt
+
+              # Repository-level sanity checks before leaving target userspace.
+              test "$(cat builder-architecture.txt)" = arm64
+              test -s Packages.gz
+              test -s SHA256SUMS
+              test -f packages/qview_${QVIEW_VERSION}-1_arm64.deb
+              for p in nano vim htop openssh-server tigervnc-standalone-server fastfetch kitty mpv audacious thunar qview; do
+                grep -q "^Package: ${p}$" Packages || { echo "missing package in local repo: ${p}" >&2; exit 1; }
+              done
+            '
+
+          tar --zstd -C out/repo -cf "out/Droidspaces-Offline-${{ matrix.id }}.tar.zst" .
+          du -h "out/Droidspaces-Offline-${{ matrix.id }}.tar.zst"
+
+      - name: Validate pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/check-pack
+          mkdir -p /tmp/check-pack
+          tar --zstd -xf "out/Droidspaces-Offline-${{ matrix.id }}.tar.zst" -C /tmp/check-pack
+          test -s /tmp/check-pack/catalog.txt
+          test -s /tmp/check-pack/target.txt
+          test -s /tmp/check-pack/Packages.gz
+          test -s /tmp/check-pack/SHA256SUMS
+          (cd /tmp/check-pack && sha256sum -c SHA256SUMS)
+          test -n "$(find /tmp/check-pack/packages -name "*.deb" -print -quit)"
+          du -sh /tmp/check-pack
+
+      - name: Upload final pack
+        uses: actions/upload-artifact@v4
+        with:
+          name: Droidspaces-Offline-${{ matrix.id }}
+          path: out/Droidspaces-Offline-${{ matrix.id }}.tar.zst
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
