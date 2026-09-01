@@ -17,8 +17,8 @@ enum class SessionAccessMode(
  *
  * The Manager does not embed a VNC server. These values are consumed by the
  * external TigerVNC launcher/configuration flow. VNC passwords are deliberately
- * not persisted here: TigerVNC stores only its encrypted password file inside
- * the container.
+ * not persisted here: TigerVNC stores its obfuscated VNCAuth password file inside
+ * the container and the Manager drops the plaintext after a successful start.
  */
 object VncSettings {
     const val DEFAULT_PORT = 5901
