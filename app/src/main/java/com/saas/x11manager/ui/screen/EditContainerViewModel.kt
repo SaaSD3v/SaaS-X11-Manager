@@ -21,9 +21,11 @@ import com.saas.x11manager.util.GraphicSessionInstaller
 import com.saas.x11manager.util.GraphicSessionRegistry
 import com.saas.x11manager.util.GraphicSessionWizard
 import com.saas.x11manager.util.InitSystem
+import com.saas.x11manager.util.SessionAccessManager
+import com.saas.x11manager.util.SessionAccessMode
 import com.saas.x11manager.util.ViewModelLogger
+import com.saas.x11manager.util.VncSettings
 import com.saas.x11manager.util.WaylandGraphicSessionInstaller
-import com.saas.x11manager.util.X11SessionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -36,7 +38,8 @@ enum class ConfigurationWizardStage {
     INIT_SELECTION,
     PROTOCOL_SELECTION,
     CATALOG_SELECTION,
-    SESSION_SELECTION
+    SESSION_SELECTION,
+    ACCESS_SELECTION
 }
 
 class EditContainerViewModel : ViewModel() {
@@ -85,6 +88,13 @@ class EditContainerViewModel : ViewModel() {
         private set
     var pendingWizardCatalogMode by mutableStateOf(GraphicSessionCatalogMode.STABLE)
         private set
+    var pendingWizardSession by mutableStateOf<GraphicSession?>(null)
+        private set
+    var pendingAccessMode by mutableStateOf(SessionAccessMode.INTEGRATED_X11)
+        private set
+    var pendingVncPort by mutableStateOf(VncSettings.DEFAULT_PORT)
+        private set
+    private var pendingVncPassword: String? = null
     var isPreparingWizard by mutableStateOf(false)
         private set
     var wizardError by mutableStateOf<String?>(null)
@@ -95,6 +105,13 @@ class EditContainerViewModel : ViewModel() {
         private set
     var quickStartCompleted by mutableStateOf(false)
         private set
+
+    val startActionLabel: String
+        get() = when (pendingAccessMode) {
+            SessionAccessMode.INTEGRATED_X11 -> "Start X11"
+            SessionAccessMode.VNC -> "Start VNC"
+            SessionAccessMode.BOTH -> "Start Both"
+        }
 
     // Kept while older UI/tests migrate to the protocol-neutral name.
     val canStartX11FromInstall: Boolean
@@ -141,6 +158,10 @@ class EditContainerViewModel : ViewModel() {
             wizardError = null
             pendingWizardProtocol = graphicSession.protocol
             pendingWizardCatalogMode = GraphicSessionCatalogMode.STABLE
+            pendingWizardSession = null
+            pendingAccessMode = SessionAccessMode.INTEGRATED_X11
+            pendingVncPort = VncSettings.DEFAULT_PORT
+            pendingVncPassword = null
             canStartGraphicSessionFromInstall = false
             quickStartCompleted = false
         }
@@ -153,6 +174,8 @@ class EditContainerViewModel : ViewModel() {
         wizardError = null
         pendingWizardProtocol = graphicSession.protocol
         pendingWizardCatalogMode = GraphicSessionCatalogMode.STABLE
+        pendingWizardSession = null
+        pendingVncPassword = null
         isPreparingWizard = true
 
         viewModelScope.launch {
@@ -175,9 +198,6 @@ class EditContainerViewModel : ViewModel() {
                 } else {
                     detected.availableInitSystems.first()
                 }
-                // Distribution is intentionally the first visible configuration
-                // popup. Runtime detection remains authoritative; the click simply
-                // confirms the detected distro and advances the guided flow.
                 wizardStage = ConfigurationWizardStage.DISTRIBUTION_SELECTION
             } catch (e: Exception) {
                 Log.e("EditContainerViewModel", "capability detection failed", e)
@@ -193,6 +213,8 @@ class EditContainerViewModel : ViewModel() {
         if (isPreparingWizard || isInstallingSession) return
         wizardStage = ConfigurationWizardStage.HIDDEN
         wizardStarted = false
+        pendingWizardSession = null
+        pendingVncPassword = null
     }
 
     fun confirmDetectedDistribution() {
@@ -261,6 +283,47 @@ class EditContainerViewModel : ViewModel() {
         wizardStage = ConfigurationWizardStage.SESSION_SELECTION
     }
 
+    fun selectWizardSession(session: GraphicSession) {
+        if (isPreparingWizard || isInstallingSession) return
+        if (session !in wizardSessions()) {
+            wizardError = "${session.label} is not available for the current wizard selection."
+            return
+        }
+        pendingWizardSession = session
+        wizardStage = ConfigurationWizardStage.ACCESS_SELECTION
+    }
+
+    fun confirmWizardAccess(
+        mode: SessionAccessMode,
+        port: Int,
+        password: String?
+    ): Boolean {
+        if (isPreparingWizard || isInstallingSession) return false
+        if (pendingWizardSession == null) {
+            wizardError = "No graphic session is selected."
+            return false
+        }
+        if (!VncSettings.isValidPort(port)) {
+            wizardError = "Invalid VNC port: $port"
+            return false
+        }
+        if (mode.requiresVnc) {
+            if (password == null || !VncSettings.isValidPassword(password)) {
+                wizardError =
+                    "VNC password must contain ${VncSettings.MIN_PASSWORD_LENGTH}-${VncSettings.MAX_PASSWORD_LENGTH} characters."
+                return false
+            }
+            pendingVncPassword = password
+        } else {
+            pendingVncPassword = null
+        }
+        pendingAccessMode = mode
+        pendingVncPort = port
+        wizardStage = ConfigurationWizardStage.HIDDEN
+        wizardStarted = false
+        return true
+    }
+
     fun backToWizardDistributionSelection() {
         if (isPreparingWizard || isInstallingSession) return
         wizardStage = ConfigurationWizardStage.DISTRIBUTION_SELECTION
@@ -283,6 +346,7 @@ class EditContainerViewModel : ViewModel() {
 
     fun returnToWizardSessionSelection() {
         if (isPreparingWizard || isInstallingSession) return
+        pendingWizardSession = null
         wizardStage = ConfigurationWizardStage.SESSION_SELECTION
     }
 
@@ -325,6 +389,7 @@ class EditContainerViewModel : ViewModel() {
             return
         }
         wizardStage = ConfigurationWizardStage.HIDDEN
+        pendingWizardSession = session
         installSessionWithInit(session, selectedInit)
     }
 
@@ -445,12 +510,19 @@ class EditContainerViewModel : ViewModel() {
                     logger.i("")
                     logger.i("[+] ${session.label} installation completed successfully")
                     logger.i("[+] Protocol: $protocolLabel")
-                    if (session.protocol == GraphicProtocol.WAYLAND) {
+                    logger.i("[+] Access method: ${pendingAccessMode.label}")
+                    if (pendingAccessMode.requiresVnc) {
+                        logger.i("[+] VNC port: $pendingVncPort")
+                        logger.i("[+] TigerVNC will be checked and installed only if needed when starting")
+                    }
+                    if (session.protocol == GraphicProtocol.WAYLAND && pendingAccessMode.usesIntegratedX11) {
                         logger.i("[+] Host transport: Integrated X11")
                     }
-                    logger.i("[+] Monitor: assigned dynamically on next Start $protocolLabel (lowest available)")
-                    logger.i("[+] Use Start $protocolLabel below to launch this container now")
-                    installResult = "OK: ${session.label} installed · monitor assigned on Start $protocolLabel"
+                    if (pendingAccessMode.usesIntegratedX11) {
+                        logger.i("[+] Monitor: assigned dynamically on next start (lowest available)")
+                    }
+                    logger.i("[+] Use $startActionLabel below to launch this container now")
+                    installResult = "OK: ${session.label} installed · ${pendingAccessMode.label}"
                     canStartGraphicSessionFromInstall = true
                     quickStartCompleted = false
                 } else {
@@ -469,44 +541,47 @@ class EditContainerViewModel : ViewModel() {
 
     fun quickStartGraphicSession() {
         if (isInstallingSession || !canStartGraphicSessionFromInstall) return
+        startConfiguredAccess()
+    }
 
-        val protocolLabel = graphicSession.protocol.label
+    fun startConfiguredAccess() {
+        if (isInstallingSession || isSaving || graphicSession == GraphicSession.NONE) return
+
         installLogs.add(Log.INFO to "")
-        installLogs.add(Log.INFO to "--- Starting $protocolLabel ---")
-        sessionOperationTitle = "Starting $protocolLabel: ${graphicSession.label}"
+        installLogs.add(Log.INFO to "--- $startActionLabel ---")
+        sessionOperationTitle = "$startActionLabel: ${graphicSession.label}"
+        showInstallTerminal = true
         isInstallingSession = true
         quickStartCompleted = false
         val logger = operationLogger()
+        val passwordForAttempt = pendingVncPassword
 
         viewModelScope.launch {
             try {
-                // X11SessionManager owns the Android/Termux:X11 host transport for
-                // both direct X11 sessions and nested Wayland compositors.
-                X11SessionManager.startX11Session(
+                val started = SessionAccessManager.start(
                     containerName = containerName,
+                    platform = containerCapabilities?.platform,
+                    session = graphicSession,
+                    accessMode = pendingAccessMode,
+                    vncPort = pendingVncPort,
+                    vncPassword = passwordForAttempt,
                     logger = logger
                 )
                 val (runtimeStatus, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
                 status = runtimeStatus
-                if (runtimeStatus == ContainerStatus.RUNNING) {
-                    val displaySlot = X11SessionManager.getDisplayForContainer(containerName)
-                    if (displaySlot != null) {
-                        logger.i("[+] Active host monitor: ${displaySlot.describe()}")
-                        installResult =
-                            "OK: $protocolLabel started with ${graphicSession.label} · " +
-                                "Monitor ${displaySlot.monitorNumber} (${displaySlot.displayName})"
-                    } else {
-                        logger.w("[!] $protocolLabel started, but the active host monitor could not be resolved")
-                        installResult = "OK: $protocolLabel started with ${graphicSession.label}"
-                    }
+                if (started && runtimeStatus == ContainerStatus.RUNNING) {
+                    installResult = "OK: ${graphicSession.label} started · ${pendingAccessMode.label}"
                     canStartGraphicSessionFromInstall = false
                     quickStartCompleted = true
+                    // After the first successful VNC setup TigerVNC owns only the
+                    // encrypted passwd file inside the container; drop plaintext.
+                    if (pendingAccessMode.requiresVnc) pendingVncPassword = null
                 } else {
-                    installResult = "Warning: $protocolLabel start requested, but container state is ${runtimeStatus.name.lowercase()}"
+                    installResult = "Error: ${pendingAccessMode.label} start failed"
                     canStartGraphicSessionFromInstall = true
                 }
             } catch (e: Exception) {
-                logOperationException(e, "$protocolLabel start failed")
+                logOperationException(e, "${pendingAccessMode.label} start failed")
                 canStartGraphicSessionFromInstall = true
             } finally {
                 isInstallingSession = false
