@@ -1,6 +1,8 @@
 package com.saas.x11manager.util
 
 import com.topjohnwu.superuser.Shell
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Final user-facing connection hint printed after a successful VNC start.
@@ -18,11 +20,13 @@ object VncConnectionGuide {
     ) {
         if (logger == null) return
 
+        val (netMode, preferredLan) = withContext(Dispatchers.IO) {
+            ContainerManager.getContainerInfo(containerName)?.netMode?.lowercase() to preferredLanAddress()
+        }
+
         logger.i("")
         logger.i("--- VNC Quick Connection Guide ---")
 
-        val netMode = ContainerManager.getContainerInfo(containerName)?.netMode?.lowercase()
-        val preferredLan = preferredLanAddress()
         if (preferredLan == null) {
             logger.w("[LAN] Android LAN/Wi-Fi IPv4 address could not be detected")
         } else if (netMode == "host") {
