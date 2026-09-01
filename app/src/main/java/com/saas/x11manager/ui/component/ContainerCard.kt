@@ -31,7 +31,8 @@ data class ContainerCardActions(
     val onStop: () -> Unit = {},
     val onToggleExpand: () -> Unit = {},
     val onShowLogs: () -> Unit = {},
-    val onEdit: () -> Unit = {}
+    val onEdit: () -> Unit = {},
+    val onGeneralSettings: () -> Unit = {}
 )
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -211,6 +212,13 @@ fun ContainerCard(
                         label = "Edit container",
                         tint = MaterialTheme.colorScheme.primary,
                         onClick = actions.onEdit
+                    )
+
+                    ActionItem(
+                        icon = Icons.Default.Settings,
+                        label = "General settings",
+                        tint = MaterialTheme.colorScheme.primary,
+                        onClick = actions.onGeneralSettings
                     )
 
                     if (!container.isRunning) {
