@@ -96,10 +96,6 @@ class HomeViewModel : ViewModel() {
             if (!initialized) _isLoading.value = true
 
             try {
-                // The Home screen only waits for state needed to operate the app.
-                // Technical diagnostics (provider identity, full DroidSpaces check,
-                // device/kernel details) run immediately afterwards without keeping
-                // the initial UI behind potentially expensive privileged commands.
                 val operational = coroutineScope {
                     val rootDef = async(Dispatchers.IO) {
                         RootChecker.checkRootAccess()
@@ -275,7 +271,11 @@ class HomeViewModel : ViewModel() {
         return true
     }
 
-    fun startX11(container: ContainerInfo) {
+    fun startSession(
+        container: ContainerInfo,
+        accessMode: SessionAccessMode,
+        vncPort: Int
+    ) {
         if (!tryBeginOperation(container.name)) return
 
         viewModelScope.launch {
@@ -285,8 +285,31 @@ class HomeViewModel : ViewModel() {
             val logger = ViewModelLogger { level, message -> appendLog(logs, level, message) }
 
             try {
-                X11SessionManager.startX11Session(
+                val profile = withContext(Dispatchers.IO) {
+                    ContainerSettingsManager.readSnapshot(
+                        containerName = container.name,
+                        forceRefresh = true
+                    )
+                }
+                val session = profile.graphicSession
+                if (session == null || session == GraphicSession.NONE) {
+                    logger.e("[-] No configured graphic session found for ${container.name}")
+                    logger.e("[-] Open Edit container and configure a graphic session first")
+                    return@launch
+                }
+
+                logger.i("[CTX] Saved access method: ${accessMode.label}")
+                if (accessMode.requiresVnc) {
+                    logger.i("[CTX] Saved VNC port: $vncPort")
+                }
+
+                val started = SessionAccessManager.start(
                     containerName = container.name,
+                    platform = profile.platform,
+                    session = session,
+                    accessMode = accessMode,
+                    vncPort = vncPort,
+                    vncPassword = null,
                     logger = logger
                 )
 
@@ -294,8 +317,11 @@ class HomeViewModel : ViewModel() {
                 if (running) {
                     updateContainerState(container.name, ContainerStatus.RUNNING, pid)
                 }
+                if (!started) {
+                    logger.e("[-] ${accessMode.label} start was not fully confirmed")
+                }
             } catch (e: Exception) {
-                Log.e("HomeViewModel", "startX11 failed", e)
+                Log.e("HomeViewModel", "startSession failed", e)
                 logger.e("Error: ${e.message}")
             } finally {
                 runningOperationContainer = null
@@ -303,6 +329,14 @@ class HomeViewModel : ViewModel() {
             }
         }
     }
+
+    /** Backward-compatible direct X11 entry point for existing callers/tests. */
+    fun startX11(container: ContainerInfo) =
+        startSession(
+            container = container,
+            accessMode = SessionAccessMode.INTEGRATED_X11,
+            vncPort = VncSettings.DEFAULT_PORT
+        )
 
     fun stopContainer(container: ContainerInfo) {
         if (!tryBeginOperation(container.name)) return
@@ -314,7 +348,10 @@ class HomeViewModel : ViewModel() {
             val logger = ViewModelLogger { level, message -> appendLog(logs, level, message) }
 
             try {
-                val stopped = ContainerManager.stopContainer(container.name, logger)
+                // VNC is an external process inside the container. Clear only
+                // Manager-owned VNC PIDs/state before the container disappears.
+                VncServerManager.stopManagedVnc(container.name, logger)
+                val stopped = X11SessionManager.stopX11Session(container.name, logger)
                 if (stopped) {
                     updateContainerState(container.name, ContainerStatus.STOPPED, null)
                 }
@@ -334,6 +371,10 @@ class HomeViewModel : ViewModel() {
         viewModelScope.launch {
             val logger = ViewModelLogger { _, _ -> }
             try {
+                val currentContainers = ContainerManager.listContainers()
+                currentContainers.filter { it.isRunning }.forEach { container ->
+                    VncServerManager.stopManagedVnc(container.name, logger)
+                }
                 X11SessionManager.stopAll(logger)
                 _containers.value = _containers.value.map {
                     it.copy(status = ContainerStatus.STOPPED, pid = null)
@@ -360,7 +401,7 @@ class HomeViewModel : ViewModel() {
                 appendLog(logs, Log.INFO, "  Hostname: ${container.hostname}")
             }
             appendLog(logs, Log.INFO, "")
-            appendLog(logs, Log.INFO, "Start X11 session to see live logs.")
+            appendLog(logs, Log.INFO, "Start the configured graphic session to see live logs.")
         }
     }
 
@@ -395,8 +436,6 @@ class HomeViewModel : ViewModel() {
     ) {
         logs.add(level to message)
         if (logs.size > MAX_LOG_ENTRIES) {
-            // Trim in one snapshot update instead of repeatedly shifting the
-            // backing list hundreds of times while a package manager is noisy.
             val retained = logs.takeLast(LOG_ENTRIES_AFTER_TRIM)
             logs.clear()
             logs.addAll(retained)
