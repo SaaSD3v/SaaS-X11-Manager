@@ -22,12 +22,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.saas.x11manager.util.AnimationUtils
 import com.saas.x11manager.util.ContainerInfo
 import com.saas.x11manager.util.ContainerStatus
-import com.saas.x11manager.util.AnimationUtils
 
 data class ContainerCardActions(
     val onStartX11: () -> Unit = {},
+    val startLabel: String = "Start X11",
     val onStop: () -> Unit = {},
     val onToggleExpand: () -> Unit = {},
     val onShowLogs: () -> Unit = {},
@@ -68,7 +69,6 @@ fun ContainerCard(
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header row
             Row(
                 modifier = Modifier.fillMaxWidth().height(32.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -84,7 +84,7 @@ fun ContainerCard(
                         contentDescription = null,
                         modifier = Modifier.size(24.dp),
                         tint = if (container.isRunning) MaterialTheme.colorScheme.primary
-                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                     )
                     Text(
                         text = container.name,
@@ -118,7 +118,6 @@ fun ContainerCard(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
-            // PID
             if (container.pid != null) {
                 Text(
                     "PID: ${container.pid}",
@@ -127,7 +126,6 @@ fun ContainerCard(
                 )
             }
 
-            // Control buttons
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -148,17 +146,30 @@ fun ContainerCard(
                             modifier = Modifier.weight(1f).height(48.dp),
                             shape = RoundedCornerShape(16.dp),
                             color = if (isStopEnabled) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
-                                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
-                            border = BorderStroke(1.dp, (if (isStopEnabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outlineVariant).copy(alpha = 0.2f))
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                            border = BorderStroke(
+                                1.dp,
+                                (if (isStopEnabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outlineVariant).copy(alpha = 0.2f)
+                            )
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxSize(),
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.Stop, null, modifier = Modifier.size(20.dp), tint = if (isStopEnabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outlineVariant)
+                                Icon(
+                                    Icons.Default.Stop,
+                                    null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = if (isStopEnabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outlineVariant
+                                )
                                 Spacer(Modifier.width(8.dp))
-                                Text("Stop", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = if (isStopEnabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outlineVariant)
+                                Text(
+                                    "Stop",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isStopEnabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outlineVariant
+                                )
                             }
                         }
                     } else {
@@ -169,24 +180,36 @@ fun ContainerCard(
                             modifier = Modifier.weight(1f).height(48.dp),
                             shape = RoundedCornerShape(16.dp),
                             color = if (isStartEnabled) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-                                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
-                            border = BorderStroke(1.dp, (if (isStartEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant).copy(alpha = 0.2f))
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                            border = BorderStroke(
+                                1.dp,
+                                (if (isStartEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant).copy(alpha = 0.2f)
+                            )
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxSize(),
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(20.dp), tint = if (isStartEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = if (isStartEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                )
                                 Spacer(Modifier.width(8.dp))
-                                Text("Start X11", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = if (isStartEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)
+                                Text(
+                                    actions.startLabel,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isStartEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                )
                             }
                         }
                     }
                 }
             }
 
-            // Expanded action drawer (Droidspaces style)
             AnimatedVisibility(
                 visible = isExpanded,
                 enter = expandVertically(animationSpec = AnimationUtils.mediumSpec(), expandFrom = Alignment.Top) + fadeIn(),
@@ -224,7 +247,7 @@ fun ContainerCard(
                     if (!container.isRunning) {
                         ActionItem(
                             icon = Icons.Default.PlayArrow,
-                            label = "Start X11",
+                            label = actions.startLabel,
                             tint = MaterialTheme.colorScheme.primary,
                             onClick = actions.onStartX11
                         )
