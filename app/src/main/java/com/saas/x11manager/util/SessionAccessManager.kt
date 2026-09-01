@@ -39,14 +39,23 @@ object SessionAccessManager {
             }
 
             SessionAccessMode.VNC -> {
-                VncServerManager.startStandalone(
+                val result = VncServerManager.startStandalone(
                     containerName = containerName,
                     platform = platform,
                     session = session,
                     port = vncPort,
                     password = vncPassword,
                     logger = logger
-                ).success
+                )
+                if (result.success) {
+                    VncConnectionGuide.logAfterSuccessfulStart(
+                        containerName = containerName,
+                        port = vncPort,
+                        password = vncPassword,
+                        logger = logger
+                    )
+                }
+                result.success
             }
 
             SessionAccessMode.BOTH -> {
@@ -73,6 +82,12 @@ object SessionAccessManager {
                         false
                     } else {
                         logger?.i("[+] Integrated X11 and VNC are sharing the same ${slot.describe()} session")
+                        VncConnectionGuide.logAfterSuccessfulStart(
+                            containerName = containerName,
+                            port = vncPort,
+                            password = vncPassword,
+                            logger = logger
+                        )
                         true
                     }
                 }
