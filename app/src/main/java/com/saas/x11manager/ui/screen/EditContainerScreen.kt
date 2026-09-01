@@ -137,6 +137,34 @@ fun EditContainerScreen(
         }
     }
 
+    // The popup selection is only a pending choice. Commit it to Home after the
+    // requested package/configuration operation actually succeeds, never merely
+    // because the user tapped a radio button.
+    LaunchedEffect(
+        viewModel.canStartGraphicSessionFromInstall,
+        viewModel.pendingAccessMode,
+        containerName
+    ) {
+        if (viewModel.canStartGraphicSessionFromInstall) {
+            VncSettings.setAccessMode(context, containerName, viewModel.pendingAccessMode)
+        }
+    }
+
+    LaunchedEffect(
+        saveError,
+        selectingInstalledSession,
+        viewModel.pendingAccessMode,
+        containerName
+    ) {
+        if (
+            selectingInstalledSession != null &&
+            !isSaving &&
+            saveError?.startsWith("OK") == true
+        ) {
+            VncSettings.setAccessMode(context, containerName, viewModel.pendingAccessMode)
+        }
+    }
+
     val effectiveRunningWarningMode = runningWarningMode ?: if (
         viewModel.wizardStage == ConfigurationWizardStage.RUNNING_WARNING
     ) {
@@ -612,7 +640,6 @@ fun EditContainerScreen(
                     onBack = { viewModel.returnToWizardSessionSelection() },
                     onConfirm = { mode, password ->
                         if (viewModel.confirmWizardAccess(mode, port, password)) {
-                            VncSettings.setAccessMode(context, containerName, mode)
                             if (viewModel.isSessionInstalled(session)) {
                                 installedActionSession = session
                             } else {
