@@ -137,15 +137,19 @@ fun EditContainerScreen(
         }
     }
 
-    // The popup selection is only a pending choice. Commit it to Home after the
-    // requested package/configuration operation actually succeeds, never merely
-    // because the user tapped a radio button.
+    // Integrated X11 needs no extra credential provisioning, so it can become
+    // the Home default as soon as the session install/configuration succeeds.
+    // VNC/Both are committed only after TigerVNC has actually started once and
+    // created its container-side password file successfully.
     LaunchedEffect(
         viewModel.canStartGraphicSessionFromInstall,
         viewModel.pendingAccessMode,
         containerName
     ) {
-        if (viewModel.canStartGraphicSessionFromInstall) {
+        if (
+            viewModel.canStartGraphicSessionFromInstall &&
+            !viewModel.pendingAccessMode.requiresVnc
+        ) {
             VncSettings.setAccessMode(context, containerName, viewModel.pendingAccessMode)
         }
     }
@@ -159,8 +163,19 @@ fun EditContainerScreen(
         if (
             selectingInstalledSession != null &&
             !isSaving &&
-            saveError?.startsWith("OK") == true
+            saveError?.startsWith("OK") == true &&
+            !viewModel.pendingAccessMode.requiresVnc
         ) {
+            VncSettings.setAccessMode(context, containerName, viewModel.pendingAccessMode)
+        }
+    }
+
+    LaunchedEffect(
+        viewModel.quickStartCompleted,
+        viewModel.pendingAccessMode,
+        containerName
+    ) {
+        if (viewModel.quickStartCompleted) {
             VncSettings.setAccessMode(context, containerName, viewModel.pendingAccessMode)
         }
     }
