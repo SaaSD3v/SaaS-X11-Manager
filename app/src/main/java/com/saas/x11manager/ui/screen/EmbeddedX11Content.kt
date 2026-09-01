@@ -96,6 +96,7 @@ internal fun EmbeddedX11Surface(
                 requestFocus()
                 EmbeddedDisplayHost.selectDisplay(displayName)
                 EmbeddedDisplayHost.tryConnect()
+                scheduleEmbeddedSurfaceResync(this)
             }
         },
         update = { view ->
@@ -110,6 +111,47 @@ internal fun EmbeddedX11Surface(
             if (!connected) EmbeddedDisplayHost.tryConnect()
         }
     )
+}
+
+/**
+ * A newly-created SurfaceView can reconnect to the long-lived X11 server before
+ * Android has finished publishing its replacement Surface. In that narrow
+ * window the embedded renderer is technically connected, but it can initially
+ * show only the X root/cursor until a later client damage event arrives.
+ *
+ * Re-assert the viewport once, after both the X11 connection and Android Surface
+ * are ready. The retry is bounded and never restarts the X server, container or
+ * graphical session.
+ */
+private fun scheduleEmbeddedSurfaceResync(view: LorieView, attempt: Int = 0) {
+    if (attempt >= 6) return
+
+    val delayMs = when (attempt) {
+        0 -> 60L
+        1 -> 120L
+        2 -> 240L
+        else -> 400L
+    }
+
+    view.postDelayed({
+        if (EmbeddedDisplayHost.getActiveView() !== view || !view.isAttachedToWindow) {
+            return@postDelayed
+        }
+
+        if (!view.connected()) {
+            EmbeddedDisplayHost.tryConnect()
+            scheduleEmbeddedSurfaceResync(view, attempt + 1)
+            return@postDelayed
+        }
+
+        if (!view.holder.surface.isValid) {
+            scheduleEmbeddedSurfaceResync(view, attempt + 1)
+            return@postDelayed
+        }
+
+        view.triggerCallback()
+        view.postInvalidateOnAnimation()
+    }, delayMs)
 }
 
 private val modifierKeyCodes = mapOf(
