@@ -30,8 +30,7 @@ import com.saas.x11manager.util.GraphicProtocol
 import com.saas.x11manager.util.GraphicSession
 import com.saas.x11manager.util.GraphicSessionCatalogMode
 import com.saas.x11manager.util.InitSystem
-import com.saas.x11manager.util.X11SessionManager
-import kotlinx.coroutines.launch
+import com.saas.x11manager.util.VncSettings
 
 private enum class RunningWarningMode {
     ENTRY,
@@ -46,7 +45,6 @@ fun EditContainerScreen(
     viewModel: EditContainerViewModel = viewModel()
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     LaunchedEffect(containerName) {
         viewModel.dismissConfigurationWizard()
@@ -67,7 +65,6 @@ fun EditContainerScreen(
     var entryRunningWarningHandled by remember(containerName) { mutableStateOf(false) }
     var installedActionSession by remember { mutableStateOf<GraphicSession?>(null) }
     var selectingInstalledSession by remember { mutableStateOf<GraphicSession?>(null) }
-    var quickStartingSelectedSession by remember { mutableStateOf(false) }
     var aptRecommendationSession by remember { mutableStateOf<GraphicSession?>(null) }
     var activeAptRecommendationOverrideSession by remember { mutableStateOf<GraphicSession?>(null) }
     var alpineProfileSession by remember { mutableStateOf<GraphicSession?>(null) }
@@ -160,7 +157,7 @@ fun EditContainerScreen(
                 onClear = { viewModel.clearInstallLogs() },
                 isBlocking = isInstalling,
                 primaryActionLabel = if (viewModel.canStartGraphicSessionFromInstall) {
-                    "Start ${graphicSession.protocol.label}"
+                    viewModel.startActionLabel
                 } else {
                     null
                 },
@@ -214,7 +211,7 @@ fun EditContainerScreen(
                             )
                             Text(
                                 "Next you will choose the init backend, X11 or Wayland, Stable or Experimental, " +
-                                    "and then a session compatible with the detected distro and architecture."
+                                    "a compatible session, and finally how you want to access it."
                             )
                         }
                     }
@@ -342,7 +339,8 @@ fun EditContainerScreen(
                     Text(
                         "${session.label} is already installed for ${session.protocol.label}. Select changes only " +
                             "the default graphic session and ${selectedInit.name.lowercase()} startup configuration, " +
-                            "without running apk/apt again. Reinstall runs the full installer."
+                            "without running apk/apt again. Reinstall runs the full installer. " +
+                            "Access method: ${viewModel.pendingAccessMode.label}."
                     )
                 },
                 dismissButton = {
@@ -363,7 +361,6 @@ fun EditContainerScreen(
                             if (viewModel.graphicSession != session) {
                                 viewModel.toggleSessionSelection(session)
                             }
-                            viewModel.dismissConfigurationWizard()
                             selectingInstalledSession = session
                             viewModel.save()
                         }) { Text("Select") }
@@ -378,7 +375,7 @@ fun EditContainerScreen(
             val selectionFailed = !isSaving && saveError != null && !selectionSucceeded
             AlertDialog(
                 onDismissRequest = {
-                    if (!isSaving && !quickStartingSelectedSession) selectingInstalledSession = null
+                    if (!isSaving && !isInstalling) selectingInstalledSession = null
                 },
                 title = { Text("Selecting ${session.label}") },
                 text = {
@@ -392,7 +389,8 @@ fun EditContainerScreen(
                         }
 
                         selectionSucceeded -> Text(
-                            "${session.label} is now the default graphic session. No package installation command was run."
+                            "${session.label} is now the default graphic session. No graphic-session package installation command was run. " +
+                                "${viewModel.pendingAccessMode.label} is ready to start."
                         )
 
                         selectionFailed -> Text(saveError ?: "Could not apply ${session.label}.")
@@ -403,7 +401,7 @@ fun EditContainerScreen(
                     {
                         TextButton(
                             onClick = { selectingInstalledSession = null },
-                            enabled = !quickStartingSelectedSession
+                            enabled = !isInstalling
                         ) { Text("Done") }
                     }
                 } else {
@@ -413,25 +411,12 @@ fun EditContainerScreen(
                     when {
                         selectionSucceeded -> Button(
                             onClick = {
-                                quickStartingSelectedSession = true
-                                scope.launch {
-                                    try {
-                                        // The outer integrated X11 server is also the host
-                                        // transport used by nested Wayland sessions.
-                                        X11SessionManager.startX11Session(containerName = containerName)
-                                        onDismiss()
-                                    } finally {
-                                        quickStartingSelectedSession = false
-                                    }
-                                }
+                                selectingInstalledSession = null
+                                viewModel.startConfiguredAccess()
                             },
-                            enabled = !quickStartingSelectedSession
+                            enabled = !isInstalling
                         ) {
-                            if (quickStartingSelectedSession) {
-                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                                Spacer(Modifier.width(8.dp))
-                            }
-                            Text("Start ${session.protocol.label}")
+                            Text(viewModel.startActionLabel)
                         }
 
                         selectionFailed -> Button(onClick = { selectingInstalledSession = null }) {
@@ -509,7 +494,7 @@ fun EditContainerScreen(
             ) {
                 WizardChoice(
                     title = "X11",
-                    subtitle = "Direct X11 window managers and desktop sessions on the Manager display.",
+                    subtitle = "Direct X11 window managers and desktop sessions.",
                     selected = viewModel.pendingWizardProtocol == GraphicProtocol.X11,
                     installed = false,
                     onClick = { viewModel.selectWizardProtocol(GraphicProtocol.X11) }
@@ -517,7 +502,7 @@ fun EditContainerScreen(
                 Spacer(Modifier.height(10.dp))
                 WizardChoice(
                     title = "Wayland",
-                    subtitle = "Native Wayland compositors using the integrated X11 display only as the outer Android transport.",
+                    subtitle = "Native Wayland compositors using an X11 transport for nested presentation.",
                     selected = viewModel.pendingWizardProtocol == GraphicProtocol.WAYLAND,
                     installed = false,
                     onClick = { viewModel.selectWizardProtocol(GraphicProtocol.WAYLAND) }
@@ -585,7 +570,7 @@ fun EditContainerScreen(
                     val installed = viewModel.isSessionInstalled(session)
                     val experimental = viewModel.isWizardSessionExperimental(session)
                     val transport = if (session.protocol == GraphicProtocol.WAYLAND) {
-                        " · nested on integrated X11 transport"
+                        " · nested X11 transport"
                     } else {
                         ""
                     }
@@ -597,25 +582,45 @@ fun EditContainerScreen(
                             installed && graphicSession == session ->
                                 "Installed · Current default$transport"
                             installed && experimental ->
-                                "Installed · Experimental · tap for Select or Reinstall$transport"
+                                "Installed · Experimental · tap to continue$transport"
                             installed ->
-                                "Installed · tap for Select or Reinstall$transport"
+                                "Installed · tap to continue$transport"
                             experimental ->
-                                "Experimental · tap to install and apply$transport"
-                            else -> "Tap to install and apply$transport"
+                                "Experimental · tap to continue$transport"
+                            else -> "Tap to continue$transport"
                         },
                         selected = graphicSession == session,
                         installed = installed,
-                        onClick = {
-                            if (installed) {
-                                viewModel.dismissConfigurationWizard()
+                        onClick = { viewModel.selectWizardSession(session) }
+                    )
+                }
+            }
+        }
+
+        viewModel.wizardStage == ConfigurationWizardStage.ACCESS_SELECTION -> {
+            val session = viewModel.pendingWizardSession
+            if (session == null) {
+                LaunchedEffect(Unit) { viewModel.returnToWizardSessionSelection() }
+            } else {
+                val port = VncSettings.getPort(context, containerName)
+                val savedAccessMode = VncSettings.getAccessMode(context, containerName)
+                GraphicAccessDialog(
+                    containerName = containerName,
+                    port = port,
+                    initialMode = savedAccessMode,
+                    onDismiss = { viewModel.dismissConfigurationWizard() },
+                    onBack = { viewModel.returnToWizardSessionSelection() },
+                    onConfirm = { mode, password ->
+                        if (viewModel.confirmWizardAccess(mode, port, password)) {
+                            VncSettings.setAccessMode(context, containerName, mode)
+                            if (viewModel.isSessionInstalled(session)) {
                                 installedActionSession = session
                             } else {
                                 requestSessionInstall(session)
                             }
                         }
-                    )
-                }
+                    }
+                )
             }
         }
     }
@@ -668,8 +673,8 @@ fun EditContainerScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            "Detect the container first, then choose init system, graphical protocol, catalog and session. " +
-                                "Installed sessions can be selected again without reinstalling packages.",
+                            "Detect the container first, then choose init system, graphical protocol, catalog, session and final access method. " +
+                                "Installed sessions can be selected again without reinstalling their packages.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp
                         )
@@ -682,6 +687,7 @@ fun EditContainerScreen(
                         SummaryRow("Init system", initSystem.name.lowercase())
                         SummaryRow("Protocol", graphicSession.protocol.label)
                         SummaryRow("Graphic session", graphicSession.label)
+                        SummaryRow("Access", VncSettings.getAccessMode(context, containerName).label)
                         Spacer(Modifier.height(6.dp))
                         Button(
                             onClick = {
