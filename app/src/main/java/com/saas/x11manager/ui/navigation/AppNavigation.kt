@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import com.saas.x11manager.ui.screen.ConfigScreen
 import com.saas.x11manager.ui.screen.DisplayScreen
 import com.saas.x11manager.ui.screen.EditContainerScreen
+import com.saas.x11manager.ui.screen.FixesScreen
 import com.saas.x11manager.ui.screen.HomeScreen
 import com.saas.x11manager.ui.screen.HomeViewModel
 import com.saas.x11manager.ui.screen.ManagedDisplayScreen
@@ -50,6 +51,7 @@ fun AppNavigation(
     val selectedTab = tabs[pagerState.currentPage]
     val scope = rememberCoroutineScope()
     var displayScreenOpen by remember { mutableStateOf(false) }
+    var fixesScreenContainer by remember { mutableStateOf<String?>(null) }
 
     val navigateToEdit = viewModel.navigateToEdit
 
@@ -59,6 +61,17 @@ fun AppNavigation(
                 containerName = navigateToEdit,
                 onDismiss = {
                     viewModel.onEditNavigated()
+                    viewModel.refreshRuntimeState()
+                }
+            )
+        }
+
+        fixesScreenContainer != null -> {
+            val containerName = requireNotNull(fixesScreenContainer)
+            FixesScreen(
+                containerName = containerName,
+                onClose = {
+                    fixesScreenContainer = null
                     viewModel.refreshRuntimeState()
                 }
             )
@@ -117,7 +130,12 @@ fun AppNavigation(
                         .padding(innerPadding)
                 ) { page ->
                     when (tabs[page]) {
-                        TabItem.Home -> HomeScreen(viewModel = viewModel)
+                        TabItem.Home -> HomeScreen(
+                            viewModel = viewModel,
+                            onOpenFixes = { containerName ->
+                                fixesScreenContainer = containerName
+                            }
+                        )
                         TabItem.Display -> DisplayScreen(
                             viewModel = viewModel,
                             onOpenScreen = { displayScreenOpen = true }
