@@ -2,17 +2,11 @@ package com.saas.x11manager.util
 
 import android.content.Context
 
-/**
- * Per-container optional fixes.
- *
- * A switch stores intent only. No package, host service or container file is
- * touched from the settings screen. The selected state is reconciled later by
- * SessionAccessManager when the user actually presses Start X11/VNC/Both.
- */
 object FixSettings {
     private const val PREFS_NAME = "container_fixes"
     private const val PULSEAUDIO_PREFIX = "pulseaudio::"
     private const val PULSEAUDIO_APPLIED_PREFIX = "pulseaudio_applied::"
+    private const val PULSEAUDIO_ORIGINAL_PREFIX = "pulseaudio_original::"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -40,4 +34,23 @@ object FixSettings {
         .edit()
         .putBoolean(PULSEAUDIO_APPLIED_PREFIX + containerName, applied)
         .commit()
+
+    fun getPulseAudioOriginalState(context: Context, containerName: String): String? =
+        prefs(context).getString(PULSEAUDIO_ORIGINAL_PREFIX + containerName, null)
+
+    fun setPulseAudioOriginalState(
+        context: Context,
+        containerName: String,
+        state: String
+    ): Boolean = prefs(context)
+        .edit()
+        .putString(PULSEAUDIO_ORIGINAL_PREFIX + containerName, state)
+        .commit()
+
+    fun clearPulseAudioRuntimeState(context: Context, containerName: String): Boolean =
+        prefs(context)
+            .edit()
+            .remove(PULSEAUDIO_APPLIED_PREFIX + containerName)
+            .remove(PULSEAUDIO_ORIGINAL_PREFIX + containerName)
+            .commit()
 }
