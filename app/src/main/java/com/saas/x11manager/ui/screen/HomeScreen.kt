@@ -30,12 +30,20 @@ fun HomeScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val expandedContainerName = remember { mutableStateOf<String?>(null) }
     var generalSettingsContainer by remember { mutableStateOf<String?>(null) }
+    var fixesContainer by remember { mutableStateOf<String?>(null) }
     val activeOperation = viewModel.runningOperationContainer
 
     generalSettingsContainer?.let { containerName ->
         GeneralSettingsDialog(
             containerName = containerName,
             onDismiss = { generalSettingsContainer = null }
+        )
+    }
+
+    fixesContainer?.let { containerName ->
+        FixesDialog(
+            containerName = containerName,
+            onDismiss = { fixesContainer = null }
         )
     }
 
@@ -129,7 +137,13 @@ fun HomeScreen(
                                 },
                                 onGeneralSettings = {
                                     expandedContainerName.value = null
+                                    fixesContainer = null
                                     generalSettingsContainer = container.name
+                                },
+                                onFixes = {
+                                    expandedContainerName.value = null
+                                    generalSettingsContainer = null
+                                    fixesContainer = container.name
                                 }
                             )
                         )
