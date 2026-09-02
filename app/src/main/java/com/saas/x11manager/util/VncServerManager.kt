@@ -1,6 +1,7 @@
 package com.saas.x11manager.util
 
 import android.util.Log
+import com.saas.x11manager.X11Application
 import com.topjohnwu.superuser.CallbackList
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
@@ -33,8 +34,6 @@ object VncServerManager {
     private const val SESSION_SCRIPT = "/usr/local/bin/saas-vnc-session"
     private const val SERVER_LOG = "/root/.vnc/saas-vnc-server.log"
     private const val SESSION_LOG = "/root/.vnc/saas-vnc-session.log"
-    private const val DEFAULT_GEOMETRY = "1280x720"
-    private const val DEFAULT_DEPTH = 24
 
     suspend fun startStandalone(
         containerName: String,
@@ -55,6 +54,18 @@ object VncServerManager {
             logger?.e("[-] Invalid VNC port: $port")
             return@withContext VncStartResult(false, port)
         }
+
+        val launchSettings = VncSettings.getLaunchSettings(
+            X11Application.instance,
+            containerName
+        )
+        val settingsError = VncSettings.validateLaunchSettings(launchSettings)
+        if (settingsError != null) {
+            logger?.e("[-] Invalid TigerVNC settings: $settingsError")
+            return@withContext VncStartResult(false, port)
+        }
+        logger?.i("[CTX] VNC resolution: ${launchSettings.geometry}")
+        logger?.i("[CTX] VNC depth: ${launchSettings.depth}")
 
         val lease = ensureContainerReady(containerName, logger)
             ?: return@withContext VncStartResult(false, port)
@@ -89,7 +100,11 @@ object VncServerManager {
             val displayName = ":$displayNumber"
             logger?.i("[CTX] VNC X display: $displayName")
 
-            val launchCommand = standaloneLaunchCommand(displayNumber, port)
+            val launchCommand = standaloneLaunchCommand(
+                displayNumber = displayNumber,
+                port = port,
+                settings = launchSettings
+            )
             if (!runContainerCommand(
                     containerName,
                     "Launching TigerVNC virtual X server",
@@ -164,6 +179,19 @@ object VncServerManager {
             return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
         }
 
+        val launchSettings = VncSettings.getLaunchSettings(
+            X11Application.instance,
+            containerName
+        )
+        val settingsError = VncSettings.validateLaunchSettings(launchSettings)
+        if (settingsError != null) {
+            logger?.e("[-] Invalid TigerVNC settings: $settingsError")
+            return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
+        }
+        if (launchSettings.mirrorGeometry.isNotBlank()) {
+            logger?.i("[CTX] VNC mirror crop: ${launchSettings.mirrorGeometry}")
+        }
+
         val lease = ensureContainerReady(containerName, logger)
             ?: return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
 
@@ -187,13 +215,17 @@ object VncServerManager {
                 return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
             }
 
-            val displaySocket = "/tmp/.X11-unix/X${integratedDisplayName.removePrefix(":")}" 
+            val displaySocket = "/tmp/.X11-unix/X${integratedDisplayName.removePrefix(":")}"
             if (!probeContainer(containerName, "test -S ${shellQuote(displaySocket)}")) {
                 logger?.e("[-] Integrated display socket is not visible in the container: $displaySocket")
                 return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
             }
 
-            val launchCommand = mirrorLaunchCommand(integratedDisplayName, port)
+            val launchCommand = mirrorLaunchCommand(
+                displayName = integratedDisplayName,
+                port = port,
+                settings = launchSettings
+            )
             if (!runContainerCommand(
                     containerName,
                     "Publishing Integrated X11 through x0vncserver",
@@ -446,29 +478,49 @@ object VncServerManager {
             "exec ${session.startCommand}\n"
     }
 
-    private fun standaloneLaunchCommand(displayNumber: Int, port: Int): String =
-        "mkdir -p /root/.vnc /tmp/.X11-unix $STATE_DIR && chmod 1777 /tmp/.X11-unix && " +
+    private fun standaloneLaunchCommand(
+        displayNumber: Int,
+        port: Int,
+        settings: VncLaunchSettings
+    ): String {
+        val argv = TigerVncCommandOptions.standalone(
+            settings = settings,
+            displayNumber = displayNumber,
+            port = port,
+            passwordFile = PASSWORD_FILE
+        ).joinToString(" ") { shellQuote(it) }
+
+        return "mkdir -p /root/.vnc /tmp/.X11-unix $STATE_DIR && chmod 1777 /tmp/.X11-unix && " +
             "server=\$(command -v Xtigervnc 2>/dev/null || command -v Xvnc 2>/dev/null); " +
             "[ -n \"\$server\" ] || exit 1; " +
             "rm -f /tmp/.X${displayNumber}-lock; " +
-            "nohup \"\$server\" :$displayNumber " +
-            "-geometry $DEFAULT_GEOMETRY -depth $DEFAULT_DEPTH " +
-            "-rfbport $port -localhost no -SecurityTypes VncAuth " +
-            "-rfbauth $PASSWORD_FILE -AlwaysShared >$SERVER_LOG 2>&1 & " +
+            "nohup \"\$server\" $argv >$SERVER_LOG 2>&1 & " +
             "server_pid=\$!; printf '%s\\n' \"\$server_pid\" > $STATE_DIR/server.pid; " +
             "printf '%s\\n' standalone > $STATE_DIR/mode; " +
             "printf '%s\\n' $port > $STATE_DIR/port; " +
             "printf '%s\\n' $displayNumber > $STATE_DIR/display"
+    }
 
-    private fun mirrorLaunchCommand(displayName: String, port: Int): String =
-        "mkdir -p /root/.vnc $STATE_DIR && " +
+    private fun mirrorLaunchCommand(
+        displayName: String,
+        port: Int,
+        settings: VncLaunchSettings
+    ): String {
+        val argv = TigerVncCommandOptions.mirror(
+            settings = settings,
+            displayName = displayName,
+            port = port,
+            passwordFile = PASSWORD_FILE
+        ).joinToString(" ") { shellQuote(it) }
+
+        return "mkdir -p /root/.vnc $STATE_DIR && " +
             "server=\$(command -v x0vncserver 2>/dev/null); [ -n \"\$server\" ] || exit 1; " +
-            "nohup \"\$server\" -display ${shellQuote(displayName)} -rfbport $port " +
-            "-PasswordFile=$PASSWORD_FILE -localhost=no -AlwaysShared=1 >$SERVER_LOG 2>&1 & " +
+            "nohup \"\$server\" $argv >$SERVER_LOG 2>&1 & " +
             "server_pid=\$!; printf '%s\\n' \"\$server_pid\" > $STATE_DIR/server.pid; " +
             "printf '%s\\n' mirror > $STATE_DIR/mode; " +
             "printf '%s\\n' $port > $STATE_DIR/port; " +
             "printf '%s\\n' ${shellQuote(displayName)} > $STATE_DIR/display"
+    }
 
     private suspend fun findFreeVirtualDisplay(containerName: String): Int? {
         val command =

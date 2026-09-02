@@ -2,11 +2,9 @@ package com.saas.x11manager.ui.screen
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -32,14 +30,36 @@ fun GeneralSettingsDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val initialPort = remember(containerName) {
-        VncSettings.getPort(context, containerName)
+    var showTigerVncSettings by remember(containerName) { mutableStateOf(false) }
+    var portText by remember(containerName) {
+        mutableStateOf(VncSettings.getPort(context, containerName).toString())
     }
-    var portText by remember(containerName) { mutableStateOf(initialPort.toString()) }
+    var geometryText by remember(containerName) {
+        mutableStateOf(VncSettings.getGeometry(context, containerName))
+    }
     var saveError by remember(containerName) { mutableStateOf<String?>(null) }
+
+    if (showTigerVncSettings) {
+        TigerVncSettingsDialog(
+            containerName = containerName,
+            onDismiss = {
+                showTigerVncSettings = false
+                geometryText = VncSettings.getGeometry(context, containerName)
+            },
+            onSaved = {
+                showTigerVncSettings = false
+                portText = VncSettings.getPort(context, containerName).toString()
+                geometryText = VncSettings.getGeometry(context, containerName)
+                saveError = null
+            }
+        )
+        return
+    }
 
     val parsedPort = portText.toIntOrNull()
     val validPort = parsedPort != null && VncSettings.isValidPort(parsedPort)
+    val validGeometry = VncSettings.isValidGeometry(geometryText)
+    val canSave = validPort && validGeometry
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -81,9 +101,34 @@ fun GeneralSettingsDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                 )
 
+                OutlinedTextField(
+                    value = geometryText,
+                    onValueChange = { value ->
+                        if (value.length <= 11 &&
+                            value.all { it.isDigit() || it == 'x' || it == 'X' || it == ' ' }
+                        ) {
+                            geometryText = value
+                            saveError = null
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("VNC resolution") },
+                    supportingText = {
+                        Text(
+                            if (validGeometry) {
+                                "Standalone TigerVNC virtual display. Default: ${VncSettings.DEFAULT_GEOMETRY}."
+                            } else {
+                                "Use WIDTHxHEIGHT, from ${VncSettings.MIN_DIMENSION} to ${VncSettings.MAX_DIMENSION} per side."
+                            }
+                        )
+                    },
+                    isError = geometryText.isNotEmpty() && !validGeometry,
+                    singleLine = true
+                )
+
                 Text(
-                    text = "The Manager will use this port when VNC launch support is enabled. " +
-                        "Changing it here does not start or install a VNC server.",
+                    text = "Port and resolution are used when VNC launch support is enabled. " +
+                        "Changing them here does not start or install a VNC server.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -100,13 +145,28 @@ fun GeneralSettingsDialog(
 
                 OutlinedButton(
                     onClick = {
-                        VncSettings.resetPort(context, containerName)
+                        VncSettings.resetGeneral(context, containerName)
                         portText = VncSettings.DEFAULT_PORT.toString()
+                        geometryText = VncSettings.DEFAULT_GEOMETRY
                         saveError = null
                     }
                 ) {
-                    Text("Reset to default")
+                    Text("Reset port & resolution")
                 }
+
+                OutlinedButton(
+                    onClick = { showTigerVncSettings = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Advanced TigerVNC settings")
+                }
+
+                Text(
+                    text = "Full-screen TigerVNC editor: security, sharing, clipboard, input, " +
+                        "timeouts, performance, TLS, Xvnc and x0vncserver options.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         },
         dismissButton = {
@@ -118,13 +178,13 @@ fun GeneralSettingsDialog(
             Button(
                 onClick = {
                     val port = parsedPort ?: return@Button
-                    if (VncSettings.setPort(context, containerName, port)) {
+                    if (VncSettings.setGeneral(context, containerName, port, geometryText)) {
                         onDismiss()
                     } else {
-                        saveError = "Could not save the VNC port."
+                        saveError = "Could not save the VNC port and resolution."
                     }
                 },
-                enabled = validPort
+                enabled = canSave
             ) {
                 Text("Save")
             }
