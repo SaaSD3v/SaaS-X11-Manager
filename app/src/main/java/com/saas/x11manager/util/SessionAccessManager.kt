@@ -23,6 +23,14 @@ object SessionAccessManager {
         if (accessMode.requiresVnc) logger?.i("[CTX] VNC port: $vncPort")
         logger?.i("")
 
+        // The fix is strictly opt-in. When enabled, revalidate it before the
+        // desktop starts so the new session inherits the persisted audio setup.
+        // Audio failure is intentionally non-fatal: X11/VNC must remain usable.
+        PulseAudioFixManager.ensureIfEnabled(
+            containerName = containerName,
+            logger = logger
+        )
+
         return when (accessMode) {
             SessionAccessMode.INTEGRATED_X11 -> {
                 val slot = X11SessionManager.startX11Session(
