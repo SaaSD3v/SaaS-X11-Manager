@@ -40,10 +40,11 @@ class PulseAudioFixPolicyTest {
             .joinToString("") { "%02x".format(it) }
 
     @Test
-    fun fixIsOptInAndExposedBelowGeneralSettings() {
+    fun fixIsOptInFullScreenAndSwitchDoesNotExecuteTheHelper() {
         val settings = source("app/src/main/java/com/saas/x11manager/util/FixSettings.kt")
         val card = source("app/src/main/java/com/saas/x11manager/ui/component/ContainerCard.kt")
         val home = source("app/src/main/java/com/saas/x11manager/ui/screen/HomeScreen.kt")
+        val fixes = source("app/src/main/java/com/saas/x11manager/ui/screen/FixesDialog.kt")
 
         assertTrue(settings.contains("getBoolean(PULSEAUDIO_PREFIX + containerName, false)"))
         assertTrue(card.contains("val onFixes: () -> Unit = {}"))
@@ -51,8 +52,14 @@ class PulseAudioFixPolicyTest {
         val fixesIndex = card.indexOf("label = \"Fixes\"")
         assertTrue(generalIndex >= 0)
         assertTrue(fixesIndex > generalIndex)
-        assertTrue(home.contains("FixesDialog("))
-        assertTrue(home.contains("onFixes ="))
+
+        assertTrue(home.contains("FixesScreen("))
+        assertFalse(home.contains("FixesDialog("))
+        assertTrue(fixes.contains("fillMaxSize()"))
+        assertFalse(fixes.contains("AlertDialog("))
+        assertTrue(fixes.contains("FixSettings.setPulseAudioEnabled"))
+        assertFalse(fixes.contains("PulseAudioFixManager."))
+        assertTrue(fixes.contains("No installation was started"))
     }
 
     @Test
@@ -71,9 +78,10 @@ class PulseAudioFixPolicyTest {
     }
 
     @Test
-    fun helperKeepsNativeFirstSafeFallbackAndDistroDetection() {
+    fun selectedFixIsReconciledOnlyWhenGraphicalStartIsRequested() {
         val script = embeddedHelper().toString(Charsets.UTF_8)
         val sessionAccess = source("app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt")
+        val manager = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
 
         assertTrue(script.contains("/tmp/.pulse-socket"))
         assertTrue(script.contains("module-aaudio-sink"))
@@ -84,7 +92,25 @@ class PulseAudioFixPolicyTest {
         assertFalse(script.contains("listen=0.0.0.0"))
         assertTrue(script.contains("--restore-state"))
         assertTrue(script.contains("--uninstall"))
-        assertTrue(sessionAccess.contains("PulseAudioFixManager.ensureIfEnabled"))
+
+        assertTrue(sessionAccess.contains("PulseAudioFixManager.reconcileForStart"))
+        assertTrue(manager.contains("suspend fun reconcileForStart"))
+        assertTrue(manager.contains("if (!requested && !previouslyApplied)"))
+        assertTrue(manager.contains("graphical start was requested"))
+        assertTrue(manager.contains("--container",))
+        assertTrue(manager.contains("\"--uninstall\""))
+    }
+
+    @Test
+    fun disablingIsAlsoDeferredAndCleanedUpOnNextStart() {
+        val fixes = source("app/src/main/java/com/saas/x11manager/ui/screen/FixesDialog.kt")
+        val manager = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
+        val settings = source("app/src/main/java/com/saas/x11manager/util/FixSettings.kt")
+
+        assertTrue(settings.contains("PULSEAUDIO_APPLIED_PREFIX"))
+        assertTrue(fixes.contains("will be removed during the next graphical start"))
+        assertTrue(manager.contains("removing the previously applied integration before graphical start"))
+        assertTrue(manager.contains("FixSettings.setPulseAudioApplied(context, containerName, false)"))
     }
 
     @Test
