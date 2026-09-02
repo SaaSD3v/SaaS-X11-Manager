@@ -9,7 +9,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
 
-/** Result returned to the Fixes UI after applying/removing the PulseAudio fix. */
+/** Result returned after applying/removing the PulseAudio fix at graphical start. */
 data class PulseAudioFixResult(
     val success: Boolean,
     val message: String,
@@ -17,16 +17,11 @@ data class PulseAudioFixResult(
 )
 
 /**
- * Thin Android wrapper around the proven SaaS DroidSpaces Audio Auto helper.
+ * Android wrapper around the audited SaaS DroidSpaces Audio Auto helper.
  *
- * The shell helper remains the source of truth for the complicated part of the
- * audio transaction: DroidSpaces version/capability probing, native v6.3+
- * /tmp/.pulse-socket preference, safe 127.0.0.1:4713 TCP fallback, AAudio with
- * OpenSL ES fallback, distro-aware apt/apk client installation, container config
- * rollback and x11-session integration.
- *
- * Nothing is copied to Termux and no package/configuration is touched until the
- * user explicitly enables the fix. Re-checks only happen after that opt-in.
+ * The Fixes screen only stores the user's desired state. This manager does not
+ * run from the settings switch. SessionAccessManager calls reconcileForStart()
+ * only after the user presses Start X11, Start VNC or Start Both.
  */
 object PulseAudioFixManager {
     private const val ASSET_DIR = "saas-audio"
@@ -41,123 +36,111 @@ object PulseAudioFixManager {
     private const val MANAGED_DIR = "$TERMUX_HOME/.local/share/saas-x11-manager"
     private const val MANAGED_SCRIPT = "$MANAGED_DIR/SaaS-DroidSpaces-Audio-Auto.sh"
 
-    suspend fun enable(
-        containerName: String,
-        logger: ContainerLogger? = null
-    ): PulseAudioFixResult = withContext(Dispatchers.IO) {
-        val context = X11Application.instance
-        logger?.i("--- PulseAudio Fix ---")
-        logger?.i("[FIX] Enabling PulseAudio fix for $containerName")
-
-        val staged = stageHelper(context)
-        if (!staged.success) {
-            staged.details.forEach { logger?.e("[FIX] $it") }
-            return@withContext staged
-        }
-
-        val run = runHelper(
-            containerName = containerName,
-            arguments = listOf("--container", containerName, "--mode", "auto", "--restore-state"),
-            quiet = false,
-            logger = logger
-        )
-        if (!run.success) return@withContext run
-
-        if (!FixSettings.setPulseAudioEnabled(context, containerName, true)) {
-            logger?.e("[FIX] Audio setup succeeded, but Android could not persist the enabled state; rolling it back")
-            runHelper(
-                containerName = containerName,
-                arguments = listOf("--container", containerName, "--uninstall"),
-                quiet = true,
-                logger = logger
-            )
-            return@withContext PulseAudioFixResult(
-                success = false,
-                message = "Could not save the PulseAudio fix state. The applied integration was rolled back."
-            )
-        }
-
-        logger?.i("[FIX] PulseAudio fix enabled")
-        PulseAudioFixResult(
-            success = true,
-            message = "PulseAudio fix enabled. Native DroidSpaces audio is preferred; loopback TCP is used only as a safe fallback.",
-            details = run.details
-        )
-    }
-
-    suspend fun disable(
-        containerName: String,
-        logger: ContainerLogger? = null
-    ): PulseAudioFixResult = withContext(Dispatchers.IO) {
-        val context = X11Application.instance
-        logger?.i("--- PulseAudio Fix ---")
-        logger?.i("[FIX] Disabling PulseAudio fix for $containerName")
-
-        val staged = stageHelper(context)
-        if (!staged.success) {
-            staged.details.forEach { logger?.e("[FIX] $it") }
-            return@withContext staged
-        }
-
-        val run = runHelper(
-            containerName = containerName,
-            arguments = listOf("--container", containerName, "--uninstall"),
-            quiet = false,
-            logger = logger
-        )
-        if (!run.success) return@withContext run
-
-        if (!FixSettings.setPulseAudioEnabled(context, containerName, false)) {
-            logger?.e("[FIX] Integration was removed, but Android could not persist the disabled state")
-            return@withContext PulseAudioFixResult(
-                success = false,
-                message = "PulseAudio integration was removed, but the Manager could not save the disabled state.",
-                details = run.details
-            )
-        }
-
-        logger?.i("[FIX] PulseAudio fix disabled")
-        PulseAudioFixResult(
-            success = true,
-            message = "PulseAudio fix disabled and the helper restored the configuration it previously owned.",
-            details = run.details
-        )
-    }
-
     /**
-     * Re-validates an already-enabled fix before a graphical session starts.
-     * A failure is deliberately non-fatal for X11/VNC; it is logged and the
-     * graphical session is still allowed to start.
+     * Reconciles the stored switch state at the moment a graphical start was
+     * explicitly requested.
+     *
+     * Enabled: stage/verify the helper, install only missing requirements and
+     * apply/verify the bridge before the graphical session starts.
+     *
+     * Disabled after a previous successful apply: remove only the integration
+     * owned by this fix before the graphical session starts.
+     *
+     * Audio failures are returned to the caller but remain non-fatal to X11/VNC.
      */
-    suspend fun ensureIfEnabled(
+    suspend fun reconcileForStart(
         containerName: String,
         logger: ContainerLogger? = null
     ): PulseAudioFixResult? = withContext(Dispatchers.IO) {
         val context = X11Application.instance
-        if (!FixSettings.isPulseAudioEnabled(context, containerName)) {
+        val requested = FixSettings.isPulseAudioEnabled(context, containerName)
+        val previouslyApplied = FixSettings.isPulseAudioApplied(context, containerName)
+
+        if (!requested && !previouslyApplied) {
             return@withContext null
         }
 
-        logger?.i("[FIX] PulseAudio fix is enabled; validating audio bridge before graphical start...")
+        logger?.i("--- Optional Fixes ---")
+
+        if (!requested) {
+            logger?.i("[FIX] PulseAudio fix is disabled; removing the previously applied integration before graphical start...")
+            val staged = stageHelper(context)
+            if (!staged.success) {
+                logger?.w("[FIX] ${staged.message}")
+                return@withContext staged
+            }
+
+            val removed = runHelper(
+                containerName = containerName,
+                arguments = listOf("--container", containerName, "--uninstall"),
+                quiet = false,
+                logger = logger
+            )
+            if (!removed.success) {
+                logger?.w("[FIX] PulseAudio cleanup failed; graphical startup will continue")
+                return@withContext removed
+            }
+
+            if (!FixSettings.setPulseAudioApplied(context, containerName, false)) {
+                logger?.w("[FIX] Cleanup succeeded, but applied-state persistence failed; cleanup will be retried on the next start")
+                return@withContext PulseAudioFixResult(
+                    success = false,
+                    message = "PulseAudio integration was removed, but its applied-state marker could not be saved.",
+                    details = removed.details
+                )
+            }
+
+            logger?.i("[FIX] PulseAudio fix removed")
+            return@withContext PulseAudioFixResult(
+                success = true,
+                message = "PulseAudio fix removed before graphical start.",
+                details = removed.details
+            )
+        }
+
+        logger?.i("[FIX] PulseAudio fix selected; applying it now because graphical start was requested...")
         val staged = stageHelper(context)
         if (!staged.success) {
-            logger?.w("[FIX] ${staged.message}")
+            staged.details.forEach { logger?.e("[FIX] $it") }
+            logger?.w("[FIX] PulseAudio preparation failed; graphical startup will continue")
             return@withContext staged
         }
 
-        val run = runHelper(
+        val applied = runHelper(
             containerName = containerName,
             arguments = listOf("--container", containerName, "--mode", "auto", "--restore-state"),
-            quiet = true,
+            quiet = false,
             logger = logger
         )
-        if (run.success) {
-            logger?.i("[FIX] PulseAudio bridge ready")
-        } else {
-            logger?.w("[FIX] PulseAudio validation failed; graphical startup will continue")
-            logger?.w("[FIX] Open Fixes and toggle PulseAudio fix off/on to retry interactively")
+        if (!applied.success) {
+            logger?.w("[FIX] PulseAudio fix failed; graphical startup will continue")
+            logger?.w("[FIX] If Magisk requests Termux root access, grant it and press Start again")
+            return@withContext applied
         }
-        run
+
+        if (!FixSettings.setPulseAudioApplied(context, containerName, true)) {
+            if (!previouslyApplied) {
+                logger?.w("[FIX] Applied-state could not be saved; rolling back the newly applied integration")
+                runHelper(
+                    containerName = containerName,
+                    arguments = listOf("--container", containerName, "--uninstall"),
+                    quiet = true,
+                    logger = logger
+                )
+            }
+            return@withContext PulseAudioFixResult(
+                success = false,
+                message = "PulseAudio setup completed, but the Manager could not persist its applied-state marker.",
+                details = applied.details
+            )
+        }
+
+        logger?.i("[FIX] PulseAudio bridge ready")
+        PulseAudioFixResult(
+            success = true,
+            message = "PulseAudio fix applied and verified for this graphical start.",
+            details = applied.details
+        )
     }
 
     private data class TermuxRuntime(val uid: Int)
@@ -173,7 +156,7 @@ object PulseAudioFixManager {
                 success = false,
                 message = "Termux was not detected.",
                 details = listOf(
-                    "Termux must be installed at /data/data/com.termux before the PulseAudio fix can be enabled."
+                    "Termux must be installed at /data/data/com.termux before the PulseAudio fix can be applied."
                 )
             )
 
@@ -348,7 +331,7 @@ object PulseAudioFixManager {
                         it.contains("su", ignoreCase = true)
                 }
             ) {
-                " Magisk may need root permission for Termux because the proven helper performs DroidSpaces operations from the normal Termux user."
+                " Grant Termux root permission in Magisk, then press Start again. PulseAudio itself still runs as the normal Termux user."
             } else {
                 ""
             }
