@@ -61,8 +61,40 @@ object VncConnectionGuide {
             logger.i("[USB/ADB]   Then connect the PC VNC client to 127.0.0.1:$port")
         }
 
+        logAdbForwardRestartRecovery(port, logger, onlyIfTroubleshooting = false)
+
         logger.i("")
         logger.i("[+] VNC connection information ready")
+    }
+
+    /**
+     * Explains the exact stop/restart ordering for a PC-side adb forward.
+     *
+     * Removing the forward clears only the host-PC ADB mapping; it does not stop
+     * TigerVNC. The mapping should be recreated only after the container/VNC
+     * server is listening again. This avoids stale local forwards during restart
+     * troubleshooting and uses the actual per-container VNC port, never a fixed
+     * 5901 assumption.
+     */
+    suspend fun logAdbForwardRestartRecovery(
+        port: Int,
+        logger: ContainerLogger?,
+        onlyIfTroubleshooting: Boolean = true
+    ) {
+        if (logger == null) return
+        logger.i("")
+        if (onlyIfTroubleshooting) {
+            logger.w("[USB/ADB] If this VNC start failed with a port-occupied error and you previously created an adb forward:")
+        } else {
+            logger.w("[USB/ADB] Important for a later container/VNC stop -> start while using USB forwarding:")
+        }
+        logger.i("[USB/ADB]   1) On the PC, remove the old local mapping first:")
+        logger.i("[USB/ADB]      adb forward --remove tcp:$port")
+        logger.i("[USB/ADB]   2) Start the container/VNC again and wait until the Manager reports VNC ready")
+        logger.i("[USB/ADB]   3) Only then recreate the mapping:")
+        logger.i("[USB/ADB]      adb forward tcp:$port tcp:$port")
+        logger.i("[USB/ADB]   4) Connect the PC VNC client to 127.0.0.1:$port")
+        logger.w("[USB/ADB] The --remove command removes only the PC-side ADB forward; it does not kill the VNC server")
     }
 
     private data class HostIpv4(
