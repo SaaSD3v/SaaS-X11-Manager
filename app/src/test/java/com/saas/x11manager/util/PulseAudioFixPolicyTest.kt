@@ -97,7 +97,7 @@ class PulseAudioFixPolicyTest {
         assertTrue(manager.contains("suspend fun reconcileForStart"))
         assertTrue(manager.contains("if (!requested && !previouslyApplied)"))
         assertTrue(manager.contains("graphical start was requested"))
-        assertTrue(manager.contains("--container",))
+        assertTrue(manager.contains("listOf(\"--container\", containerName, \"--mode\", \"auto\", \"--restore-state\")"))
         assertTrue(manager.contains("\"--uninstall\""))
     }
 
