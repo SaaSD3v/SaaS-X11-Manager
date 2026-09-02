@@ -128,7 +128,7 @@ object PulseAudioFixManager {
         PulseAudioFixResult(true, "PulseAudio ready ($sink)")
     }
 
-    private fun failure(logger: ContainerLogger?, message: String): PulseAudioFixResult {
+    private suspend fun failure(logger: ContainerLogger?, message: String): PulseAudioFixResult {
         logger?.w("[!] $message")
         logger?.w("[!] Graphical startup will continue")
         return PulseAudioFixResult(false, message)
@@ -407,7 +407,7 @@ object PulseAudioFixManager {
         return false
     }
 
-    private fun installAndVerifyContainerClients(
+    private suspend fun installAndVerifyContainerClients(
         containerName: String,
         logger: ContainerLogger?
     ): Boolean {
