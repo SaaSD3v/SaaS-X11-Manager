@@ -13,11 +13,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -31,16 +31,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.util.FixSettings
 
 /**
- * Full-size Fixes settings surface.
+ * Full-size per-container Fixes settings surface.
  *
  * Switches are declarative only: changing one stores the desired state but does
  * not install packages, start PulseAudio, restart a container, or invoke root.
- * SessionAccessManager reconciles the desired state when Start X11/VNC/Both is
- * pressed so the operation is visible in the normal session logs.
+ * SessionAccessManager reconciles the desired state only when Start X11/VNC/Both
+ * is pressed, where progress is already visible in the normal session logs.
  */
 @Composable
 internal fun FixesScreen(
@@ -71,10 +72,14 @@ internal fun FixesScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Column(modifier = Modifier.padding(start = 4.dp)) {
-                Text("Fixes", style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    "Fixes",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
                 Text(
                     containerName,
                     style = MaterialTheme.typography.bodySmall,
@@ -83,7 +88,7 @@ internal fun FixesScreen(
             }
         }
 
-        Divider()
+        HorizontalDivider()
 
         Column(
             modifier = Modifier
@@ -94,10 +99,11 @@ internal fun FixesScreen(
         ) {
             Text(
                 "Optional compatibility fixes",
-                style = MaterialTheme.typography.titleMedium
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
             )
             Text(
-                "Nothing is installed or started from this screen. Select the fixes you want, then press Start X11, Start VNC or Start Both. The Manager applies the selected fixes immediately before starting the graphical session.",
+                "Nothing is installed or started from this screen. Select the fixes you want, go back, then press Start X11, Start VNC or Start Both. The Manager applies the selected fixes immediately before starting the graphical session and shows the work in the normal session logs.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -154,7 +160,7 @@ internal fun FixesScreen(
                                     applied = FixSettings.isPulseAudioApplied(context, containerName)
                                     statusIsError = false
                                     status = if (requested) {
-                                        "Selected. No installation was started. The PulseAudio fix will be detected, installed if needed, and applied automatically when you next start X11/VNC."
+                                        "Selected. No installation was started here. The PulseAudio fix will be detected, installed if needed and verified automatically the next time you start the graphical session."
                                     } else if (applied) {
                                         "Disabled for the next start. The existing Manager-owned PulseAudio integration will be removed during the next graphical start; the current running session is not interrupted."
                                     } else {
@@ -179,13 +185,13 @@ internal fun FixesScreen(
                     )
 
                     Text(
-                        "At Start, the Manager uses the bundled audited helper. It prefers the DroidSpaces native /tmp/.pulse-socket bridge, detects AAudio/OpenSL ES, installs only missing apt/apk audio clients, and uses 127.0.0.1 TCP only as a host-network fallback.",
+                        "At Start, the bundled audited helper prefers the DroidSpaces native /tmp/.pulse-socket bridge, detects AAudio/OpenSL ES, installs only missing apt/apk audio clients, and uses 127.0.0.1 TCP only as a host-network fallback.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     Text(
-                        "Root note: the graphical Manager uses root for DroidSpaces operations, while PulseAudio itself still runs as the normal Termux user. If Magisk asks for Termux root access during the first application, grant it so the helper can perform DroidSpaces commands.",
+                        "Root handling: PulseAudio and package commands still run as the real Termux user, but DroidSpaces/root commands are delegated back to the Manager's already-authorized root shell. Termux does not need a separate Magisk root permission.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
