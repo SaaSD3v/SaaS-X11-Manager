@@ -3,6 +3,7 @@ name: X11 Manager CI
 on:
   push:
     branches:
+      - "X11APP"
       - "main"
       - "master"
       - "agent/structural-fixes"
