@@ -33,17 +33,21 @@ fun HomeScreen(
     var fixesContainer by remember { mutableStateOf<String?>(null) }
     val activeOperation = viewModel.runningOperationContainer
 
+    // Fixes is a real settings surface, not a modal operation dialog. Opening it
+    // replaces the Home content and the switch only stores intent. Actual work is
+    // deferred until Start X11/VNC/Both.
+    fixesContainer?.let { containerName ->
+        FixesScreen(
+            containerName = containerName,
+            onBack = { fixesContainer = null }
+        )
+        return
+    }
+
     generalSettingsContainer?.let { containerName ->
         GeneralSettingsDialog(
             containerName = containerName,
             onDismiss = { generalSettingsContainer = null }
-        )
-    }
-
-    fixesContainer?.let { containerName ->
-        FixesDialog(
-            containerName = containerName,
-            onDismiss = { fixesContainer = null }
         )
     }
 
