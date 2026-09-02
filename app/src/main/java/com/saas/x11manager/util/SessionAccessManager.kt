@@ -23,10 +23,11 @@ object SessionAccessManager {
         if (accessMode.requiresVnc) logger?.i("[CTX] VNC port: $vncPort")
         logger?.i("")
 
-        // The fix is strictly opt-in. When enabled, revalidate it before the
-        // desktop starts so the new session inherits the persisted audio setup.
-        // Audio failure is intentionally non-fatal: X11/VNC must remain usable.
-        PulseAudioFixManager.ensureIfEnabled(
+        // Fix switches only store intent in the settings screen. Actual install,
+        // validation or cleanup is deliberately deferred until the user presses
+        // Start X11/VNC/Both so package/root work never happens while browsing
+        // settings. Audio failure remains non-fatal for the graphical session.
+        PulseAudioFixManager.reconcileForStart(
             containerName = containerName,
             logger = logger
         )
