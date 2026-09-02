@@ -49,7 +49,7 @@ class EditContainerViewModel : ViewModel() {
     var status by mutableStateOf(ContainerStatus.UNKNOWN)
     var initSystem by mutableStateOf(InitSystem.SYSTEMD)
         private set
-    var graphicSession by mutableStateOf(GraphicSession.XFCE)
+    var graphicSession by mutableStateOf(GraphicSession.NONE)
         private set
     var containerCapabilities by mutableStateOf<ContainerCapabilities?>(null)
         private set
@@ -120,7 +120,7 @@ class EditContainerViewModel : ViewModel() {
     private var loaded = false
     private var containerName = ""
     private var cacheDir: File? = null
-    private var savedGraphicSession = GraphicSession.XFCE
+    private var savedGraphicSession = GraphicSession.NONE
 
     fun load(containerName: String, cacheDir: File) {
         if (loaded && this.containerName == containerName) return
@@ -137,18 +137,21 @@ class EditContainerViewModel : ViewModel() {
             initSystem = info.initSystem
 
             val sessionState = withContext(Dispatchers.IO) {
-                val saved = ContainerSettingsManager.getGraphicSession(containerName)
+                val snapshot = ContainerSettingsManager.readSnapshot(containerName, forceRefresh = true)
                 val installed = GraphicSessionRegistry.installableSessions.associateWith { session ->
-                    ContainerSettingsManager.isGraphicSessionInstalled(containerName, session)
+                    snapshot.isGraphicSessionInstalled(session)
                 }
-                saved to installed
+                val selected = snapshot.graphicSession?.takeIf { session ->
+                    session == GraphicSession.NONE || installed[session] == true
+                } ?: GraphicSession.NONE
+                selected to installed
             }
 
-            graphicSession = sessionState.first ?: GraphicSession.XFCE
+            graphicSession = sessionState.first
             savedGraphicSession = graphicSession
             installedSessions.clear()
             sessionState.second.forEach { (session, installed) ->
-                installedSessions[session] = installed || graphicSession == session
+                installedSessions[session] = installed
             }
 
             logs = emptyList()
@@ -156,7 +159,11 @@ class EditContainerViewModel : ViewModel() {
             installResult = null
             installResultSession = null
             wizardError = null
-            pendingWizardProtocol = graphicSession.protocol
+            pendingWizardProtocol = if (graphicSession == GraphicSession.NONE) {
+                GraphicProtocol.X11
+            } else {
+                graphicSession.protocol
+            }
             pendingWizardCatalogMode = GraphicSessionCatalogMode.STABLE
             pendingWizardSession = null
             pendingAccessMode = SessionAccessMode.INTEGRATED_X11
@@ -172,7 +179,11 @@ class EditContainerViewModel : ViewModel() {
         wizardStarted = true
         wizardStage = ConfigurationWizardStage.HIDDEN
         wizardError = null
-        pendingWizardProtocol = graphicSession.protocol
+        pendingWizardProtocol = if (graphicSession == GraphicSession.NONE) {
+            GraphicProtocol.X11
+        } else {
+            graphicSession.protocol
+        }
         pendingWizardCatalogMode = GraphicSessionCatalogMode.STABLE
         pendingWizardSession = null
         pendingVncPassword = null
@@ -399,7 +410,7 @@ class EditContainerViewModel : ViewModel() {
     }
 
     fun isSessionInstalled(session: GraphicSession): Boolean =
-        installedSessions[session] == true || graphicSession == session
+        installedSessions[session] == true
 
     fun toggleSessionSelection(session: GraphicSession) {
         if (!isSessionInstalled(session) || isInstallingSession || isSaving) return
