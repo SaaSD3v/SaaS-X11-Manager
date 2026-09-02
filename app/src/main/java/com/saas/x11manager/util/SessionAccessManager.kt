@@ -38,6 +38,7 @@ object SessionAccessManager {
                     logger?.e("[-] Integrated X11 access failed")
                     false
                 } else {
+                    PulseAudioFixManager.finalizeAfterContainerReady(containerName, logger)
                     logger?.i("[+] Integrated X11 ready on ${slot.describe()}")
                     true
                 }
@@ -53,6 +54,7 @@ object SessionAccessManager {
                     logger = logger
                 )
                 if (result.success) {
+                    PulseAudioFixManager.finalizeAfterContainerReady(containerName, logger)
                     VncConnectionGuide.logAfterSuccessfulStart(
                         containerName = containerName,
                         port = vncPort,
@@ -78,6 +80,7 @@ object SessionAccessManager {
                     logger?.e("[-] Integrated X11 could not start; VNC mirror was not attempted")
                     false
                 } else {
+                    PulseAudioFixManager.finalizeAfterContainerReady(containerName, logger)
                     logger?.i("")
                     val mirror = VncServerManager.startMirror(
                         containerName = containerName,
