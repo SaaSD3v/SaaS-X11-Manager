@@ -22,6 +22,12 @@ data class PulseAudioFixResult(
  * The Fixes screen only stores the user's desired state. This manager does not
  * run from the settings switch. SessionAccessManager calls reconcileForStart()
  * only after the user presses Start X11, Start VNC or Start Both.
+ *
+ * The embedded helper remains byte-for-byte v3.0.2 FINAL and is verified first.
+ * For Manager execution only, its two root entry points are then replaced by a
+ * deterministic file-RPC adapter. The helper still runs as the actual Termux
+ * UID, while root/DroidSpaces commands execute inside the Manager's already-
+ * authorized libsu shell. Termux therefore does not need a second Magisk grant.
  */
 object PulseAudioFixManager {
     private const val ASSET_DIR = "saas-audio"
@@ -31,23 +37,64 @@ object PulseAudioFixManager {
     private const val SCRIPT_BASE64_SIZE = 92_700
     private const val SCRIPT_PARTS = 5
 
+    private const val MANAGER_SCRIPT_SHA256 = "93caccafaa46ce0d51fe52d0ec2007aba4a45db2bc7d069f2d311c4bff8dbce2"
+    private const val MANAGER_SCRIPT_SIZE = 70_724
+
     private const val TERMUX_PREFIX = "/data/data/com.termux/files/usr"
     private const val TERMUX_HOME = "/data/data/com.termux/files/home"
     private const val MANAGED_DIR = "$TERMUX_HOME/.local/share/saas-x11-manager"
     private const val MANAGED_SCRIPT = "$MANAGED_DIR/SaaS-DroidSpaces-Audio-Auto.sh"
+    private const val ROOT_RPC_BASE = "/data/local/tmp/saas-x11manager-audio-rpc"
 
-    /**
-     * Reconciles the stored switch state at the moment a graphical start was
-     * explicitly requested.
-     *
-     * Enabled: stage/verify the helper, install only missing requirements and
-     * apply/verify the bridge before the graphical session starts.
-     *
-     * Disabled after a previous successful apply: remove only the integration
-     * owned by this fix before the graphical session starts.
-     *
-     * Audio failures are returned to the caller but remain non-fatal to X11/VNC.
-     */
+    private val ORIGINAL_ROOT_EXEC = """
+        root_exec() { su -c "@1"; }
+    """.trimIndent().replace('@', '$')
+
+    private val MANAGER_ROOT_EXEC = """
+        root_exec() {
+            if [ -n "@{SAAS_AUDIO_ROOT_RPC_DIR:-}" ]; then
+                rpc_dir="@SAAS_AUDIO_ROOT_RPC_DIR"
+                rpc_seq="@{SAAS_AUDIO_ROOT_RPC_SEQ:-0}"
+                rpc_seq=@((rpc_seq + 1))
+                SAAS_AUDIO_ROOT_RPC_SEQ="@rpc_seq"
+                export SAAS_AUDIO_ROOT_RPC_SEQ
+                rpc_base="@rpc_dir/req.@$.@rpc_seq"
+                printf '%s\n' "@1" > "@rpc_base.cmd" || return 125
+                : > "@rpc_base.ready" || { rm -f "@rpc_base.cmd" 2>/dev/null || true; return 125; }
+                rpc_wait=0
+                while [ ! -f "@rpc_base.status" ]; do
+                    rpc_wait=@((rpc_wait + 1))
+                    if [ "@rpc_wait" -ge 6000 ]; then
+                        rm -f "@rpc_base.cmd" "@rpc_base.ready" "@rpc_base.out" "@rpc_base.err" 2>/dev/null || true
+                        return 124
+                    fi
+                    sleep 0.05
+                done
+                [ -f "@rpc_base.out" ] && cat "@rpc_base.out"
+                [ -f "@rpc_base.err" ] && cat "@rpc_base.err" >&2
+                rpc_status="@(sed -n '1p' "@rpc_base.status" 2>/dev/null || printf '125')"
+                case "@rpc_status" in ''|*[!0-9]*) rpc_status=125;; esac
+                rm -f "@rpc_base.cmd" "@rpc_base.ready" "@rpc_base.out" "@rpc_base.err" "@rpc_base.status" 2>/dev/null || true
+                return "@rpc_status"
+            fi
+            su -c "@1"
+        }
+    """.trimIndent().replace('@', '$')
+
+    private val ORIGINAL_REQUIRE_ROOT = """
+        require_root_access() {
+            uid="@(su -c 'id -u' 2>/dev/null | sed -n '1p' || true)"
+            [ "@uid" = "0" ] || die "Root access through su was not granted"
+        }
+    """.trimIndent().replace('@', '$')
+
+    private val MANAGER_REQUIRE_ROOT = """
+        require_root_access() {
+            uid="@(root_exec 'id -u' 2>/dev/null | sed -n '1p' || true)"
+            [ "@uid" = "0" ] || die "Root access was not available"
+        }
+    """.trimIndent().replace('@', '$')
+
     suspend fun reconcileForStart(
         containerName: String,
         logger: ContainerLogger? = null
@@ -99,6 +146,7 @@ object PulseAudioFixManager {
         }
 
         logger?.i("[FIX] PulseAudio fix selected; applying it now because graphical start was requested...")
+        logger?.i("[FIX] Root operations are delegated to the Manager root shell; Termux does not need a separate Magisk grant")
         val staged = stageHelper(context)
         if (!staged.success) {
             staged.details.forEach { logger?.e("[FIX] $it") }
@@ -114,7 +162,6 @@ object PulseAudioFixManager {
         )
         if (!applied.success) {
             logger?.w("[FIX] PulseAudio fix failed; graphical startup will continue")
-            logger?.w("[FIX] If Magisk requests Termux root access, grant it and press Start again")
             return@withContext applied
         }
 
@@ -145,11 +192,6 @@ object PulseAudioFixManager {
 
     private data class TermuxRuntime(val uid: Int)
 
-    /**
-     * Reconstructs the audited helper from small APK assets, validates its exact
-     * decoded size and SHA-256, then copies it into Termux with Termux ownership.
-     * Any missing, extra, truncated or reordered payload part fails closed.
-     */
     private fun stageHelper(context: Context): PulseAudioFixResult {
         val runtime = detectTermuxRuntime()
             ?: return PulseAudioFixResult(
@@ -226,24 +268,46 @@ object PulseAudioFixManager {
             )
         }
 
-        val cacheScript = File(context.cacheDir, "saas-droidspaces-audio-auto-$SCRIPT_VERSION.sh")
-        try {
-            cacheScript.outputStream().use { it.write(decoded) }
-        } catch (e: Exception) {
+        val originalDigest = sha256(decoded)
+        if (!originalDigest.equals(SCRIPT_SHA256, ignoreCase = true)) {
             return PulseAudioFixResult(
                 success = false,
-                message = "Bundled PulseAudio helper could not be written to the app cache.",
-                details = listOf(e.message ?: e.javaClass.simpleName)
+                message = "Bundled PulseAudio helper failed its source integrity check.",
+                details = listOf("Expected $SCRIPT_SHA256", "Found ${originalDigest.ifEmpty { "unavailable" }}")
             )
         }
 
-        val digest = sha256(cacheScript)
-        if (!digest.equals(SCRIPT_SHA256, ignoreCase = true)) {
-            cacheScript.delete()
+        val adapted = adaptForManager(decoded)
+            ?: return PulseAudioFixResult(
+                success = false,
+                message = "Bundled PulseAudio helper could not be adapted for Manager root transport.",
+                details = listOf("The expected v$SCRIPT_VERSION root entry points were not found exactly once.")
+            )
+
+        if (adapted.size != MANAGER_SCRIPT_SIZE) {
             return PulseAudioFixResult(
                 success = false,
-                message = "Bundled PulseAudio helper failed its integrity check.",
-                details = listOf("Expected $SCRIPT_SHA256", "Found ${digest.ifEmpty { "unavailable" }}")
+                message = "Manager-adapted PulseAudio helper has an unexpected size.",
+                details = listOf("Expected: $MANAGER_SCRIPT_SIZE bytes", "Found: ${adapted.size} bytes")
+            )
+        }
+        val adaptedDigest = sha256(adapted)
+        if (!adaptedDigest.equals(MANAGER_SCRIPT_SHA256, ignoreCase = true)) {
+            return PulseAudioFixResult(
+                success = false,
+                message = "Manager-adapted PulseAudio helper failed its integrity check.",
+                details = listOf("Expected $MANAGER_SCRIPT_SHA256", "Found ${adaptedDigest.ifEmpty { "unavailable" }}")
+            )
+        }
+
+        val cacheScript = File(context.cacheDir, "saas-droidspaces-audio-auto-$SCRIPT_VERSION-manager.sh")
+        try {
+            cacheScript.outputStream().use { it.write(adapted) }
+        } catch (e: Exception) {
+            return PulseAudioFixResult(
+                success = false,
+                message = "PulseAudio helper could not be written to the app cache.",
+                details = listOf(e.message ?: e.javaClass.simpleName)
             )
         }
 
@@ -275,8 +339,23 @@ object PulseAudioFixManager {
 
         return PulseAudioFixResult(
             success = true,
-            message = "PulseAudio helper staged and SHA-256 verified."
+            message = "PulseAudio helper staged; source and Manager adapter SHA-256 verified."
         )
+    }
+
+    private fun adaptForManager(original: ByteArray): ByteArray? {
+        val source = original.toString(Charsets.UTF_8)
+        if (
+            source.indexOf(ORIGINAL_ROOT_EXEC) < 0 ||
+            source.indexOf(ORIGINAL_ROOT_EXEC) != source.lastIndexOf(ORIGINAL_ROOT_EXEC) ||
+            source.indexOf(ORIGINAL_REQUIRE_ROOT) < 0 ||
+            source.indexOf(ORIGINAL_REQUIRE_ROOT) != source.lastIndexOf(ORIGINAL_REQUIRE_ROOT)
+        ) return null
+
+        return source
+            .replace(ORIGINAL_ROOT_EXEC, MANAGER_ROOT_EXEC)
+            .replace(ORIGINAL_REQUIRE_ROOT, MANAGER_REQUIRE_ROOT)
+            .toByteArray(Charsets.UTF_8)
     }
 
     private suspend fun runHelper(
@@ -293,22 +372,23 @@ object PulseAudioFixManager {
             if (quiet) add("--quiet")
         }.joinToString(" ") { shellQuote(it) }
 
+        val rpcDir = "$ROOT_RPC_BASE/${runtime.uid}-${System.currentTimeMillis()}-${System.nanoTime()}"
         val termuxCommand = buildString {
             append("export HOME=").append(shellQuote(TERMUX_HOME)).append("; ")
             append("export PREFIX=").append(shellQuote(TERMUX_PREFIX)).append("; ")
             append("export TMPDIR=").append(shellQuote("$TERMUX_PREFIX/tmp")).append("; ")
             append("export PATH=").append(shellQuote("$TERMUX_PREFIX/bin:/system/bin:/system/xbin")).append("; ")
+            append("export SAAS_AUDIO_ROOT_RPC_DIR=").append(shellQuote(rpcDir)).append("; ")
             append("exec ").append(shellQuote("$TERMUX_PREFIX/bin/sh")).append(' ')
             append(shellQuote(MANAGED_SCRIPT)).append(' ').append(args)
         }
-        val rootCommand = "su ${runtime.uid} -c ${shellQuote(termuxCommand)}"
 
         val result = try {
-            Shell.cmd(rootCommand).exec()
+            Shell.cmd(buildRootBrokerCommand(runtime, rpcDir, termuxCommand)).exec()
         } catch (e: Exception) {
             return PulseAudioFixResult(
                 success = false,
-                message = "PulseAudio helper could not be started.",
+                message = "PulseAudio helper could not be started through the Manager root broker.",
                 details = listOf(e.message ?: e.javaClass.simpleName)
             )
         }
@@ -325,20 +405,10 @@ object PulseAudioFixManager {
         }
 
         if (!result.isSuccess) {
-            val meaningful = lines.takeLast(16)
-            val rootHint = if (meaningful.any {
-                    it.contains("Root access", ignoreCase = true) ||
-                        it.contains("su", ignoreCase = true)
-                }
-            ) {
-                " Grant Termux root permission in Magisk, then press Start again. PulseAudio itself still runs as the normal Termux user."
-            } else {
-                ""
-            }
             return PulseAudioFixResult(
                 success = false,
-                message = "PulseAudio fix failed for $containerName.$rootHint",
-                details = meaningful
+                message = "PulseAudio fix failed for $containerName. Root was delegated through the Manager; Termux does not need a separate Magisk root grant.",
+                details = lines.takeLast(16)
             )
         }
 
@@ -348,6 +418,53 @@ object PulseAudioFixManager {
             details = lines.takeLast(16)
         )
     }
+
+    private fun buildRootBrokerCommand(
+        runtime: TermuxRuntime,
+        rpcDir: String,
+        termuxCommand: String
+    ): String = """
+        rpc=%RPC%
+        uid=%UID%
+        rm -rf "@rpc" 2>/dev/null || true
+        mkdir -p "@rpc" || exit 120
+        chown "@uid:@uid" "@rpc" || exit 121
+        chmod 700 "@rpc" || exit 122
+
+        broker() {
+            while [ ! -f "@rpc/stop" ]; do
+                matched=0
+                for ready in "@rpc"/req.*.ready; do
+                    [ -f "@ready" ] || continue
+                    base="@{ready%.ready}"
+                    mv "@ready" "@base.running" 2>/dev/null || continue
+                    /system/bin/sh "@base.cmd" >"@base.out" 2>"@base.err"
+                    cmd_rc=@?
+                    chmod 644 "@base.out" "@base.err" 2>/dev/null || true
+                    printf '%s\n' "@cmd_rc" >"@base.status.tmp"
+                    chmod 644 "@base.status.tmp" 2>/dev/null || true
+                    mv "@base.status.tmp" "@base.status"
+                    rm -f "@base.running" 2>/dev/null || true
+                    matched=1
+                done
+                [ "@matched" -eq 1 ] || sleep 0.05
+            done
+        }
+
+        broker &
+        broker_pid=@!
+        su "@uid" -c %TERMUX%
+        helper_rc=@?
+        : > "@rpc/stop"
+        kill "@broker_pid" 2>/dev/null || true
+        wait "@broker_pid" 2>/dev/null || true
+        rm -rf "@rpc" 2>/dev/null || true
+        exit "@helper_rc"
+    """.trimIndent()
+        .replace("%RPC%", shellQuote(rpcDir))
+        .replace("%UID%", runtime.uid.toString())
+        .replace("%TERMUX%", shellQuote(termuxCommand))
+        .replace('@', '$')
 
     private fun detectTermuxRuntime(): TermuxRuntime? {
         val command =
@@ -366,17 +483,10 @@ object PulseAudioFixManager {
         return TermuxRuntime(uid)
     }
 
-    private fun sha256(file: File): String = try {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buffer = ByteArray(32 * 1024)
-            while (true) {
-                val read = input.read(buffer)
-                if (read <= 0) break
-                digest.update(buffer, 0, read)
-            }
-        }
-        digest.digest().joinToString("") { "%02x".format(it) }
+    private fun sha256(bytes: ByteArray): String = try {
+        MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString("") { "%02x".format(it) }
     } catch (_: Exception) {
         ""
     }
