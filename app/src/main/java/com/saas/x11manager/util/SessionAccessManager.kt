@@ -23,11 +23,7 @@ object SessionAccessManager {
         if (accessMode.requiresVnc) logger?.i("[CTX] VNC port: $vncPort")
         logger?.i("")
 
-        // Fix switches only store intent in the settings screen. Actual install,
-        // validation or cleanup is deliberately deferred until the user presses
-        // Start X11/VNC/Both so package/root work never happens while browsing
-        // settings. Audio failure remains non-fatal for the graphical session.
-        PulseAudioFixManager.reconcileForStart(
+        PulseAudioFixManager.prepareBeforeGraphicalStart(
             containerName = containerName,
             logger = logger
         )
