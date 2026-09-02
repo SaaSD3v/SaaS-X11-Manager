@@ -1,6 +1,7 @@
 package com.saas.x11manager.util
 
 import android.content.Context
+import android.util.Base64
 import com.saas.x11manager.X11Application
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
@@ -28,9 +29,12 @@ data class PulseAudioFixResult(
  * user explicitly enables the fix. Re-checks only happen after that opt-in.
  */
 object PulseAudioFixManager {
-    private const val ASSET_NAME = "saas-droidspaces-audio-auto.sh"
+    private const val ASSET_DIR = "saas-audio"
     private const val SCRIPT_VERSION = "3.0.2"
     private const val SCRIPT_SHA256 = "55cd6d74323a76fe44a07ac5c8777ff843ab13427b57cec686a3a9262c919278"
+    private const val SCRIPT_SIZE = 69_523
+    private const val SCRIPT_BASE64_SIZE = 92_700
+    private const val SCRIPT_PARTS = 5
 
     private const val TERMUX_PREFIX = "/data/data/com.termux/files/usr"
     private const val TERMUX_HOME = "/data/data/com.termux/files/home"
@@ -156,10 +160,13 @@ object PulseAudioFixManager {
         run
     }
 
-    private data class TermuxRuntime(
-        val uid: Int
-    )
+    private data class TermuxRuntime(val uid: Int)
 
+    /**
+     * Reconstructs the audited helper from small APK assets, validates its exact
+     * decoded size and SHA-256, then copies it into Termux with Termux ownership.
+     * Any missing, extra, truncated or reordered payload part fails closed.
+     */
     private fun stageHelper(context: Context): PulseAudioFixResult {
         val runtime = detectTermuxRuntime()
             ?: return PulseAudioFixResult(
@@ -170,15 +177,79 @@ object PulseAudioFixManager {
                 )
             )
 
-        val cacheScript = File(context.cacheDir, "saas-droidspaces-audio-auto-$SCRIPT_VERSION.sh")
+        val expectedParts = (0 until SCRIPT_PARTS).map { index ->
+            "part${index.toString().padStart(2, '0')}.b64"
+        }
+        val availableParts = try {
+            context.assets.list(ASSET_DIR)
+                ?.filter { it.matches(Regex("part\\d{2}\\.b64")) }
+                ?.sorted()
+                .orEmpty()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        if (availableParts != expectedParts) {
+            return PulseAudioFixResult(
+                success = false,
+                message = "Bundled PulseAudio helper payload is incomplete.",
+                details = listOf(
+                    "Expected: ${expectedParts.joinToString()}",
+                    "Found: ${availableParts.joinToString().ifEmpty { "none" }}"
+                )
+            )
+        }
+
+        val encoded = StringBuilder(SCRIPT_BASE64_SIZE)
         try {
-            context.assets.open(ASSET_NAME).use { input ->
-                cacheScript.outputStream().use { output -> input.copyTo(output) }
+            expectedParts.forEach { part ->
+                context.assets.open("$ASSET_DIR/$part").bufferedReader(Charsets.US_ASCII).useLines { lines ->
+                    lines.forEach { line ->
+                        line.forEach { char ->
+                            if (!char.isWhitespace()) encoded.append(char)
+                        }
+                    }
+                }
             }
         } catch (e: Exception) {
             return PulseAudioFixResult(
                 success = false,
-                message = "Bundled PulseAudio helper could not be read.",
+                message = "Bundled PulseAudio helper could not be reconstructed.",
+                details = listOf(e.message ?: e.javaClass.simpleName)
+            )
+        }
+
+        if (encoded.length != SCRIPT_BASE64_SIZE) {
+            return PulseAudioFixResult(
+                success = false,
+                message = "Bundled PulseAudio helper payload has an unexpected size.",
+                details = listOf("Expected base64 bytes: $SCRIPT_BASE64_SIZE", "Found: ${encoded.length}")
+            )
+        }
+
+        val decoded = try {
+            Base64.decode(encoded.toString(), Base64.DEFAULT)
+        } catch (e: IllegalArgumentException) {
+            return PulseAudioFixResult(
+                success = false,
+                message = "Bundled PulseAudio helper payload is not valid base64.",
+                details = listOf(e.message ?: e.javaClass.simpleName)
+            )
+        }
+        if (decoded.size != SCRIPT_SIZE) {
+            return PulseAudioFixResult(
+                success = false,
+                message = "Bundled PulseAudio helper decoded to an unexpected size.",
+                details = listOf("Expected: $SCRIPT_SIZE bytes", "Found: ${decoded.size} bytes")
+            )
+        }
+
+        val cacheScript = File(context.cacheDir, "saas-droidspaces-audio-auto-$SCRIPT_VERSION.sh")
+        try {
+            cacheScript.outputStream().use { it.write(decoded) }
+        } catch (e: Exception) {
+            return PulseAudioFixResult(
+                success = false,
+                message = "Bundled PulseAudio helper could not be written to the app cache.",
                 details = listOf(e.message ?: e.javaClass.simpleName)
             )
         }
@@ -221,7 +292,7 @@ object PulseAudioFixManager {
 
         return PulseAudioFixResult(
             success = true,
-            message = "PulseAudio helper staged."
+            message = "PulseAudio helper staged and SHA-256 verified."
         )
     }
 
@@ -272,7 +343,11 @@ object PulseAudioFixManager {
 
         if (!result.isSuccess) {
             val meaningful = lines.takeLast(16)
-            val rootHint = if (meaningful.any { it.contains("Root access", ignoreCase = true) || it.contains("su", ignoreCase = true) }) {
+            val rootHint = if (meaningful.any {
+                    it.contains("Root access", ignoreCase = true) ||
+                        it.contains("su", ignoreCase = true)
+                }
+            ) {
                 " Magisk may need root permission for Termux because the proven helper performs DroidSpaces operations from the normal Termux user."
             } else {
                 ""
