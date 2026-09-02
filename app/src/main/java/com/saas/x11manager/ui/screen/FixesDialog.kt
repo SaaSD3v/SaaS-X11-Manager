@@ -113,7 +113,7 @@ internal fun FixesScreen(
                         )
                         Column(modifier = Modifier.padding(start = 12.dp)) {
                             Text(
-                                "PulseAudio fix",
+                                "Audio configuration",
                                 style = MaterialTheme.typography.titleMedium
                             )
                             Text(
@@ -123,6 +123,11 @@ internal fun FixesScreen(
                             )
                             Text(
                                 "Android audio for Linux applications",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "HOST network mode currently supported",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
