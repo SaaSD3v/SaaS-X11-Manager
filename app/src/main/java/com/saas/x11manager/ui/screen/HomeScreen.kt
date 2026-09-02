@@ -23,26 +23,15 @@ import com.saas.x11manager.util.VncSettings
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
-    viewModel: HomeViewModel
+    viewModel: HomeViewModel,
+    onOpenFixes: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val containers by viewModel.containers.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val expandedContainerName = remember { mutableStateOf<String?>(null) }
     var generalSettingsContainer by remember { mutableStateOf<String?>(null) }
-    var fixesContainer by remember { mutableStateOf<String?>(null) }
     val activeOperation = viewModel.runningOperationContainer
-
-    // Fixes is a real settings surface, not a modal operation dialog. Opening it
-    // replaces the Home content and the switch only stores intent. Actual work is
-    // deferred until Start X11/VNC/Both.
-    fixesContainer?.let { containerName ->
-        FixesScreen(
-            containerName = containerName,
-            onBack = { fixesContainer = null }
-        )
-        return
-    }
 
     generalSettingsContainer?.let { containerName ->
         GeneralSettingsDialog(
@@ -105,9 +94,6 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     items(containers, key = { it.name }) { container ->
-                        // These are small Android preference reads and are intentionally
-                        // performed in the UI so a General settings save is reflected on
-                        // the card immediately after the dialog closes.
                         val accessMode = VncSettings.getAccessMode(context, container.name)
                         val vncPort = VncSettings.getPort(context, container.name)
                         val startLabel = when (accessMode) {
@@ -141,13 +127,12 @@ fun HomeScreen(
                                 },
                                 onGeneralSettings = {
                                     expandedContainerName.value = null
-                                    fixesContainer = null
                                     generalSettingsContainer = container.name
                                 },
                                 onFixes = {
                                     expandedContainerName.value = null
                                     generalSettingsContainer = null
-                                    fixesContainer = container.name
+                                    onOpenFixes(container.name)
                                 }
                             )
                         )
