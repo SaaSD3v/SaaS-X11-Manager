@@ -62,6 +62,12 @@ object SessionAccessManager {
                         password = vncPassword,
                         logger = logger
                     )
+                } else {
+                    VncConnectionGuide.logAdbForwardRestartRecovery(
+                        port = vncPort,
+                        logger = logger,
+                        onlyIfTroubleshooting = true
+                    )
                 }
                 result.success
             }
@@ -87,6 +93,11 @@ object SessionAccessManager {
                     )
                     if (!mirror.success) {
                         logger?.w("[!] VNC mirror failed, but Integrated X11 remains available on ${slot.describe()}")
+                        VncConnectionGuide.logAdbForwardRestartRecovery(
+                            port = vncPort,
+                            logger = logger,
+                            onlyIfTroubleshooting = true
+                        )
                         false
                     } else {
                         logger?.i("[+] Integrated X11 and VNC are sharing the same ${slot.describe()} session")
