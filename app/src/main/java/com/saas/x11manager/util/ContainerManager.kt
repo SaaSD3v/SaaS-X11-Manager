@@ -260,7 +260,7 @@ object ContainerManager {
             val config = loadConfig(
                 "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}", name
             ) ?: return@withContext false
-            val session = ContainerSettingsManager.getGraphicSession(name) ?: GraphicSession.XFCE
+            val session = ContainerSettingsManager.getGraphicSession(name) ?: GraphicSession.NONE
 
             val applied = RootfsAccessor.use(
                 rootfsPath = config.rootfsPath,
