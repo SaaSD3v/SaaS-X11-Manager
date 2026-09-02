@@ -5,6 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
+/** Regression guard for both VNC settings surfaces. */
 class VncSettingsFullscreenPolicyTest {
 
     private fun source(relativePath: String): String {
