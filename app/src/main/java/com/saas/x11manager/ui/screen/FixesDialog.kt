@@ -5,10 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -35,14 +33,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.util.FixSettings
 
-/**
- * Full-size per-container Fixes settings surface.
- *
- * Switches are declarative only: changing one stores the desired state but does
- * not install packages, start PulseAudio, restart a container, or invoke root.
- * SessionAccessManager reconciles the desired state only when Start X11/VNC/Both
- * is pressed, where progress is already visible in the normal session logs.
- */
 @Composable
 internal fun FixesScreen(
     containerName: String,
@@ -52,11 +42,7 @@ internal fun FixesScreen(
     var enabled by remember(containerName) {
         mutableStateOf(FixSettings.isPulseAudioEnabled(context, containerName))
     }
-    var applied by remember(containerName) {
-        mutableStateOf(FixSettings.isPulseAudioApplied(context, containerName))
-    }
-    var status by remember(containerName) { mutableStateOf<String?>(null) }
-    var statusIsError by remember(containerName) { mutableStateOf(false) }
+    var saveError by remember(containerName) { mutableStateOf(false) }
 
     BackHandler(onBack = onBack)
 
@@ -102,11 +88,6 @@ internal fun FixesScreen(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
-            Text(
-                "Nothing is installed or started from this screen. Select the fixes you want, go back, then press Start X11, Start VNC or Start Both. The Manager applies the selected fixes immediately before starting the graphical session and shows the work in the normal session logs.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -114,103 +95,66 @@ internal fun FixesScreen(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant
                 )
             ) {
-                Column(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Default.Build,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Column(modifier = Modifier.padding(start = 12.dp)) {
-                                Text(
-                                    "PulseAudio fix",
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                Text(
-                                    if (enabled) "Enabled for next graphical start" else "Disabled by default",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        Switch(
-                            checked = enabled,
-                            onCheckedChange = { requested ->
-                                val saved = FixSettings.setPulseAudioEnabled(
-                                    context = context,
-                                    containerName = containerName,
-                                    enabled = requested
-                                )
-                                if (saved) {
-                                    enabled = requested
-                                    applied = FixSettings.isPulseAudioApplied(context, containerName)
-                                    statusIsError = false
-                                    status = if (requested) {
-                                        "Selected. No installation was started here. The PulseAudio fix will be detected, installed if needed and verified automatically the next time you start the graphical session."
-                                    } else if (applied) {
-                                        "Disabled for the next start. The existing Manager-owned PulseAudio integration will be removed during the next graphical start; the current running session is not interrupted."
-                                    } else {
-                                        "Disabled. Nothing will be installed or applied."
-                                    }
-                                } else {
-                                    statusIsError = true
-                                    status = "Could not save the PulseAudio fix preference. No system changes were made."
-                                }
-                            }
+                        Icon(
+                            Icons.Default.Build,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
                         )
+                        Column(modifier = Modifier.padding(start = 12.dp)) {
+                            Text(
+                                "PulseAudio fix",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                if (enabled) "Enabled" else "Disabled by default",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "Android audio for Linux applications",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
 
-                    Text(
-                        if (applied) {
-                            "Runtime state: the Manager has previously applied this fix to the container."
-                        } else {
-                            "Runtime state: not applied yet."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Text(
-                        "At Start, the bundled audited helper prefers the DroidSpaces native /tmp/.pulse-socket bridge, detects AAudio/OpenSL ES, installs only missing apt/apk audio clients, and uses 127.0.0.1 TCP only as a host-network fallback.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Text(
-                        "Root handling: PulseAudio and package commands still run as the real Termux user, but DroidSpaces/root commands are delegated back to the Manager's already-authorized root shell. Termux does not need a separate Magisk root permission.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Switch(
+                        checked = enabled,
+                        onCheckedChange = { requested ->
+                            val saved = FixSettings.setPulseAudioEnabled(
+                                context = context,
+                                containerName = containerName,
+                                enabled = requested
+                            )
+                            if (saved) {
+                                enabled = requested
+                                saveError = false
+                            } else {
+                                saveError = true
+                            }
+                        }
                     )
                 }
             }
 
-            status?.let { message ->
+            if (saveError) {
                 Text(
-                    message,
+                    "Could not save this setting.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (statusIsError) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    }
+                    color = MaterialTheme.colorScheme.error
                 )
             }
-
-            Spacer(Modifier.height(24.dp))
         }
     }
 }
