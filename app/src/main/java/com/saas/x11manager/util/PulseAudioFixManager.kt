@@ -336,7 +336,7 @@ object PulseAudioFixManager {
         try { Shell.cmd(command).exec() } catch (_: Exception) { }
     }
 
-    private fun stopExternalScriptCore(runtime: TermuxRuntime, baseDir: String, label: String, logger: ContainerLogger?) {
+    private suspend fun stopExternalScriptCore(runtime: TermuxRuntime, baseDir: String, label: String, logger: ContainerLogger?) {
         val pidFile = "$baseDir/host/pulseaudio.pid"
         val socket = "$baseDir/host/control.sock"
         val command = """
@@ -356,7 +356,7 @@ object PulseAudioFixManager {
         if (!stopped.isNullOrBlank()) logger?.i("[*] Migrating from $label audio core (PID $stopped)")
     }
 
-    private fun stopPreviousManagerTcpRuntime(runtime: TermuxRuntime, logger: ContainerLogger?) {
+    private suspend fun stopPreviousManagerTcpRuntime(runtime: TermuxRuntime, logger: ContainerLogger?) {
         val command = """
             pf=${shellQuote(HOST_PID_FILE)}
             [ -f "${'$'}pf" ] || exit 0
@@ -555,13 +555,13 @@ object PulseAudioFixManager {
             else -> false
         }
 
-    private fun resolveEndpoint(info: ContainerInfo, logger: ContainerLogger?): String? = when (normalizedNetwork(info)) {
+    private suspend fun resolveEndpoint(info: ContainerInfo, logger: ContainerLogger?): String? = when (normalizedNetwork(info)) {
         "host" -> "127.0.0.1"
         "nat" -> discoverNatGateway(info, logger)
         else -> null
     }
 
-    private fun discoverNatGateway(info: ContainerInfo, logger: ContainerLogger?): String? {
+    private suspend fun discoverNatGateway(info: ContainerInfo, logger: ContainerLogger?): String? {
         val pid = info.pid ?: return null
         val busybox = "${Constants.DS_BASE_DIR}/bin/busybox"
         val command = """
@@ -681,7 +681,7 @@ object PulseAudioFixManager {
         runAsTermux(runtime, command)
     }
 
-    private fun ensureDirectListener(runtime: TermuxRuntime, ip: String, port: Int, logger: ContainerLogger?): Boolean {
+    private suspend fun ensureDirectListener(runtime: TermuxRuntime, ip: String, port: Int, logger: ContainerLogger?): Boolean {
         if (!hostOwnsIpv4(ip)) return false
         if (probeEndpointAndroidSink(runtime, ip, port)) {
             logger?.i("[+] Reusing authenticated PulseAudio listener on $ip:$port")
@@ -704,13 +704,13 @@ object PulseAudioFixManager {
                 logger?.i("[+] Authenticated PulseAudio listener ready on $ip:$port")
                 return true
             }
-            Thread.sleep(100)
+            delay(100)
         }
         unloadTrackedListener(runtime, ip, port)
         return false
     }
 
-    private fun selectAndEnsureListener(runtime: TermuxRuntime, ip: String, logger: ContainerLogger?): Int? {
+    private suspend fun selectAndEnsureListener(runtime: TermuxRuntime, ip: String, logger: ContainerLogger?): Int? {
         val maxPort = (BASE_AUDIO_PORT + MAX_PORT_SHIFT).coerceAtMost(65535)
         for (port in BASE_AUDIO_PORT..maxPort) {
             val owner = configuredPortForwardOwner(port)
