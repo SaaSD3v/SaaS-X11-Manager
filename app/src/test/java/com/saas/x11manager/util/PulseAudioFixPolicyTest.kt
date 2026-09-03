@@ -30,7 +30,7 @@ class PulseAudioFixPolicyTest {
         assertFalse(fixes.contains("AlertDialog("))
         assertTrue(fixes.contains("\"Audio configuration\""))
         assertTrue(fixes.contains("\"Android audio for Linux applications\""))
-        assertTrue(fixes.contains("\"HOST network mode currently supported\""))
+        assertTrue(fixes.contains("\"HOST and NAT network modes supported\""))
         assertFalse(fixes.contains("Magisk"))
         assertFalse(fixes.contains("Root handling"))
 
@@ -50,14 +50,13 @@ class PulseAudioFixPolicyTest {
         assertFalse(manager.contains("ContainerManager.stopContainer("))
         assertFalse(manager.contains("systemctl restart"))
         assertFalse(manager.contains("rc-service"))
-        assertFalse(manager.contains("--restore-state"))
-        assertFalse(manager.contains("--uninstall"))
+        assertFalse(manager.contains("X11SessionManager.startX11Session"))
+        assertFalse(manager.contains("VncManager"))
     }
 
     @Test
-    fun managerOwnedHostAudioReplacesTheRetiredNativeSocketTransport() {
+    fun sessionOrderingKeepsAudioPreparationBeforeGraphicsAndTransportAfterContainerReady() {
         val sessionAccess = source("app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt")
-        val manager = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
 
         val prepareIndex = sessionAccess.indexOf("PulseAudioFixManager.prepareBeforeGraphicalStart")
         val x11Index = sessionAccess.indexOf("X11SessionManager.startX11Session")
@@ -65,32 +64,57 @@ class PulseAudioFixPolicyTest {
         assertTrue(prepareIndex >= 0)
         assertTrue(x11Index > prepareIndex)
         assertTrue(finalizeIndex > x11Index)
-
-        assertTrue(manager.contains("AUDIO_PORT = 4713"))
-        assertTrue(manager.contains("HOST_SERVER = \"tcp:\$AUDIO_HOST:\$AUDIO_PORT\""))
-        assertTrue(manager.contains("module-native-protocol-tcp listen=\$AUDIO_HOST port=\$AUDIO_PORT auth-anonymous=1"))
-        assertTrue(manager.contains("module-aaudio-sink"))
-        assertTrue(manager.contains("module-sles-sink"))
-        assertTrue(manager.contains("info.netMode.trim().lowercase() == \"host\""))
-        assertTrue(manager.contains("net_mode=host only"))
-
-        assertFalse(manager.contains("PULSE_SERVER=unix:/tmp/.pulse-socket"))
-        assertFalse(manager.contains("waitForContainerBridge"))
-        assertFalse(manager.contains("HOST_SOCKET"))
-        assertFalse(manager.contains("default.pa"))
     }
 
     @Test
-    fun hostRuntimeUsesAnIsolatedPulseAudioEnvironmentAndSurvivesRebootRecovery() {
+    fun hostAndNatUseThePhysicallyValidatedPrivateCoreArchitecture() {
         val manager = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
 
-        assertTrue(manager.contains(".saas-x11-manager/audio"))
-        assertTrue(manager.contains("PULSE_CONFIG_PATH"))
-        assertTrue(manager.contains("PULSE_RUNTIME_PATH"))
-        assertTrue(manager.contains("PULSE_STATE_PATH"))
-        assertTrue(manager.contains("PULSE_CLIENTCONFIG"))
-        assertTrue(manager.contains("pulseaudio -n --daemonize=no --exit-idle-time=-1 --use-pid-file=false"))
-        assertTrue(manager.contains("Manager audio runtime already ready"))
+        assertTrue(manager.contains("BASE_AUDIO_PORT = 4713"))
+        assertTrue(manager.contains("MAX_PORT_SHIFT = 64"))
+        assertTrue(manager.contains("HOST_CONTROL_SOCKET"))
+        assertTrue(manager.contains("module-native-protocol-unix socket=\$HOST_CONTROL_SOCKET auth-cookie=\$HOST_COOKIE"))
+        assertTrue(manager.contains("module-native-protocol-tcp"))
+        assertTrue(manager.contains("auth-cookie=\$HOST_COOKIE"))
+        assertTrue(manager.contains("module-aaudio-sink"))
+        assertTrue(manager.contains("module-sles-sink"))
+        assertTrue(manager.contains("\"host\" -> \"127.0.0.1\""))
+        assertTrue(manager.contains("discoverNatGateway"))
+        assertTrue(manager.contains("/proc/\${'$'}pid/net/route"))
+        assertTrue(manager.contains("172.28.0.1"))
+        assertTrue(manager.contains("configuredPortForwardOwner"))
+        assertTrue(manager.contains("selectAndEnsureListener"))
+
+        assertFalse(manager.contains("auth-anonymous=1"))
+        assertFalse(manager.contains("listen=0.0.0.0"))
+        assertFalse(manager.contains("PULSE_SERVER=unix:/tmp/.pulse-socket"))
+        assertFalse(manager.contains("waitForContainerBridge"))
+        assertFalse(manager.contains("HOST_SOCKET"))
+    }
+
+    @Test
+    fun binaryCookieNeverTravelsRawThroughDroidSpacesCommandString() {
+        val manager = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
+
+        assertTrue(manager.contains("transport.cookie"))
+        assertTrue(manager.contains("dd if=/dev/urandom"))
+        assertTrue(manager.contains("od -An -v -tu1"))
+        assertTrue(manager.contains("printf '%b'"))
+        assertTrue(manager.contains("COOKIE_ESCAPED"))
+        assertTrue(manager.contains("cookie-file = /root/.config/pulse/saas-audio.cookie"))
+        assertTrue(manager.contains("PULSE_COOKIE=/root/.config/pulse/saas-audio.cookie"))
+    }
+
+    @Test
+    fun managerMigratesTheValidatedShellBaselinesAndPreviousHostOnlyApk() {
+        val manager = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
+
+        assertTrue(manager.contains(".saas-droidspaces-audio-hostnat"))
+        assertTrue(manager.contains(".saas-droidspaces-audio-netlab"))
+        assertTrue(manager.contains("SaaS DroidSpaces Audio HostNAT"))
+        assertTrue(manager.contains("SaaS DroidSpaces Audio NetLab"))
+        assertTrue(manager.contains("Migrating previous HOST-only Manager audio runtime"))
+        assertTrue(manager.contains("migratedOriginalPulseState"))
     }
 
     @Test
@@ -111,8 +135,8 @@ class PulseAudioFixPolicyTest {
     fun persistentClientConfigurationSupportsDebianUbuntuAndAlpine() {
         val manager = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
 
-        assertTrue(manager.contains("default-server = \$HOST_SERVER"))
-        assertTrue(manager.contains("export PULSE_SERVER=\$HOST_SERVER"))
+        assertTrue(manager.contains("default-server = \$server"))
+        assertTrue(manager.contains("export PULSE_SERVER=\$server"))
         assertTrue(manager.contains("apt-get install -y pulseaudio-utils libasound2-plugins alsa-utils"))
         assertTrue(manager.contains("apk add --no-cache pulseaudio-utils alsa-utils alsa-plugins-pulse"))
         assertTrue(manager.contains("Persistent container audio client already configured"))

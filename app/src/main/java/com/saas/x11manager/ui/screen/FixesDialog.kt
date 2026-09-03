@@ -127,7 +127,7 @@ internal fun FixesScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                "HOST network mode currently supported",
+                                "HOST and NAT network modes supported",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
