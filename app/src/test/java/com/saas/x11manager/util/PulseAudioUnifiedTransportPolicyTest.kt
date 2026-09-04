@@ -40,16 +40,17 @@ class PulseAudioDataPathTransportPolicyTest {
     }
 
     @Test
-    fun natControlsExistingCoreWithoutStartingSecondDaemon() {
+    fun natControlsExistingCoreThroughRootAmRunCommand() {
         val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioDataPathTransport.kt")
 
         assertTrue(transport.contains("RUN_PERMISSION = \"com.termux.permission.RUN_COMMAND\""))
-        assertTrue(transport.contains("ComponentName(TERMUX_PACKAGE, RUN_SERVICE)"))
-        assertTrue(transport.contains("context.startService(intent)"))
-        assertTrue(transport.contains("putExtra(RUN_PATH, TERMUX_SH)"))
-        assertTrue(transport.contains("putExtra(RUN_ARGS, arrayOf(\"-c\", command))"))
+        assertTrue(transport.contains("am startservice --user 0"))
+        assertTrue(transport.contains("$TERMUX_PACKAGE/$RUN_SERVICE"))
+        assertTrue(transport.contains("RUN_PATH"))
+        assertTrue(transport.contains("RUN_WORKDIR"))
+        assertTrue(transport.contains("RUN_BACKGROUND"))
         assertTrue(transport.contains("allow-external-apps=true"))
-        assertTrue(transport.contains("Audio control executor: Termux RunCommandService"))
+        assertTrue(transport.contains("Audio control executor: root am startservice -> Termux RunCommandService"))
         assertTrue(transport.contains("Listener verifier: DroidSpaces container data path"))
         assertTrue(transport.contains("module-native-protocol-tcp"))
         assertTrue(transport.contains("auth-cookie="))
@@ -57,6 +58,12 @@ class PulseAudioDataPathTransportPolicyTest {
         assertTrue(transport.contains("172.28.0.1"))
         assertTrue(transport.contains("BASE_PORT = 4713"))
         assertTrue(transport.contains("MAX_PORT_SHIFT = 64"))
+
+        // Regression guard for 6ff7363: app-context startService is blocked once X11 owns the UI.
+        assertFalse(transport.contains("context.startService("))
+        assertFalse(transport.contains("startForegroundService("))
+        assertFalse(transport.contains("ComponentName("))
+        assertFalse(transport.contains("Intent("))
 
         assertFalse(transport.contains("pulseaudio -n"))
         assertFalse(transport.contains("module-aaudio-sink"))
@@ -72,6 +79,19 @@ class PulseAudioDataPathTransportPolicyTest {
         assertFalse(transport.contains("systemctl restart"))
         assertFalse(transport.contains("rc-service"))
         assertFalse(transport.contains("/tmp/.pulse-socket"))
+    }
+
+    @Test
+    fun rootAmDispatcherUsesTermuxOwnedLauncherAndFileHandshake() {
+        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioDataPathTransport.kt")
+        assertTrue(transport.contains("val launcher = \"$COMMANDS/$token.sh\""))
+        assertTrue(transport.contains("chown ${owner.uid}:${owner.gid}"))
+        assertTrue(transport.contains("chmod 700"))
+        assertTrue(transport.contains("exec >${q(resultFile)} 2>&1"))
+        assertTrue(transport.contains("--es ${q(RUN_PATH)} ${q(launcher)}"))
+        assertTrue(transport.contains("--ez ${q(RUN_BACKGROUND)} true"))
+        assertTrue(transport.contains("RUN_COMMAND root am startservice failed"))
+        assertTrue(transport.contains("RUN_COMMAND timed out waiting for Termux result"))
     }
 
     @Test
