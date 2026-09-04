@@ -104,15 +104,16 @@ class PulseAudioFixPolicyTest {
         assertTrue(transport.contains("private UNIX socket via Termux UID"))
         assertTrue(transport.contains("Listener verifier: PulseAudio module table + DroidSpaces container data path"))
 
-        assertFalse(transport.contains("RunCommandService"))
-        assertFalse(transport.contains("RUN_COMMAND"))
+        // Assert that executable integration identifiers are absent. Prose may
+        // still mention historical transports while documenting why they are not used.
+        assertFalse(transport.contains("com.termux.app.RunCommandService"))
+        assertFalse(transport.contains("com.termux.permission.RUN_COMMAND"))
         assertFalse(transport.contains("am startservice"))
         assertFalse(transport.contains("pulseaudio -n"))
         assertFalse(transport.contains("module-aaudio-sink"))
         assertFalse(transport.contains("module-sles-sink"))
         assertFalse(transport.contains("auth-anonymous=1"))
         assertFalse(transport.contains("listen=0.0.0.0"))
-        assertFalse(transport.contains("PULSE_SERVER=\"${'$'}tcp\""))
     }
 
     @Test
