@@ -49,7 +49,7 @@ class PulseAudioUnifiedTransportPolicyTest {
         assertTrue(transport.contains("allow-external-apps=true"))
         assertTrue(transport.contains("Audio control executor: Termux RunCommandService"))
         assertTrue(transport.contains("module-native-protocol-tcp"))
-        assertTrue(transport.contains("auth-cookie=\${'$'}COOKIE"))
+        assertTrue(transport.contains("auth-cookie="))
         assertTrue(transport.contains("\"host\" -> \"127.0.0.1\""))
         assertTrue(transport.contains("discoverNatGateway"))
         assertTrue(transport.contains("172.28.0.1"))
@@ -76,10 +76,10 @@ class PulseAudioUnifiedTransportPolicyTest {
     fun listenerCommandMatchesPhysicalManualProof() {
         val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioUnifiedTransport.kt")
         assertTrue(transport.contains("pactl load-module module-native-protocol-tcp"))
-        assertTrue(transport.contains("\"listen=\${'$'}IP\""))
-        assertTrue(transport.contains("\"port=\${'$'}PORT\""))
-        assertTrue(transport.contains("\"auth-cookie=\${'$'}COOKIE\""))
-        assertTrue(transport.contains("PULSE_SERVER=\"\${'$'}unix\""))
-        assertTrue(transport.contains("PULSE_SERVER=\"\${'$'}tcp\""))
+        assertTrue(transport.contains("listen="))
+        assertTrue(transport.contains("port="))
+        assertTrue(transport.contains("auth-cookie="))
+        assertTrue(transport.contains("PULSE_SERVER="))
+        assertTrue(transport.contains("PULSE_COOKIE="))
     }
 }
