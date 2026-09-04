@@ -23,6 +23,14 @@ object SessionAccessManager {
         if (accessMode.requiresVnc) logger?.i("[CTX] VNC port: $vncPort")
         logger?.i("")
 
+        // Termux caches allow-external-apps. Prove the RUN_COMMAND bridge while
+        // the Manager is still foreground, before X11 can move the app into a
+        // background state and before the Manager-owned PulseAudio core starts.
+        TermuxRunCommandPreflight.prepareBeforeAudioCore(
+            containerName = containerName,
+            logger = logger
+        )
+
         // Prepare exactly one Manager-owned PulseAudio core. HOST and NAT share
         // this same AAudio/OpenSL ES daemon and private UNIX control socket.
         PulseAudioFixManager.prepareBeforeGraphicalStart(
