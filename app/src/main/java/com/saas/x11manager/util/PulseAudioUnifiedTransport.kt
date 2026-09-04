@@ -242,7 +242,7 @@ object PulseAudioUnifiedTransport {
                 "PULSE_COOKIE=${q(COOKIE)} pactl $arguments"
         )
 
-    private fun verifyCore(owner: TermuxOwner, logger: ContainerLogger?): String? {
+    private suspend fun verifyCore(owner: TermuxOwner, logger: ContainerLogger?): String? {
         val info = unixPactl(owner, "info")
         if (info.exitCode != 0) {
             logger?.w("[PA-CORE] pactl info exit=${info.exitCode}")
@@ -282,7 +282,7 @@ object PulseAudioUnifiedTransport {
         return sink
     }
 
-    private fun loadOrReuseListener(
+    private suspend fun loadOrReuseListener(
         owner: TermuxOwner,
         ip: String,
         port: Int,
@@ -379,7 +379,7 @@ object PulseAudioUnifiedTransport {
         return null
     }
 
-    private fun unloadListener(owner: TermuxOwner, moduleId: Int, logger: ContainerLogger?) {
+    private suspend fun unloadListener(owner: TermuxOwner, moduleId: Int, logger: ContainerLogger?) {
         val result = unixPactl(owner, "unload-module ${q(moduleId.toString())}")
         if (result.exitCode != 0) {
             logger?.w("[PA-UNLOAD] module=$moduleId exit=${result.exitCode}")
@@ -387,7 +387,7 @@ object PulseAudioUnifiedTransport {
         }
     }
 
-    private fun cookieOctal(owner: TermuxOwner, logger: ContainerLogger?): String? {
+    private suspend fun cookieOctal(owner: TermuxOwner, logger: ContainerLogger?): String? {
         val result = execAsTermux(
             owner,
             """
@@ -405,7 +405,7 @@ object PulseAudioUnifiedTransport {
         return result.stdout.joinToString("").trim().takeIf { it.isNotEmpty() }
     }
 
-    private fun logCoreDiagnostics(owner: TermuxOwner, logger: ContainerLogger?) {
+    private suspend fun logCoreDiagnostics(owner: TermuxOwner, logger: ContainerLogger?) {
         val modules = unixPactl(owner, "list short modules")
         modules.stdout.filter { it.contains("module-native-protocol-tcp") }
             .takeLast(12)
@@ -420,7 +420,7 @@ object PulseAudioUnifiedTransport {
             .forEach { logger?.w("[PA-DIAG][log] $it") }
     }
 
-    private fun logLines(
+    private suspend fun logLines(
         logger: ContainerLogger?,
         prefix: String,
         lines: List<String>,
