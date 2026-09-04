@@ -23,16 +23,10 @@ object SessionAccessManager {
         if (accessMode.requiresVnc) logger?.i("[CTX] VNC port: $vncPort")
         logger?.i("")
 
-        // Termux caches allow-external-apps. Prove the RUN_COMMAND bridge while
-        // the Manager is still foreground, before X11 can move the app into a
-        // background state and before the Manager-owned PulseAudio core starts.
-        TermuxRunCommandPreflight.prepareBeforeAudioCore(
-            containerName = containerName,
-            logger = logger
-        )
-
         // Prepare exactly one Manager-owned PulseAudio core. HOST and NAT share
         // this same AAudio/OpenSL ES daemon and private UNIX control socket.
+        // No Termux RUN_COMMAND bridge is needed: listener control happens later
+        // through the authenticated private UNIX socket.
         PulseAudioFixManager.prepareBeforeGraphicalStart(
             containerName = containerName,
             logger = logger
@@ -128,9 +122,10 @@ object SessionAccessManager {
         containerName: String,
         logger: ContainerLogger?
     ) {
-        // HOST and NAT both control the same prepared core through the real
-        // Termux context. The transport never owns container/X11/VNC lifecycle.
-        PulseAudioRootAmTransport.finalizeAfterContainerReady(
+        // The core was already prepared above. This finalizer only loads or
+        // reuses the topology-specific authenticated TCP listener through the
+        // private UNIX control socket, then verifies the real container path.
+        PulseAudioUnifiedTransport.finalizeAfterContainerReady(
             containerName = containerName,
             logger = logger
         )
