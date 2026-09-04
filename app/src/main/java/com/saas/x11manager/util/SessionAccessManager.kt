@@ -23,16 +23,15 @@ object SessionAccessManager {
         if (accessMode.requiresVnc) logger?.i("[CTX] VNC port: $vncPort")
         logger?.i("")
 
+        // Keep the already validated Manager core/cookie/config preparation.
+        // For NAT, the RunCommand transport immediately migrates only that
+        // Manager-owned PulseAudio process into the real Termux app context.
         PulseAudioFixManager.prepareBeforeGraphicalStart(
             containerName = containerName,
             logger = logger
         )
 
-        // NAT requires the real Termux supplementary app groups (especially
-        // inet/3003) before PulseAudio can bind a non-loopback Android address.
-        // This may migrate only the Manager-owned audio core; it never owns
-        // container or graphical lifecycle.
-        PulseAudioNatIdentityTransport.prepareBeforeGraphicalStart(
+        PulseAudioNatRunCommandTransport.prepareBeforeGraphicalStart(
             containerName = containerName,
             logger = logger
         )
@@ -129,7 +128,7 @@ object SessionAccessManager {
     ) {
         val info = ContainerManager.getContainerInfo(containerName)
         if (info?.netMode?.trim()?.lowercase() == "nat") {
-            PulseAudioNatIdentityTransport.finalizeAfterContainerReady(
+            PulseAudioNatRunCommandTransport.finalizeAfterContainerReady(
                 containerName = containerName,
                 logger = logger
             )
