@@ -28,6 +28,15 @@ object SessionAccessManager {
             logger = logger
         )
 
+        // NAT requires the real Termux supplementary app groups (especially
+        // inet/3003) before PulseAudio can bind a non-loopback Android address.
+        // This may migrate only the Manager-owned audio core; it never owns
+        // container or graphical lifecycle.
+        PulseAudioNatIdentityTransport.prepareBeforeGraphicalStart(
+            containerName = containerName,
+            logger = logger
+        )
+
         return when (accessMode) {
             SessionAccessMode.INTEGRATED_X11 -> {
                 val slot = X11SessionManager.startX11Session(
@@ -114,20 +123,19 @@ object SessionAccessManager {
         }
     }
 
-    /**
-     * NAT has one Android-specific compatibility path: some runtimes allow the
-     * private UNIX PulseAudio core but reject adding a TCP module after startup.
-     * Preload that listener, when needed, before the normal finalizer verifies
-     * and persists the container client. HOST is untouched by this helper.
-     */
     private suspend fun finalizeAudioAfterContainerReady(
         containerName: String,
         logger: ContainerLogger?
     ) {
-        PulseAudioNatStartupFallback.ensureBeforeFinalize(
-            containerName = containerName,
-            logger = logger
-        )
-        PulseAudioFixManager.finalizeAfterContainerReady(containerName, logger)
+        val info = ContainerManager.getContainerInfo(containerName)
+        if (info?.netMode?.trim()?.lowercase() == "nat") {
+            PulseAudioNatIdentityTransport.finalizeAfterContainerReady(
+                containerName = containerName,
+                logger = logger
+            )
+        } else {
+            // Preserve the already physically validated HOST implementation.
+            PulseAudioFixManager.finalizeAfterContainerReady(containerName, logger)
+        }
     }
 }
