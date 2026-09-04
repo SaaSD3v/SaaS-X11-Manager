@@ -32,27 +32,28 @@ class TermuxRunCommandPreflightPolicyTest {
 
     @Test
     fun preflightInvalidatesCachedExternalAppsPolicyExactlyOnce() {
-        val source = source("app/src/main/java/com/saas/x11manager/util/TermuxRunCommandPreflight.kt")
+        val text = source("app/src/main/java/com/saas/x11manager/util/TermuxRunCommandPreflight.kt")
 
-        assertTrue(source.contains("allow-external-apps=true"))
-        assertTrue(source.contains("termux-external-apps.cache-v2"))
-        assertTrue(source.contains("TermuxAppSharedProperties"))
-        assertTrue(source.contains("cmd\" = 'com.termux'") || source.contains("cmd\" = "))
-        assertTrue(source.contains("kill -9"))
-        assertFalse(source.contains("am force-stop"))
-        assertFalse(source.contains("killall"))
-        assertFalse(source.contains("pkill -u"))
+        assertTrue(text.contains("allow-external-apps=true"))
+        assertTrue(text.contains("termux-external-apps.cache-v2"))
+        assertTrue(text.contains("TermuxAppSharedProperties"))
+        assertTrue(text.contains("/proc/[0-9]*"))
+        assertTrue(text.contains("kill -9"))
+        assertTrue(text.contains("TERMUX_PACKAGE = \"com.termux\""))
+        assertFalse(text.contains("am force-stop"))
+        assertFalse(text.contains("killall"))
+        assertFalse(text.contains("pkill -u"))
     }
 
     @Test
     fun preflightUsesForegroundRunCommandWithRootAmFallbackAndHandshake() {
-        val source = source("app/src/main/java/com/saas/x11manager/util/TermuxRunCommandPreflight.kt")
+        val text = source("app/src/main/java/com/saas/x11manager/util/TermuxRunCommandPreflight.kt")
 
-        assertTrue(source.contains("context.startService(intent)"))
-        assertTrue(source.contains("am startservice --user 0"))
-        assertTrue(source.contains("OK|BRIDGE|ready"))
-        assertTrue(source.contains("bridge-preflight"))
-        assertTrue(source.contains("Termux RUN_COMMAND bridge ready before audio core"))
-        assertTrue(source.contains("RunCommandService|TermuxPluginUtils|allow-external-apps"))
+        assertTrue(text.contains("context.startService(intent)"))
+        assertTrue(text.contains("am startservice --user 0"))
+        assertTrue(text.contains("OK|BRIDGE|ready"))
+        assertTrue(text.contains("bridge-preflight"))
+        assertTrue(text.contains("Termux RUN_COMMAND bridge ready before audio core"))
+        assertTrue(text.contains("RunCommandService|TermuxPluginUtils|allow-external-apps"))
     }
 }
