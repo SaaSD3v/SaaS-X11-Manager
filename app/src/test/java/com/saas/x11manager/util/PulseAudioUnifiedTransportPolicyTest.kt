@@ -19,10 +19,11 @@ class PulseAudioDataPathTransportPolicyTest {
     private fun source(relativePath: String): String = projectFile(relativePath).readText()
 
     @Test
-    fun hostAndNatUseSingleCoreWithDataPathTransport() {
+    fun hostAndNatUseSingleCoreWithRootAmTransport() {
         val session = source("app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt")
         assertTrue(session.contains("PulseAudioFixManager.prepareBeforeGraphicalStart"))
-        assertTrue(session.contains("PulseAudioDataPathTransport.finalizeAfterContainerReady"))
+        assertTrue(session.contains("PulseAudioRootAmTransport.finalizeAfterContainerReady"))
+        assertFalse(session.contains("PulseAudioDataPathTransport.finalizeAfterContainerReady"))
         assertFalse(session.contains("PulseAudioPhysicalTransport.finalizeAfterContainerReady"))
         assertFalse(session.contains("PulseAudioUnifiedTransport.finalizeAfterContainerReady"))
         assertFalse(session.contains("PulseAudioNatTransport"))
@@ -40,8 +41,8 @@ class PulseAudioDataPathTransportPolicyTest {
     }
 
     @Test
-    fun natControlsExistingCoreThroughRootAmRunCommand() {
-        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioDataPathTransport.kt")
+    fun hostAndNatControlExistingCoreThroughRootAmRunCommand() {
+        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioRootAmTransport.kt")
 
         assertTrue(transport.contains("RUN_PERMISSION = \"com.termux.permission.RUN_COMMAND\""))
         assertTrue(transport.contains("RUN_SERVICE = \"com.termux.app.RunCommandService\""))
@@ -51,19 +52,21 @@ class PulseAudioDataPathTransportPolicyTest {
         assertTrue(transport.contains("RUN_BACKGROUND"))
         assertTrue(transport.contains("allow-external-apps=true"))
         assertTrue(transport.contains("Audio control executor: root am startservice -> Termux RunCommandService"))
+        assertTrue(transport.contains("RUN_COMMAND result authority: Termux file handshake"))
         assertTrue(transport.contains("Listener verifier: DroidSpaces container data path"))
         assertTrue(transport.contains("module-native-protocol-tcp"))
         assertTrue(transport.contains("auth-cookie="))
         assertTrue(transport.contains("discoverNatGateway"))
         assertTrue(transport.contains("172.28.0.1"))
+        assertTrue(transport.contains("\"host\" -> \"127.0.0.1\""))
         assertTrue(transport.contains("BASE_PORT = 4713"))
         assertTrue(transport.contains("MAX_PORT_SHIFT = 64"))
 
-        // Regression guard for 6ff7363: app-context startService is blocked once X11 owns the UI.
         assertFalse(transport.contains("context.startService("))
         assertFalse(transport.contains("startForegroundService("))
         assertFalse(transport.contains("ComponentName("))
         assertFalse(transport.contains("Intent("))
+        assertFalse(transport.contains("PulseAudioFixManager.finalizeAfterContainerReady"))
 
         assertFalse(transport.contains("pulseaudio -n"))
         assertFalse(transport.contains("module-aaudio-sink"))
@@ -82,31 +85,24 @@ class PulseAudioDataPathTransportPolicyTest {
     }
 
     @Test
-    fun rootAmDispatcherUsesTermuxOwnedLauncherAndFileHandshake() {
-        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioDataPathTransport.kt")
+    fun rootAmDispatcherTreatsHandshakeAsAuthoritative() {
+        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioRootAmTransport.kt")
         assertTrue(transport.contains("val launcher ="))
         assertTrue(transport.contains("val resultFile ="))
         assertTrue(transport.contains("launcherBody"))
         assertTrue(transport.contains("chown"))
         assertTrue(transport.contains("chmod 700"))
         assertTrue(transport.contains("exec >"))
-        assertTrue(transport.contains("--es"))
-        assertTrue(transport.contains("RUN_PATH"))
-        assertTrue(transport.contains("RUN_BACKGROUND"))
-        assertTrue(transport.contains("RUN_COMMAND root am startservice failed"))
+        assertTrue(transport.contains("val dispatch ="))
         assertTrue(transport.contains("RUN_COMMAND timed out waiting for Termux result"))
+        assertTrue(transport.contains("Do not return early on dispatch.isSuccess == false"))
+        assertFalse(transport.contains("if (dispatch?.isSuccess != true)"))
+        assertFalse(transport.contains("RUN_COMMAND root am startservice failed"))
     }
 
     @Test
-    fun hostDelegatesToPreviouslyValidatedManagerPath() {
-        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioDataPathTransport.kt")
-        assertTrue(transport.contains("if (mode == \"host\")"))
-        assertTrue(transport.contains("PulseAudioFixManager.finalizeAfterContainerReady"))
-    }
-
-    @Test
-    fun natListenerMatchesManualLoadAndIsVerifiedByContainer() {
-        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioDataPathTransport.kt")
+    fun listenersMatchTheManualProofAndAreVerifiedByContainer() {
+        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioRootAmTransport.kt")
         assertTrue(transport.contains("pactl load-module module-native-protocol-tcp"))
         assertTrue(transport.contains("pactl list short modules"))
         assertTrue(transport.contains("verifyContainerClientDetailed"))
@@ -114,7 +110,8 @@ class PulseAudioDataPathTransportPolicyTest {
         assertTrue(transport.contains("pactl unload-module"))
         assertTrue(transport.contains("PulseAudio listener module loaded: id="))
 
-        // Regression guard for f725fdd: Termux must not self-probe tcp:172.28.x.x.
+        // Termux controls the daemon only through the private UNIX socket. The
+        // actual TCP verifier is the running container, not a Termux self-probe.
         assertFalse(transport.contains("PULSE_SERVER=\"${'$'}tcp\""))
         assertFalse(transport.contains("while [ \"${'$'}j\" -lt 20 ]"))
     }
