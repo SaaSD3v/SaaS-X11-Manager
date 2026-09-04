@@ -38,7 +38,7 @@ object SessionAccessManager {
                     logger?.e("[-] Integrated X11 access failed")
                     false
                 } else {
-                    PulseAudioFixManager.finalizeAfterContainerReady(containerName, logger)
+                    finalizeAudioAfterContainerReady(containerName, logger)
                     logger?.i("[+] Integrated X11 ready on ${slot.describe()}")
                     true
                 }
@@ -54,7 +54,7 @@ object SessionAccessManager {
                     logger = logger
                 )
                 if (result.success) {
-                    PulseAudioFixManager.finalizeAfterContainerReady(containerName, logger)
+                    finalizeAudioAfterContainerReady(containerName, logger)
                     VncConnectionGuide.logAfterSuccessfulStart(
                         containerName = containerName,
                         port = vncPort,
@@ -80,7 +80,7 @@ object SessionAccessManager {
                     logger?.e("[-] Integrated X11 could not start; VNC mirror was not attempted")
                     false
                 } else {
-                    PulseAudioFixManager.finalizeAfterContainerReady(containerName, logger)
+                    finalizeAudioAfterContainerReady(containerName, logger)
                     logger?.i("")
                     val mirror = VncServerManager.startMirror(
                         containerName = containerName,
@@ -112,5 +112,22 @@ object SessionAccessManager {
                 }
             }
         }
+    }
+
+    /**
+     * NAT has one Android-specific compatibility path: some runtimes allow the
+     * private UNIX PulseAudio core but reject adding a TCP module after startup.
+     * Preload that listener, when needed, before the normal finalizer verifies
+     * and persists the container client. HOST is untouched by this helper.
+     */
+    private suspend fun finalizeAudioAfterContainerReady(
+        containerName: String,
+        logger: ContainerLogger?
+    ) {
+        PulseAudioNatStartupFallback.ensureBeforeFinalize(
+            containerName = containerName,
+            logger = logger
+        )
+        PulseAudioFixManager.finalizeAfterContainerReady(containerName, logger)
     }
 }
