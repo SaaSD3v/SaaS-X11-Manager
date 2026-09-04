@@ -43,7 +43,7 @@ class PulseAudioFixPolicyTest {
     @Test
     fun audioCodeNeverOwnsContainerOrX11Lifecycle() {
         val manager = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
-        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioDataPathTransport.kt")
+        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioRootAmTransport.kt")
 
         assertTrue(manager.contains("prepareBeforeGraphicalStart"))
         assertTrue(transport.contains("finalizeAfterContainerReady"))
@@ -58,15 +58,16 @@ class PulseAudioFixPolicyTest {
     }
 
     @Test
-    fun sessionOrderingKeepsOneCoreBeforeGraphicsAndDataPathTransportAfterReady() {
+    fun sessionOrderingKeepsOneCoreBeforeGraphicsAndRootAmTransportAfterReady() {
         val sessionAccess = source("app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt")
 
         val prepareIndex = sessionAccess.indexOf("PulseAudioFixManager.prepareBeforeGraphicalStart")
         val x11Index = sessionAccess.indexOf("X11SessionManager.startX11Session")
-        val finalizeIndex = sessionAccess.indexOf("PulseAudioDataPathTransport.finalizeAfterContainerReady")
+        val finalizeIndex = sessionAccess.indexOf("PulseAudioRootAmTransport.finalizeAfterContainerReady")
         assertTrue(prepareIndex >= 0)
         assertTrue(x11Index > prepareIndex)
         assertTrue(finalizeIndex > x11Index)
+        assertFalse(sessionAccess.contains("PulseAudioDataPathTransport.finalizeAfterContainerReady"))
         assertFalse(sessionAccess.contains("PulseAudioNatTransport"))
         assertFalse(sessionAccess.contains("PulseAudioPhysicalTransport"))
         assertFalse(sessionAccess.contains("PulseAudioUnifiedTransport"))
@@ -88,19 +89,19 @@ class PulseAudioFixPolicyTest {
     }
 
     @Test
-    fun dataPathTransportKeepsHostBaselineAndNatOnSameCore() {
-        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioDataPathTransport.kt")
+    fun rootAmTransportMapsHostAndNatOntoTheSameCore() {
+        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioRootAmTransport.kt")
 
         assertTrue(transport.contains("BASE_PORT = 4713"))
         assertTrue(transport.contains("MAX_PORT_SHIFT = 64"))
-        assertTrue(transport.contains("if (mode == \"host\")"))
-        assertTrue(transport.contains("PulseAudioFixManager.finalizeAfterContainerReady"))
+        assertTrue(transport.contains("\"host\" -> \"127.0.0.1\""))
         assertTrue(transport.contains("discoverNatGateway"))
         assertTrue(transport.contains("172.28.0.1"))
         assertTrue(transport.contains("configuredPortForwardOwner"))
         assertTrue(transport.contains("module-native-protocol-tcp"))
         assertTrue(transport.contains("auth-cookie="))
         assertTrue(transport.contains("Termux RunCommandService"))
+        assertTrue(transport.contains("RUN_COMMAND result authority: Termux file handshake"))
         assertTrue(transport.contains("Listener verifier: DroidSpaces container data path"))
 
         assertFalse(transport.contains("pulseaudio -n"))
@@ -113,7 +114,7 @@ class PulseAudioFixPolicyTest {
 
     @Test
     fun binaryCookieNeverTravelsRawThroughDroidSpacesCommandString() {
-        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioDataPathTransport.kt")
+        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioRootAmTransport.kt")
 
         assertTrue(transport.contains("transport.cookie"))
         assertTrue(transport.contains("od -An -v -tu1"))
@@ -151,13 +152,8 @@ class PulseAudioFixPolicyTest {
 
     @Test
     fun persistentClientConfigurationSupportsDebianUbuntuAndAlpine() {
-        val manager = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
-        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioDataPathTransport.kt")
+        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioRootAmTransport.kt")
 
-        // HOST remains on the physically validated manager client path.
-        assertTrue(manager.contains("apt-get install -y pulseaudio-utils libasound2-plugins alsa-utils"))
-        assertTrue(manager.contains("apk add --no-cache pulseaudio-utils alsa-utils alsa-plugins-pulse"))
-        // NAT uses the same persistent client format and distro support.
         assertTrue(transport.contains("default-server = \$server"))
         assertTrue(transport.contains("export PULSE_SERVER=\$server"))
         assertTrue(transport.contains("apt-get install -y pulseaudio-utils libasound2-plugins alsa-utils"))
