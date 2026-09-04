@@ -43,31 +43,33 @@ class PulseAudioFixPolicyTest {
     @Test
     fun audioCodeNeverOwnsContainerOrX11Lifecycle() {
         val manager = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
-        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioUnifiedTransport.kt")
+        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioDataPathTransport.kt")
 
         assertTrue(manager.contains("prepareBeforeGraphicalStart"))
         assertTrue(transport.contains("finalizeAfterContainerReady"))
-        for (source in listOf(manager, transport)) {
-            assertFalse(source.contains("ContainerManager.startContainer("))
-            assertFalse(source.contains("ContainerManager.stopContainer("))
-            assertFalse(source.contains("systemctl restart"))
-            assertFalse(source.contains("rc-service"))
-            assertFalse(source.contains("X11SessionManager.startX11Session"))
-            assertFalse(source.contains("VncManager"))
+        for (text in listOf(manager, transport)) {
+            assertFalse(text.contains("ContainerManager.startContainer("))
+            assertFalse(text.contains("ContainerManager.stopContainer("))
+            assertFalse(text.contains("systemctl restart"))
+            assertFalse(text.contains("rc-service"))
+            assertFalse(text.contains("X11SessionManager.startX11Session"))
+            assertFalse(text.contains("VncManager"))
         }
     }
 
     @Test
-    fun sessionOrderingKeepsOneCoreBeforeGraphicsAndUnifiedTransportAfterReady() {
+    fun sessionOrderingKeepsOneCoreBeforeGraphicsAndDataPathTransportAfterReady() {
         val sessionAccess = source("app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt")
 
         val prepareIndex = sessionAccess.indexOf("PulseAudioFixManager.prepareBeforeGraphicalStart")
         val x11Index = sessionAccess.indexOf("X11SessionManager.startX11Session")
-        val finalizeIndex = sessionAccess.indexOf("PulseAudioUnifiedTransport.finalizeAfterContainerReady")
+        val finalizeIndex = sessionAccess.indexOf("PulseAudioDataPathTransport.finalizeAfterContainerReady")
         assertTrue(prepareIndex >= 0)
         assertTrue(x11Index > prepareIndex)
         assertTrue(finalizeIndex > x11Index)
         assertFalse(sessionAccess.contains("PulseAudioNatTransport"))
+        assertFalse(sessionAccess.contains("PulseAudioPhysicalTransport"))
+        assertFalse(sessionAccess.contains("PulseAudioUnifiedTransport"))
     }
 
     @Test
@@ -86,29 +88,32 @@ class PulseAudioFixPolicyTest {
     }
 
     @Test
-    fun unifiedTransportMapsHostAndNatOntoTheSameCore() {
-        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioUnifiedTransport.kt")
+    fun dataPathTransportKeepsHostBaselineAndNatOnSameCore() {
+        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioDataPathTransport.kt")
 
         assertTrue(transport.contains("BASE_PORT = 4713"))
         assertTrue(transport.contains("MAX_PORT_SHIFT = 64"))
-        assertTrue(transport.contains("\"host\" -> \"127.0.0.1\""))
+        assertTrue(transport.contains("if (mode == \"host\")"))
+        assertTrue(transport.contains("PulseAudioFixManager.finalizeAfterContainerReady"))
         assertTrue(transport.contains("discoverNatGateway"))
         assertTrue(transport.contains("172.28.0.1"))
         assertTrue(transport.contains("configuredPortForwardOwner"))
         assertTrue(transport.contains("module-native-protocol-tcp"))
-        assertTrue(transport.contains("auth-cookie=\${'$'}COOKIE"))
+        assertTrue(transport.contains("auth-cookie="))
         assertTrue(transport.contains("Termux RunCommandService"))
+        assertTrue(transport.contains("Listener verifier: DroidSpaces container data path"))
 
         assertFalse(transport.contains("pulseaudio -n"))
         assertFalse(transport.contains("module-aaudio-sink"))
         assertFalse(transport.contains("module-sles-sink"))
         assertFalse(transport.contains("auth-anonymous=1"))
         assertFalse(transport.contains("listen=0.0.0.0"))
+        assertFalse(transport.contains("PULSE_SERVER=\"${'$'}tcp\""))
     }
 
     @Test
     fun binaryCookieNeverTravelsRawThroughDroidSpacesCommandString() {
-        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioUnifiedTransport.kt")
+        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioDataPathTransport.kt")
 
         assertTrue(transport.contains("transport.cookie"))
         assertTrue(transport.contains("od -An -v -tu1"))
@@ -146,13 +151,17 @@ class PulseAudioFixPolicyTest {
 
     @Test
     fun persistentClientConfigurationSupportsDebianUbuntuAndAlpine() {
-        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioUnifiedTransport.kt")
+        val manager = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
+        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioDataPathTransport.kt")
 
+        // HOST remains on the physically validated manager client path.
+        assertTrue(manager.contains("apt-get install -y pulseaudio-utils libasound2-plugins alsa-utils"))
+        assertTrue(manager.contains("apk add --no-cache pulseaudio-utils alsa-utils alsa-plugins-pulse"))
+        // NAT uses the same persistent client format and distro support.
         assertTrue(transport.contains("default-server = \$server"))
         assertTrue(transport.contains("export PULSE_SERVER=\$server"))
         assertTrue(transport.contains("apt-get install -y pulseaudio-utils libasound2-plugins alsa-utils"))
         assertTrue(transport.contains("apk add --no-cache pulseaudio-utils alsa-utils alsa-plugins-pulse"))
-        assertTrue(transport.contains("Persistent container audio client already configured"))
         assertTrue(transport.contains("Installing missing Debian/Ubuntu audio clients"))
         assertTrue(transport.contains("Installing missing Alpine audio clients"))
     }
