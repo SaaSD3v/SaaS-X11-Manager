@@ -15,6 +15,12 @@
         android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:node="remove" />
 
+    <!-- Termux documents package visibility as required for RUN_COMMAND clients
+         targeting Android 11 / targetSdk 30 or newer. -->
+    <queries>
+        <package android:name="com.termux" />
+    </queries>
+
     <application
         android:name=".X11Application"
         android:allowBackup="true"
