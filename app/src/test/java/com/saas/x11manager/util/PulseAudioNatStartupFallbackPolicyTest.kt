@@ -19,29 +19,31 @@ class PulseAudioNatStartupFallbackPolicyTest {
     private fun source(relativePath: String): String = projectFile(relativePath).readText()
 
     @Test
-    fun natStartupFallbackRunsBeforeNormalAudioFinalizer() {
+    fun natIdentityIsPreparedBeforeGraphicalStartAndUsesOwnFinalizer() {
         val session = source("app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt")
-        val helper = session.indexOf("PulseAudioNatStartupFallback.ensureBeforeFinalize")
-        val finalize = session.indexOf("PulseAudioFixManager.finalizeAfterContainerReady", startIndex = helper)
-        assertTrue(helper >= 0)
-        assertTrue(finalize > helper)
+        val base = session.indexOf("PulseAudioFixManager.prepareBeforeGraphicalStart")
+        val identity = session.indexOf("PulseAudioNatIdentityTransport.prepareBeforeGraphicalStart")
+        val x11 = session.indexOf("X11SessionManager.startX11Session")
+        assertTrue(base >= 0)
+        assertTrue(identity > base)
+        assertTrue(x11 > identity)
+        assertTrue(session.contains("PulseAudioNatIdentityTransport.finalizeAfterContainerReady"))
+        assertTrue(session.contains("PulseAudioFixManager.finalizeAfterContainerReady"))
     }
 
     @Test
-    fun fallbackOnlyRebuildsManagerAudioAndPreloadsAuthenticatedNatListener() {
-        val source = source("app/src/main/java/com/saas/x11manager/util/PulseAudioNatStartupFallback.kt")
-
-        assertTrue(source.contains("info.netMode.trim().lowercase() != \"nat\""))
-        assertTrue(source.contains("module-native-protocol-unix socket=\$HOST_CONTROL_SOCKET auth-cookie=\$HOST_COOKIE"))
-        assertTrue(source.contains("module-native-protocol-tcp listen=\${listener.ip} port=\${listener.port} auth-cookie=\$HOST_COOKIE"))
-        assertTrue(source.contains("module-aaudio-sink"))
-        assertTrue(source.contains("module-sles-sink"))
-        assertTrue(source.contains("BASE_AUDIO_PORT = 4713"))
-        assertTrue(source.contains("MAX_PORT_SHIFT = 64"))
-        assertTrue(source.contains("configuredPortForwardOwner"))
-        assertTrue(source.contains("currentManagerListeners"))
-        assertTrue(source.contains("container and X11/VNC stay unchanged"))
-
+    fun natIdentityTransportPreservesInetAndFailsFast() {
+        val source = source("app/src/main/java/com/saas/x11manager/util/PulseAudioNatIdentityTransport.kt")
+        assertTrue(source.contains("INET_GID = 3003"))
+        assertTrue(source.contains("/data/system/packages.list"))
+        assertTrue(source.contains("--supp-group"))
+        assertTrue(source.contains(" -G "))
+        assertTrue(source.contains("setpriv --reuid"))
+        assertTrue(source.contains("coreHasInet"))
+        assertTrue(source.contains("module-native-protocol-tcp"))
+        assertTrue(source.contains("auth-cookie=\$COOKIE"))
+        assertTrue(source.contains("MAX_PORT_SHIFT = 12"))
+        assertTrue(source.contains("NAT audio failed fast"))
         assertFalse(source.contains("auth-anonymous=1"))
         assertFalse(source.contains("listen=0.0.0.0"))
         assertFalse(source.contains("ContainerManager.startContainer("))
