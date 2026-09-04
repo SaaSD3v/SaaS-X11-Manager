@@ -4,6 +4,10 @@
 
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Required by Termux RunCommandService. The permission is defined by
+         Termux as dangerous; the rooted Manager grants it to itself before
+         invoking the service so there is no interactive permission dialog. -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND"/>
     <uses-permission
         android:name="android.permission.FOREGROUND_SERVICE"
         tools:node="remove" />
