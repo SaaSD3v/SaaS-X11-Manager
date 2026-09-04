@@ -23,15 +23,9 @@ object SessionAccessManager {
         if (accessMode.requiresVnc) logger?.i("[CTX] VNC port: $vncPort")
         logger?.i("")
 
-        // Keep the validated configuration/cookie preparation. For NAT the
-        // single Termux bridge below replaces only the Manager-owned PulseAudio
-        // process with one created by Termux itself.
+        // Prepare exactly one Manager-owned PulseAudio core. HOST and NAT share
+        // this same AAudio/OpenSL ES daemon and private UNIX control socket.
         PulseAudioFixManager.prepareBeforeGraphicalStart(
-            containerName = containerName,
-            logger = logger
-        )
-
-        PulseAudioNatTransport.prepareBeforeGraphicalStart(
             containerName = containerName,
             logger = logger
         )
@@ -126,15 +120,11 @@ object SessionAccessManager {
         containerName: String,
         logger: ContainerLogger?
     ) {
-        val info = ContainerManager.getContainerInfo(containerName)
-        if (info?.netMode?.trim()?.lowercase() == "nat") {
-            PulseAudioNatTransport.finalizeAfterContainerReady(
-                containerName = containerName,
-                logger = logger
-            )
-        } else {
-            // Preserve the already physically validated HOST implementation.
-            PulseAudioFixManager.finalizeAfterContainerReady(containerName, logger)
-        }
+        // The graphical layer owns lifecycle. Audio only exposes the already
+        // prepared single core through HOST or NAT after the container is ready.
+        PulseAudioUnifiedTransport.finalizeAfterContainerReady(
+            containerName = containerName,
+            logger = logger
+        )
     }
 }
