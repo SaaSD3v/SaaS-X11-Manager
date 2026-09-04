@@ -1,7 +1,5 @@
 package com.saas.x11manager.util
 
-import android.content.ComponentName
-import android.content.Intent
 import android.content.pm.PackageManager
 import com.saas.x11manager.X11Application
 import com.topjohnwu.superuser.Shell
@@ -25,7 +23,6 @@ object PulseAudioDataPathTransport {
     private const val RUN_ACTION = "com.termux.RUN_COMMAND"
     private const val RUN_SERVICE = "com.termux.app.RunCommandService"
     private const val RUN_PATH = "com.termux.RUN_COMMAND_PATH"
-    private const val RUN_ARGS = "com.termux.RUN_COMMAND_ARGUMENTS"
     private const val RUN_WORKDIR = "com.termux.RUN_COMMAND_WORKDIR"
     private const val RUN_BACKGROUND = "com.termux.RUN_COMMAND_BACKGROUND"
 
@@ -61,7 +58,6 @@ object PulseAudioDataPathTransport {
         val mode = info.netMode.trim().lowercase()
 
         if (mode == "host") {
-            // Preserve the already physically validated HOST implementation.
             return@withContext PulseAudioFixManager.finalizeAfterContainerReady(containerName, logger)?.success ?: true
         }
         if (mode != "nat") {
@@ -80,7 +76,7 @@ object PulseAudioDataPathTransport {
             return@withContext fail(logger, "Termux allow-external-apps policy is unavailable")
         }
 
-        logger?.i("[CTX] Audio control executor: Termux RunCommandService")
+        logger?.i("[CTX] Audio control executor: root am startservice -> Termux RunCommandService")
         logger?.i("[CTX] Listener verifier: DroidSpaces container data path")
         logger?.i("[CTX] RUN_COMMAND permission: granted")
 
@@ -335,22 +331,49 @@ object PulseAudioDataPathTransport {
         logger: ContainerLogger?
     ): String? {
         val token = "$label-${System.nanoTime()}"
+        val launcher = "$COMMANDS/$token.sh"
         val resultFile = "$COMMANDS/$token.result"
-        val command = "mkdir -p ${q(COMMANDS)}; chmod 700 ${q(COMMANDS)} 2>/dev/null || true; exec >${q(resultFile)} 2>&1; $body"
-        prepareStateOwnership(owner)
+        val launcherBody = """
+            #!$TERMUX_SH
+            export HOME=${q(TERMUX_HOME)}
+            export PREFIX=${q(TERMUX_PREFIX)}
+            export PATH=${q("$TERMUX_PREFIX/bin:/system/bin:/system/xbin")}
+            export TMPDIR=${q("$TERMUX_PREFIX/tmp")}
+            exec >${q(resultFile)} 2>&1
+            $body
+        """.trimIndent() + "\n"
 
-        val context = X11Application.instance
-        val intent = Intent(RUN_ACTION).apply {
-            component = ComponentName(TERMUX_PACKAGE, RUN_SERVICE)
-            putExtra(RUN_PATH, TERMUX_SH)
-            putExtra(RUN_ARGS, arrayOf("-c", command))
-            putExtra(RUN_WORKDIR, TERMUX_HOME)
-            putExtra(RUN_BACKGROUND, true)
+        prepareStateOwnership(owner)
+        val prepare = """
+            mkdir -p ${q(COMMANDS)} || exit 21
+            rm -f ${q(launcher)} ${q(resultFile)} 2>/dev/null || true
+            printf '%s' ${q(launcherBody)} > ${q(launcher)} || exit 22
+            chown ${owner.uid}:${owner.gid} ${q(COMMANDS)} ${q(launcher)} || exit 23
+            chmod 700 ${q(COMMANDS)} ${q(launcher)} || exit 24
+            restorecon -F ${q(launcher)} >/dev/null 2>&1 || true
+        """.trimIndent()
+        val prepared = try { Shell.cmd(prepare).exec() } catch (_: Exception) { null }
+        if (prepared?.isSuccess != true) {
+            logger?.w("[!] RUN_COMMAND launcher preparation failed")
+            prepared?.out?.filter { it.isNotBlank() }?.takeLast(4)?.forEach { logger?.w("[RUN_COMMAND] $it") }
+            prepared?.err?.filter { it.isNotBlank() }?.takeLast(4)?.forEach { logger?.w("[RUN_COMMAND] $it") }
+            return null
         }
-        try {
-            context.startService(intent)
-        } catch (t: Throwable) {
-            logger?.w("[!] RUN_COMMAND start failed: ${t.javaClass.simpleName}: ${t.message ?: "no message"}")
+
+        val component = "$TERMUX_PACKAGE/$RUN_SERVICE"
+        val start = """
+            am startservice --user 0 -n ${q(component)} \
+                -a ${q(RUN_ACTION)} \
+                --es ${q(RUN_PATH)} ${q(launcher)} \
+                --es ${q(RUN_WORKDIR)} ${q(TERMUX_HOME)} \
+                --ez ${q(RUN_BACKGROUND)} true
+        """.trimIndent()
+        val started = try { Shell.cmd(start).exec() } catch (_: Exception) { null }
+        if (started?.isSuccess != true) {
+            logger?.w("[!] RUN_COMMAND root am startservice failed")
+            started?.out?.filter { it.isNotBlank() }?.takeLast(6)?.forEach { logger?.w("[RUN_COMMAND] $it") }
+            started?.err?.filter { it.isNotBlank() }?.takeLast(6)?.forEach { logger?.w("[RUN_COMMAND] $it") }
+            try { Shell.cmd("rm -f ${q(launcher)} ${q(resultFile)} 2>/dev/null || true").exec() } catch (_: Exception) { }
             return null
         }
 
@@ -361,12 +384,15 @@ object PulseAudioDataPathTransport {
                 val lines = r.out.map { it.trim() }.filter { it.isNotEmpty() }
                 val result = lines.lastOrNull { it.startsWith("OK|") || it.startsWith("ERR|") } ?: lines.last()
                 lines.filterNot { it == result }.takeLast(8).forEach { logger?.w("[TERMUX] $it") }
-                try { Shell.cmd("rm -f ${q(resultFile)} 2>/dev/null || true").exec() } catch (_: Exception) { }
+                try { Shell.cmd("rm -f ${q(launcher)} ${q(resultFile)} 2>/dev/null || true").exec() } catch (_: Exception) { }
                 return result
             }
             delay(100)
         }
         logger?.w("[!] RUN_COMMAND timed out waiting for Termux result: $label")
+        started.out.filter { it.isNotBlank() }.takeLast(4).forEach { logger?.w("[RUN_COMMAND] $it") }
+        started.err.filter { it.isNotBlank() }.takeLast(4).forEach { logger?.w("[RUN_COMMAND] $it") }
+        try { Shell.cmd("rm -f ${q(launcher)} ${q(resultFile)} 2>/dev/null || true").exec() } catch (_: Exception) { }
         return null
     }
 
