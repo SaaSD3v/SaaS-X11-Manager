@@ -120,9 +120,9 @@ object SessionAccessManager {
         containerName: String,
         logger: ContainerLogger?
     ) {
-        // HOST keeps the validated Manager path. NAT uses the same prepared core
-        // and validates TCP from the running container, which is the real client.
-        PulseAudioDataPathTransport.finalizeAfterContainerReady(
+        // HOST and NAT both control the same prepared core through the real
+        // Termux context. The transport never owns container/X11/VNC lifecycle.
+        PulseAudioRootAmTransport.finalizeAfterContainerReady(
             containerName = containerName,
             logger = logger
         )
