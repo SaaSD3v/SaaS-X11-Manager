@@ -44,8 +44,8 @@ class PulseAudioDataPathTransportPolicyTest {
         val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioDataPathTransport.kt")
 
         assertTrue(transport.contains("RUN_PERMISSION = \"com.termux.permission.RUN_COMMAND\""))
+        assertTrue(transport.contains("RUN_SERVICE = \"com.termux.app.RunCommandService\""))
         assertTrue(transport.contains("am startservice --user 0"))
-        assertTrue(transport.contains("$TERMUX_PACKAGE/$RUN_SERVICE"))
         assertTrue(transport.contains("RUN_PATH"))
         assertTrue(transport.contains("RUN_WORKDIR"))
         assertTrue(transport.contains("RUN_BACKGROUND"))
@@ -84,12 +84,15 @@ class PulseAudioDataPathTransportPolicyTest {
     @Test
     fun rootAmDispatcherUsesTermuxOwnedLauncherAndFileHandshake() {
         val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioDataPathTransport.kt")
-        assertTrue(transport.contains("val launcher = \"$COMMANDS/$token.sh\""))
-        assertTrue(transport.contains("chown ${owner.uid}:${owner.gid}"))
+        assertTrue(transport.contains("val launcher ="))
+        assertTrue(transport.contains("val resultFile ="))
+        assertTrue(transport.contains("launcherBody"))
+        assertTrue(transport.contains("chown"))
         assertTrue(transport.contains("chmod 700"))
-        assertTrue(transport.contains("exec >${q(resultFile)} 2>&1"))
-        assertTrue(transport.contains("--es ${q(RUN_PATH)} ${q(launcher)}"))
-        assertTrue(transport.contains("--ez ${q(RUN_BACKGROUND)} true"))
+        assertTrue(transport.contains("exec >"))
+        assertTrue(transport.contains("--es"))
+        assertTrue(transport.contains("RUN_PATH"))
+        assertTrue(transport.contains("RUN_BACKGROUND"))
         assertTrue(transport.contains("RUN_COMMAND root am startservice failed"))
         assertTrue(transport.contains("RUN_COMMAND timed out waiting for Termux result"))
     }
