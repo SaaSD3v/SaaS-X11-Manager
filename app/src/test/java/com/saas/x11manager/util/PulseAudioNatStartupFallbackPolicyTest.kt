@@ -56,8 +56,8 @@ class PulseAudioNatStartupFallbackPolicyTest {
         assertTrue(source.contains("NAT audio failed fast"))
 
         assertFalse(source.contains("context.startForegroundService(intent)"))
-        assertFalse(source.contains("val script = \"$COMMANDS/"))
-        assertFalse(source.contains("printf '%s' ${q(scriptText)}"))
+        assertFalse(source.contains("val script = \"\$COMMANDS/"))
+        assertFalse(source.contains("printf '%s' \${q(scriptText)}"))
         assertFalse(source.contains("am startservice"))
         assertFalse(source.contains("setpriv --reuid"))
         assertFalse(source.contains("--supp-group"))
