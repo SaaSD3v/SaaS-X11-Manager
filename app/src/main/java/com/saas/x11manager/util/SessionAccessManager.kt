@@ -120,9 +120,9 @@ object SessionAccessManager {
         containerName: String,
         logger: ContainerLogger?
     ) {
-        // The graphical layer owns lifecycle. Audio exposes the already prepared
-        // single core and validates TCP from the running container data path.
-        PulseAudioPhysicalTransport.finalizeAfterContainerReady(
+        // HOST keeps the validated Manager path. NAT uses the same prepared core
+        // and validates TCP from the running container, which is the real client.
+        PulseAudioDataPathTransport.finalizeAfterContainerReady(
             containerName = containerName,
             logger = logger
         )
