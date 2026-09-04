@@ -5,7 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-class PulseAudioUnifiedTransportPolicyTest {
+class PulseAudioPhysicalTransportPolicyTest {
     private fun projectFile(relativePath: String): File {
         var current: File? = File(System.getProperty("user.dir")).absoluteFile
         while (current != null) {
@@ -22,7 +22,8 @@ class PulseAudioUnifiedTransportPolicyTest {
     fun hostAndNatShareOnePostReadyTransport() {
         val session = source("app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt")
         assertTrue(session.contains("PulseAudioFixManager.prepareBeforeGraphicalStart"))
-        assertTrue(session.contains("PulseAudioUnifiedTransport.finalizeAfterContainerReady"))
+        assertTrue(session.contains("PulseAudioPhysicalTransport.finalizeAfterContainerReady"))
+        assertFalse(session.contains("PulseAudioUnifiedTransport.finalizeAfterContainerReady"))
         assertFalse(session.contains("PulseAudioNatTransport"))
         assertFalse(session.contains("PulseAudioNatRunCommandTransport"))
         assertFalse(session.contains("PulseAudioNatIdentityTransport"))
@@ -38,8 +39,8 @@ class PulseAudioUnifiedTransportPolicyTest {
     }
 
     @Test
-    fun unifiedTransportOnlyControlsExistingCoreThroughRealTermux() {
-        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioUnifiedTransport.kt")
+    fun transportControlsExistingCoreWithoutStartingAnotherDaemon() {
+        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioPhysicalTransport.kt")
 
         assertTrue(transport.contains("RUN_PERMISSION = \"com.termux.permission.RUN_COMMAND\""))
         assertTrue(transport.contains("ComponentName(TERMUX_PACKAGE, RUN_SERVICE)"))
@@ -48,6 +49,7 @@ class PulseAudioUnifiedTransportPolicyTest {
         assertTrue(transport.contains("putExtra(RUN_ARGS, arrayOf(\"-c\", command))"))
         assertTrue(transport.contains("allow-external-apps=true"))
         assertTrue(transport.contains("Audio control executor: Termux RunCommandService"))
+        assertTrue(transport.contains("Listener verifier: DroidSpaces container data path"))
         assertTrue(transport.contains("module-native-protocol-tcp"))
         assertTrue(transport.contains("auth-cookie="))
         assertTrue(transport.contains("\"host\" -> \"127.0.0.1\""))
@@ -73,13 +75,20 @@ class PulseAudioUnifiedTransportPolicyTest {
     }
 
     @Test
-    fun listenerCommandMatchesPhysicalManualProof() {
-        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioUnifiedTransport.kt")
+    fun listenerLoadMatchesManualProofButDataPlaneIsVerifiedByContainer() {
+        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioPhysicalTransport.kt")
         assertTrue(transport.contains("pactl load-module module-native-protocol-tcp"))
         assertTrue(transport.contains("listen="))
         assertTrue(transport.contains("port="))
         assertTrue(transport.contains("auth-cookie="))
-        assertTrue(transport.contains("PULSE_SERVER="))
-        assertTrue(transport.contains("PULSE_COOKIE="))
+        assertTrue(transport.contains("pactl list short modules"))
+        assertTrue(transport.contains("verifyContainerClientDetailed"))
+        assertTrue(transport.contains("Container could not reach"))
+        assertTrue(transport.contains("pactl unload-module"))
+
+        // Regression guard for f725fdd: a listener must not be rejected merely
+        // because Termux itself cannot self-connect to the Android NAT gateway.
+        assertFalse(transport.contains("PULSE_SERVER=\"${'$'}tcp\""))
+        assertFalse(transport.contains("while [ \"${'$'}j\" -lt 20 ]"))
     }
 }
