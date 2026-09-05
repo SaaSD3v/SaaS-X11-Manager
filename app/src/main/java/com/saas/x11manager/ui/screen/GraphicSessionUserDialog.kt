@@ -184,7 +184,7 @@ internal fun GraphicSessionUserPicker(
             onClick = {
                 onSelectionChange(
                     GraphicSessionUserSelection(
-                        userName = newUserName.ifBlank { "user" },
+                        userName = newUserName,
                         createIfMissing = true
                     )
                 )
