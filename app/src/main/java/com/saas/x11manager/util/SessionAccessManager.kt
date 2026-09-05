@@ -24,6 +24,7 @@ object SessionAccessManager {
 
         val userPreparation = GraphicSessionUserManager.prepareForStart(
             containerName = containerName,
+            session = session,
             logger = logger
         ) ?: return false
 
