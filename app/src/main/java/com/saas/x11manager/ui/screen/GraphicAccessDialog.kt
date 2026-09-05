@@ -19,6 +19,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +48,12 @@ internal fun GraphicAccessDialog(
     var password by remember(containerName) { mutableStateOf("") }
     var userSelection by remember(containerName) {
         mutableStateOf(GraphicSessionUserSelection.ROOT)
+    }
+
+    LaunchedEffect(containerName) {
+        GraphicSessionUserManager.currentSelection(containerName)?.let { saved ->
+            userSelection = saved
+        }
     }
 
     val passwordRequired = selectedMode.requiresVnc
@@ -124,7 +131,7 @@ internal fun GraphicAccessDialog(
                     }
                 } else {
                     Text(
-                        "Standalone VNC keeps its existing root-owned session runtime. Linux user selection applies to Integrated X11 and Both.",
+                        "Standalone VNC keeps its own root-owned virtual-display runtime. Your saved Linux desktop user is preserved for Integrated X11 and Both.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -188,14 +195,15 @@ internal fun GraphicAccessDialog(
                     Spacer(Modifier.width(8.dp))
                     Button(
                         onClick = {
-                            GraphicSessionUserManager.selectForNextStart(
-                                containerName,
-                                if (userSelectionRequired) {
+                            // Standalone VNC does not use the managed desktop-user
+                            // launcher. Do not silently overwrite the saved X11 user
+                            // with root merely because the user chose VNC access.
+                            if (userSelectionRequired) {
+                                GraphicSessionUserManager.selectForNextStart(
+                                    containerName,
                                     userSelection
-                                } else {
-                                    GraphicSessionUserSelection.ROOT
-                                }
-                            )
+                                )
+                            }
                             onConfirm(
                                 selectedMode,
                                 password.takeIf { selectedMode.requiresVnc }
