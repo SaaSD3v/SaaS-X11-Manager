@@ -19,6 +19,33 @@ class GraphicSessionInitFilesTest {
     }
 
     @Test
+    fun rootSessionScriptPreservesLegacyDirectLaunchOnDynamicDisplay() {
+        val script = GraphicSessionInitFiles.rootSessionScript(GraphicSession.ICEWM, "/bin/sh")
+
+        assertTrue(script.startsWith("#!/bin/sh\n"))
+        assertTrue(script.contains("for candidate in /tmp/.X11-unix/X*"))
+        assertTrue(script.contains("export DISPLAY=:\$X11_DISPLAY_NUMBER"))
+        assertTrue(script.contains("export HOME=/root"))
+        assertTrue(script.contains("export USER=root"))
+        assertTrue(script.contains("export LOGNAME=root"))
+        assertTrue(script.contains("export SHELL=/bin/sh"))
+        assertTrue(script.endsWith("exec icewm-session\n"))
+        assertFalse(script.contains("SESSION_USER_FILE"))
+        assertFalse(script.contains("exec su "))
+    }
+
+    @Test
+    fun rootSessionScriptKeepsInitSpecificShellWithoutMixingOpenrcAndSystemd() {
+        val openRc = GraphicSessionInitFiles.rootSessionScript(GraphicSession.ICEWM, "/bin/sh")
+        val systemd = GraphicSessionInitFiles.rootSessionScript(GraphicSession.ICEWM, "/bin/bash")
+
+        assertTrue(openRc.startsWith("#!/bin/sh\n"))
+        assertTrue(openRc.contains("export SHELL=/bin/sh"))
+        assertTrue(systemd.startsWith("#!/bin/bash\n"))
+        assertTrue(systemd.contains("export SHELL=/bin/bash"))
+    }
+
+    @Test
     fun sessionScriptRejectsMissingOrAmbiguousMountedSockets() {
         val script = GraphicSessionInitFiles.sessionScript(GraphicSession.OPENBOX, "/bin/sh")
 
