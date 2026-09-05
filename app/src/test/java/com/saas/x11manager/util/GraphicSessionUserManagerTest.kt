@@ -14,27 +14,29 @@ class GraphicSessionUserManagerTest {
                 "root:x:0:0:root:/root:/bin/sh",
                 "daemon:x:2:2:daemon:/sbin:/sbin/nologin",
                 "messagebus:x:101:101:dbus:/nonexistent:/sbin/nologin",
-                "higor:x:1000:1000:Higor:/home/higor:/bin/bash",
+                "SaaS:x:1000:1000:SaaS:/home/SaaS:/bin/bash",
                 "worker:x:1001:1001:Worker:/home/worker:/bin/ash",
                 "nobody:x:65534:65534:nobody:/:/sbin/nologin"
             )
         )
 
-        assertEquals(listOf("higor", "worker", "root"), users.map { it.name })
-        assertEquals("/home/higor", users.first { it.name == "higor" }.home)
+        assertEquals(listOf("SaaS", "worker", "root"), users.map { it.name })
+        assertEquals("/home/SaaS", users.first { it.name == "SaaS" }.home)
         assertTrue(users.first { it.name == "root" }.isRoot)
     }
 
     @Test
-    fun userNameValidationAcceptsBasicLinuxNamesOnly() {
+    fun userNameValidationAcceptsSafeCaseSensitiveLinuxNames() {
         assertTrue(GraphicSessionUserManager.isValidUserName("higor"))
+        assertTrue(GraphicSessionUserManager.isValidUserName("SaaS"))
+        assertTrue(GraphicSessionUserManager.isValidUserName("UserX"))
         assertTrue(GraphicSessionUserManager.isValidUserName("user_2"))
         assertTrue(GraphicSessionUserManager.isValidUserName("dev-user"))
         assertFalse(GraphicSessionUserManager.isValidUserName(""))
         assertFalse(GraphicSessionUserManager.isValidUserName("2user"))
-        assertFalse(GraphicSessionUserManager.isValidUserName("User"))
         assertFalse(GraphicSessionUserManager.isValidUserName("user name"))
         assertFalse(GraphicSessionUserManager.isValidUserName("user;id"))
+        assertFalse(GraphicSessionUserManager.isValidUserName("user/name"))
     }
 
     @Test
