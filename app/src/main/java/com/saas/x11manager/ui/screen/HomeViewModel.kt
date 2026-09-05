@@ -25,9 +25,6 @@ class HomeViewModel : ViewModel() {
     private val _containers = MutableStateFlow<List<ContainerInfo>>(emptyList())
     val containers: StateFlow<List<ContainerInfo>> = _containers
 
-    private val _monitors = MutableStateFlow<List<X11MonitorInfo>>(emptyList())
-    val monitors: StateFlow<List<X11MonitorInfo>> = _monitors
-
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
 
@@ -244,16 +241,17 @@ class HomeViewModel : ViewModel() {
 
     private fun applyRuntimeSnapshot(snapshot: RuntimeRefreshSnapshot) {
         _containers.value = snapshot.containers
-        _monitors.value = snapshot.monitors
-        val running = snapshot.monitors.firstOrNull { it.status == X11ServerStatus.Running }
-        _x11ServerStatus.value = if (running != null) X11ServerStatus.Running else X11ServerStatus.Stopped
-        _x11ServerPid.value = running?.pid
+        _x11ServerStatus.value = snapshot.x11Status
+        _x11ServerPid.value = snapshot.x11Pid
     }
 
     private suspend fun readRuntimeSnapshot(): RuntimeRefreshSnapshot = withContext(Dispatchers.IO) {
         val containers = ContainerManager.listContainers()
-        val monitors = X11SessionManager.getMonitors(containers)
-        RuntimeRefreshSnapshot(containers = containers, monitors = monitors)
+        RuntimeRefreshSnapshot(
+            containers = containers,
+            x11Status = X11SessionManager.getServerStatus(),
+            x11Pid = X11SessionManager.getServerPid()
+        )
     }
 
     private fun updateContainerState(name: String, status: ContainerStatus, pid: Int? = null) {
@@ -330,7 +328,6 @@ class HomeViewModel : ViewModel() {
         }
     }
 
-    /** Backward-compatible direct X11 entry point for existing callers/tests. */
     fun startX11(container: ContainerInfo) =
         startSession(
             container = container,
@@ -348,8 +345,6 @@ class HomeViewModel : ViewModel() {
             val logger = ViewModelLogger { level, message -> appendLog(logs, level, message) }
 
             try {
-                // VNC is an external process inside the container. Clear only
-                // Manager-owned VNC PIDs/state before the container disappears.
                 VncServerManager.stopManagedVnc(container.name, logger)
                 val stopped = X11SessionManager.stopX11Session(container.name, logger)
                 if (stopped) {
@@ -488,7 +483,8 @@ class HomeViewModel : ViewModel() {
 
     private data class RuntimeRefreshSnapshot(
         val containers: List<ContainerInfo>,
-        val monitors: List<X11MonitorInfo>
+        val x11Status: X11ServerStatus,
+        val x11Pid: Int?
     )
 
     private companion object {
