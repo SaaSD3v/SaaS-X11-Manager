@@ -6,24 +6,20 @@ import kotlinx.coroutines.withContext
 
 /**
  * Controls only the graphical session process inside an already-running
- * DroidSpaces container. It never starts or stops the container itself.
+ * DroidSpaces container. X11-0nly always targets display :0 / X0.
  *
- * The service names remain backward-compatible with the original X11 manager,
- * while protocol health checks are selected from the configured session.
+ * OpenRC and systemd remain deliberately separate execution paths.
  */
 internal object GraphicSessionRuntimeController {
 
     private const val INIT_MARKER = "__SAAS_X11_INIT__="
     private const val ACTION_MARKER = "__SAAS_X11_ACTION__="
     private const val DIAG_MARKER = "__SAAS_X11_DIAG__="
+    private const val CONTAINER_X0_SOCKET = "/tmp/.X11-unix/X0"
 
-    internal fun buildStartCommand(
-        displaySlot: X11DisplaySlot,
-        requireWaylandSocket: Boolean = false
-    ): String {
-        val expectedSocket = "/tmp/.X11-unix/X${displaySlot.number}"
+    internal fun buildStartCommand(requireWaylandSocket: Boolean = false): String {
         val requireWayland = if (requireWaylandSocket) "1" else "0"
-        return "expected=${shellQuote(expectedSocket)}; display=${shellQuote(displaySlot.displayName)}; require_wayland=$requireWayland; " +
+        return "expected=${shellQuote(CONTAINER_X0_SOCKET)}; display=${shellQuote(Constants.X11_DISPLAY)}; require_wayland=$requireWayland; " +
             "{ " +
             "if command -v systemctl >/dev/null 2>&1 && " +
             "test -f /etc/systemd/system/x11-session.service; then " +
@@ -137,7 +133,6 @@ internal object GraphicSessionRuntimeController {
 
     suspend fun ensureRunning(
         containerName: String,
-        displaySlot: X11DisplaySlot,
         logger: ContainerLogger? = null
     ): Boolean = withContext(Dispatchers.IO) {
         val configuredSession = ContainerSettingsManager
@@ -146,31 +141,24 @@ internal object GraphicSessionRuntimeController {
 
         logger?.i("--- Graphic Session Synchronization ---")
         logger?.i("[CTX] Container: $containerName")
-        logger?.i("[CTX] Monitor: ${displaySlot.monitorNumber}")
-        logger?.i("[CTX] Host display: ${displaySlot.displayName}")
+        logger?.i("[CTX] Host display: ${Constants.X11_DISPLAY}")
         logger?.i("[CTX] Host transport: Integrated X11")
-        logger?.i("[CTX] Expected container socket: /tmp/.X11-unix/X${displaySlot.number}")
+        logger?.i("[CTX] Expected container socket: $CONTAINER_X0_SOCKET")
         logger?.i("[CTX] Container lifecycle: unchanged")
 
         if (configuredSession == null || configuredSession == GraphicSession.NONE) {
-            logger?.i("[CTX] Configured graphic session: none")
             logger?.i("[*] No managed graphic session is configured for $containerName")
-            logger?.i("[+] Leaving ${displaySlot.describe()} available as a raw X11 server")
+            logger?.i("[+] Leaving ${Constants.X11_DISPLAY} available as a raw X11 server")
             return@withContext true
         }
 
         logger?.i("[CTX] Protocol: ${configuredSession.protocol.label}")
         logger?.i("[CTX] Configured graphic session: ${configuredSession.label}")
-        logger?.i("[CTX] Session command: ${configuredSession.startCommand}")
-        if (configuredSession.protocol == GraphicProtocol.WAYLAND) {
-            logger?.i("[CTX] Wayland runtime: /tmp/runtime-root")
-        }
-        logger?.i("[*] Ensuring ${configuredSession.label} session on ${displaySlot.describe()}...")
+        logger?.i("[*] Ensuring ${configuredSession.label} session on ${Constants.X11_DISPLAY}...")
         val startedAt = System.nanoTime()
         var result = runContainerCommand(
             containerName,
             buildStartCommand(
-                displaySlot = displaySlot,
                 requireWaylandSocket = configuredSession.protocol == GraphicProtocol.WAYLAND
             )
         )
@@ -180,14 +168,10 @@ internal object GraphicSessionRuntimeController {
             it.trim() == "${ACTION_MARKER}x11-client-not-ready"
         }
         if (transportHandshakeFailed) {
-            logger?.w(
-                "[!] ${displaySlot.describe()} has a process/socket but rejected a real X11 client; " +
-                    "restarting only this Manager X11 server once"
-            )
-            val stopped = X11SessionManager.stopIntegratedServer(displaySlot, logger)
+            logger?.w("[!] ${Constants.X11_DISPLAY} rejected a real X11 client; restarting the fixed Manager X11 server once")
+            val stopped = X11SessionManager.stopIntegratedServer(logger)
             if (stopped) {
                 val restarted = X11SessionManager.startIntegratedServer(
-                    displaySlot = displaySlot,
                     containerName = containerName,
                     logger = logger
                 )
@@ -196,37 +180,22 @@ internal object GraphicSessionRuntimeController {
                     result = runContainerCommand(
                         containerName,
                         buildStartCommand(
-                            displaySlot = displaySlot,
                             requireWaylandSocket = configuredSession.protocol == GraphicProtocol.WAYLAND
                         )
                     )
                     logRuntimeMarkers(result.out, logger)
-                } else {
-                    logger?.w(
-                        "[!] X11 transport restart failed: " +
-                            (restarted.exceptionOrNull()?.message ?: "unknown error")
-                    )
                 }
-            } else {
-                logger?.w("[!] Could not restart the unusable ${displaySlot.describe()} transport")
             }
         }
 
-        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L
         logger?.i("[CTX] Controller exit code: ${result.code}")
-        logger?.i("[CTX] Synchronization duration: ${elapsedMs}ms")
+        logger?.i("[CTX] Synchronization duration: ${(System.nanoTime() - startedAt) / 1_000_000L}ms")
 
         if (result.isSuccess) {
-            logger?.i(
-                "[+] ${configuredSession.label} ${configuredSession.protocol.label} session active on " +
-                    displaySlot.describe()
-            )
+            logger?.i("[+] ${configuredSession.label} ${configuredSession.protocol.label} session active on ${Constants.X11_DISPLAY}")
             true
         } else {
-            logger?.w(
-                "[!] ${configuredSession.label} could not be confirmed active on " +
-                    "${displaySlot.describe()} (exit ${result.code})"
-            )
+            logger?.w("[!] ${configuredSession.label} could not be confirmed active on ${Constants.X11_DISPLAY} (exit ${result.code})")
             logFailureDiagnostics(result.out, result.err, logger)
             false
         }
@@ -245,21 +214,16 @@ internal object GraphicSessionRuntimeController {
         logger?.i("[CTX] Container lifecycle: remains RUNNING")
 
         if (configuredSession == null || configuredSession == GraphicSession.NONE) {
-            logger?.i("[CTX] Configured graphic session: none")
             logger?.i("[+] No managed graphic session process needs to be stopped")
             return@withContext true
         }
 
-        logger?.i("[CTX] Protocol: ${configuredSession.protocol.label}")
-        logger?.i("[CTX] Configured graphic session: ${configuredSession.label}")
-        logger?.i("[CTX] Session command: ${configuredSession.startCommand}")
         logger?.i("[*] Stopping ${configuredSession.label} graphic session only...")
         val startedAt = System.nanoTime()
         val result = runContainerCommand(containerName, buildStopCommand())
-        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L
         logRuntimeMarkers(result.out, logger)
         logger?.i("[CTX] Controller exit code: ${result.code}")
-        logger?.i("[CTX] Stop duration: ${elapsedMs}ms")
+        logger?.i("[CTX] Stop duration: ${(System.nanoTime() - startedAt) / 1_000_000L}ms")
 
         if (result.isSuccess) {
             logger?.i("[+] Graphic session stopped; container remains running")
@@ -271,58 +235,39 @@ internal object GraphicSessionRuntimeController {
         }
     }
 
-    private fun runContainerCommand(
-        containerName: String,
-        command: String
-    ) = Shell.cmd(
+    private fun runContainerCommand(containerName: String, command: String) = Shell.cmd(
         "${Constants.DS_BINARY_PATH} --name=${shellQuote(containerName)} run " +
             "sh -c ${shellQuote(command)}"
     ).exec()
 
-    private suspend fun logRuntimeMarkers(
-        output: List<String>,
-        logger: ContainerLogger?
-    ) {
-        output
-            .firstOrNull { it.startsWith(INIT_MARKER) }
+    private suspend fun logRuntimeMarkers(output: List<String>, logger: ContainerLogger?) {
+        output.firstOrNull { it.startsWith(INIT_MARKER) }
             ?.removePrefix(INIT_MARKER)
             ?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?.let { backend -> logger?.i("[+] Graphic session backend: $backend") }
+            ?.takeIf(String::isNotEmpty)
+            ?.let { logger?.i("[+] Graphic session backend: $it") }
 
-        val actions = output
-            .asSequence()
+        val actions = output.asSequence()
             .filter { it.startsWith(ACTION_MARKER) }
             .map { it.removePrefix(ACTION_MARKER).trim() }
-            .filter { it.isNotEmpty() }
+            .filter(String::isNotEmpty)
             .distinct()
             .toList()
+
         for (action in actions) {
             when {
-                action == "socket-not-visible" ->
-                    logger?.w("[!] Container X11 transport socket was not visible during the prerequisite check")
-                action.startsWith("socket-setup-exit=") && action != "socket-setup-exit=0" ->
-                    logger?.w("[!] X11 transport socket setup service returned ${action.substringAfter('=')}")
-                action == "socket-visible" ->
-                    logger?.i("[+] Expected container X11 transport socket is visible")
-                action == "x11-client-ready" ->
-                    logger?.i("[+] Container completed a real X11 client handshake")
-                action == "x11-client-not-ready" ->
-                    logger?.w("[!] X11 socket is visible, but a real X11 client cannot connect")
-                action == "x11-client-tool-missing" ->
-                    logger?.w("[!] xset is missing; X11 client readiness cannot be verified")
-                action == "wayland-visible" ->
-                    logger?.i("[+] Wayland compositor socket is visible")
-                action == "wayland-not-visible" ->
-                    logger?.w("[!] Wayland compositor socket did not appear")
-                action == "already-active" ->
-                    logger?.i("[+] Graphic session service was already active; preserving it")
-                action == "start-requested" ->
-                    logger?.i("[*] Graphic session service was inactive; start requested")
-                action.startsWith("start-exit=") && action != "start-exit=0" ->
-                    logger?.w("[!] OpenRC graphical session start returned ${action.substringAfter('=')}")
-                action == "active" ->
-                    logger?.i("[+] Graphic session service confirmed active")
+                action == "socket-not-visible" -> logger?.w("[!] Container X11 transport socket was not visible during the prerequisite check")
+                action.startsWith("socket-setup-exit=") && action != "socket-setup-exit=0" -> logger?.w("[!] X11 transport socket setup service returned ${action.substringAfter('=')}")
+                action == "socket-visible" -> logger?.i("[+] Expected container X11 transport socket is visible")
+                action == "x11-client-ready" -> logger?.i("[+] Container completed a real X11 client handshake")
+                action == "x11-client-not-ready" -> logger?.w("[!] X11 socket is visible, but a real X11 client cannot connect")
+                action == "x11-client-tool-missing" -> logger?.w("[!] xset is missing; X11 client readiness cannot be verified")
+                action == "wayland-visible" -> logger?.i("[+] Wayland compositor socket is visible")
+                action == "wayland-not-visible" -> logger?.w("[!] Wayland compositor socket did not appear")
+                action == "already-active" -> logger?.i("[+] Graphic session service was already active; preserving it")
+                action == "start-requested" -> logger?.i("[*] Graphic session service was inactive; start requested")
+                action.startsWith("start-exit=") && action != "start-exit=0" -> logger?.w("[!] OpenRC graphical session start returned ${action.substringAfter('=')}")
+                action == "active" -> logger?.i("[+] Graphic session service confirmed active")
                 else -> logger?.i("[CTX] Graphic session action: $action")
             }
         }
@@ -335,11 +280,7 @@ internal object GraphicSessionRuntimeController {
     ) {
         val lines = (stdout + stderr)
             .map(String::trim)
-            .filter {
-                it.isNotEmpty() &&
-                    !it.startsWith(INIT_MARKER) &&
-                    !it.startsWith(ACTION_MARKER)
-            }
+            .filter { it.isNotEmpty() && !it.startsWith(INIT_MARKER) && !it.startsWith(ACTION_MARKER) }
             .map { it.removePrefix(DIAG_MARKER) }
             .takeLast(24)
 
