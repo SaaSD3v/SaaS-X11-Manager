@@ -44,6 +44,7 @@ fun TerminalDialog(
     val screenHeight = configuration.screenHeightDp.dp
     val dialogShape = RoundedCornerShape(28.dp)
     val buttonShape = RoundedCornerShape(14.dp)
+    var showDetails by remember(title) { mutableStateOf(false) }
 
     Dialog(
         onDismissRequest = if (isBlocking) { {} } else { onDismiss },
@@ -108,7 +109,7 @@ fun TerminalDialog(
 
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (onClear != null) {
                         val canClear = logs.isNotEmpty() && !isBlocking
@@ -129,12 +130,12 @@ fun TerminalDialog(
                             tonalElevation = 0.dp
                         ) {
                             Row(
-                                modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(Icons.Default.Delete, "Clear", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (canClear) 0.8f else 0.38f))
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text("Clear", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (canClear) 0.8f else 0.38f))
                             }
                         }
@@ -149,7 +150,10 @@ fun TerminalDialog(
                             .clickable(
                                 enabled = canCopy,
                                 onClick = {
-                                    val logText = logs.joinToString("\n") { AnsiColorParser.stripAnsi(it.second) }
+                                    val copiedLogs = presentTerminalLogs(logs, showDetails)
+                                    val logText = copiedLogs.joinToString("\n") {
+                                        AnsiColorParser.stripAnsi(it.second)
+                                    }
                                     val clipboard = context.getSystemService(ClipboardManager::class.java)
                                     val clip = ClipData.newPlainText("Terminal Logs", logText)
                                     clipboard.setPrimaryClip(clip)
@@ -164,13 +168,56 @@ fun TerminalDialog(
                         tonalElevation = 0.dp
                     ) {
                         Row(
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(Icons.Default.ContentCopy, "Copy", modifier = Modifier.size(16.dp), tint = if (canCopy) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f))
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text("Copy", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = if (canCopy) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f))
+                        }
+                    }
+
+                    Surface(
+                        modifier = Modifier
+                            .height(38.dp)
+                            .weight(1f)
+                            .clip(buttonShape)
+                            .clickable(
+                                onClick = { showDetails = !showDetails },
+                                indication = rememberRipple(bounded = true),
+                                interactionSource = remember { MutableInteractionSource() }
+                            ),
+                        shape = buttonShape,
+                        color = if (showDetails) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
+                        },
+                        border = BorderStroke(
+                            1.dp,
+                            if (showDetails) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                            } else {
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                            }
+                        ),
+                        tonalElevation = 0.dp
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                if (showDetails) "Simple" else "Details",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (showDetails) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
                         }
                     }
                 }
@@ -178,7 +225,8 @@ fun TerminalDialog(
                 TerminalConsole(
                     logs = logs,
                     isProcessing = isBlocking,
-                    modifier = Modifier.fillMaxWidth().weight(1f)
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    showDetails = showDetails
                 )
 
                 if (primaryActionLabel != null && onPrimaryAction != null) {
