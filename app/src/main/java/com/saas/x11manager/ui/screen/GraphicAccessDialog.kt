@@ -29,6 +29,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.saas.x11manager.util.GraphicSessionUserManager
+import com.saas.x11manager.util.GraphicSessionUserSelection
 import com.saas.x11manager.util.SessionAccessMode
 import com.saas.x11manager.util.VncSettings
 
@@ -43,9 +45,14 @@ internal fun GraphicAccessDialog(
 ) {
     var selectedMode by remember(containerName, initialMode) { mutableStateOf(initialMode) }
     var password by remember(containerName) { mutableStateOf("") }
+    var userSelection by remember(containerName) {
+        mutableStateOf(GraphicSessionUserSelection.ROOT)
+    }
 
     val passwordRequired = selectedMode.requiresVnc
     val passwordValid = !passwordRequired || VncSettings.isValidPassword(password)
+    val userSelectionRequired = selectedMode != SessionAccessMode.VNC
+    val userSelectionValid = !userSelectionRequired || isValidGraphicUserSelection(userSelection)
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -95,6 +102,33 @@ internal fun GraphicAccessDialog(
                     selected = selectedMode == SessionAccessMode.BOTH,
                     onClick = { selectedMode = SessionAccessMode.BOTH }
                 )
+
+                Spacer(Modifier.height(16.dp))
+                if (userSelectionRequired) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            GraphicSessionUserPicker(
+                                containerName = containerName,
+                                selection = userSelection,
+                                onSelectionChange = { userSelection = it }
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        "Standalone VNC keeps its existing root-owned session runtime. Linux user selection applies to Integrated X11 and Both.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
 
                 if (passwordRequired) {
                     Spacer(Modifier.height(16.dp))
@@ -154,12 +188,20 @@ internal fun GraphicAccessDialog(
                     Spacer(Modifier.width(8.dp))
                     Button(
                         onClick = {
+                            GraphicSessionUserManager.selectForNextStart(
+                                containerName,
+                                if (userSelectionRequired) {
+                                    userSelection
+                                } else {
+                                    GraphicSessionUserSelection.ROOT
+                                }
+                            )
                             onConfirm(
                                 selectedMode,
                                 password.takeIf { selectedMode.requiresVnc }
                             )
                         },
-                        enabled = passwordValid
+                        enabled = passwordValid && userSelectionValid
                     ) {
                         Text("Continue")
                     }
