@@ -32,7 +32,7 @@ internal object GraphicSessionInitFiles {
             "    requested_user=\$(sed -n 's/^user=//p' \"\$SESSION_USER_FILE\" | head -n 1)\n" +
             "    requested_create=\$(sed -n 's/^create=//p' \"\$SESSION_USER_FILE\" | head -n 1)\n" +
             "    case \"\$requested_user\" in\n" +
-            "        ''|[!a-z_]*|*[!a-z0-9_-]*) echo \"Invalid Manager graphical user selection\" >&2; exit 1 ;;\n" +
+            "        ''|[!A-Za-z_]*|*[!A-Za-z0-9_-]*) echo \"Invalid Manager graphical user selection\" >&2; exit 1 ;;\n" +
             "        *) SESSION_USER=\$requested_user ;;\n" +
             "    esac\n" +
             "    [ \"\$requested_create\" = 1 ] && SESSION_CREATE=1\n" +
@@ -43,7 +43,13 @@ internal object GraphicSessionInitFiles {
             "    if command -v apk >/dev/null 2>&1; then\n" +
             "        adduser -D \"\$SESSION_USER\" || exit 1\n" +
             "    elif command -v adduser >/dev/null 2>&1; then\n" +
-            "        adduser --disabled-password --gecos '' \"\$SESSION_USER\" || exit 1\n" +
+            "        if adduser --help 2>&1 | grep -q -- '--allow-bad-names'; then\n" +
+            "            adduser --allow-bad-names --disabled-password --gecos '' \"\$SESSION_USER\" || exit 1\n" +
+            "        elif adduser --help 2>&1 | grep -q -- '--force-badname'; then\n" +
+            "            adduser --force-badname --disabled-password --gecos '' \"\$SESSION_USER\" || exit 1\n" +
+            "        else\n" +
+            "            adduser --disabled-password --gecos '' \"\$SESSION_USER\" || exit 1\n" +
+            "        fi\n" +
             "    elif command -v useradd >/dev/null 2>&1; then\n" +
             "        useradd -m \"\$SESSION_USER\" || exit 1\n" +
             "    else\n" +
