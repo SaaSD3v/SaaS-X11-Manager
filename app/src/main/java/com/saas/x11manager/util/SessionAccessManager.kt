@@ -122,12 +122,26 @@ object SessionAccessManager {
         containerName: String,
         logger: ContainerLogger?
     ) {
-        // The core was already prepared above. This finalizer only loads or
-        // reuses the topology-specific authenticated TCP listener through the
-        // private UNIX control socket, then verifies the real container path.
-        PulseAudioUnifiedTransport.finalizeAfterContainerReady(
-            containerName = containerName,
-            logger = logger
-        )
+        // Keep the physically validated HOST finalizer unchanged. NAT currently
+        // uses the Manager's tracked-listener path because that path can create
+        // and verify a listener without requiring `pactl list modules`, which is
+        // unavailable on the physical DroidSpaces v6.5.0 test device.
+        val mode = ContainerManager.getContainerInfo(containerName)
+            ?.netMode
+            ?.trim()
+            ?.lowercase()
+
+        if (mode == "nat") {
+            logger?.i("[CTX] NAT audio finalizer: tracked authenticated listener")
+            PulseAudioFixManager.finalizeAfterContainerReady(
+                containerName = containerName,
+                logger = logger
+            )
+        } else {
+            PulseAudioUnifiedTransport.finalizeAfterContainerReady(
+                containerName = containerName,
+                logger = logger
+            )
+        }
     }
 }
