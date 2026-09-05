@@ -42,9 +42,7 @@ object GraphicSessionUserManager {
     private const val SETTINGS_FILE = "$SETTINGS_DIR/session-user"
     private const val SESSION_LAUNCHER = "/usr/local/bin/x11-session.sh"
 
-    // Keep a conservative shell-safe subset while preserving Linux's
-    // case-sensitive account names. Existing users such as `SaaS`, and newly
-    // created users such as `UserX`, must not be silently rewritten to lower-case.
+    // Preserve Linux case-sensitive names such as SaaS and UserX.
     private val validUserName = Regex("^[A-Za-z_][A-Za-z0-9_-]{0,31}$")
     private val selectedForStart = ConcurrentHashMap<String, GraphicSessionUserSelection>()
 
@@ -58,11 +56,6 @@ object GraphicSessionUserManager {
     fun selectedForNextStart(containerName: String): GraphicSessionUserSelection? =
         selectedForStart[containerName]
 
-    /**
-     * Returns the effective saved graphical-user choice without changing the
-     * container or its lifecycle. In-memory selections win for the current app
-     * process; otherwise the persisted per-container choice is restored.
-     */
     suspend fun currentSelection(containerName: String): GraphicSessionUserSelection? =
         withContext(Dispatchers.IO) {
             selectedForStart[containerName]?.let { return@withContext it }
@@ -107,12 +100,6 @@ object GraphicSessionUserManager {
             parsePasswd(lines)
         }
 
-    /**
-     * Persists the selected user and refreshes the generic session launcher
-     * before the normal X11 lifecycle begins. Stopped containers are edited
-     * through their rootfs; running containers use the DroidSpaces command
-     * channel. No container lifecycle is changed here.
-     */
     suspend fun prepareForStart(
         containerName: String,
         session: GraphicSession,
@@ -135,7 +122,7 @@ object GraphicSessionUserManager {
             logger?.e("[-] Could not persist graphical user selection for $containerName")
             return@withContext null
         }
-        if (!writeCurrentSessionLauncher(info, session, requested)) {
+        if (!writeCurrentSessionLauncher(info, session)) {
             logger?.e("[-] Could not refresh the user-aware graphical session launcher")
             return@withContext null
         }
@@ -200,20 +187,21 @@ object GraphicSessionUserManager {
         }
     }
 
+    /**
+     * Always use the same generic launcher that was physically proven on Alpine
+     * and Debian. Root is simply SESSION_USER=root inside that launcher; it does
+     * not get a second special implementation. OpenRC still uses /bin/sh and
+     * systemd still uses /bin/bash, so the init backends remain separate.
+     */
     private fun writeCurrentSessionLauncher(
         info: ContainerInfo,
-        session: GraphicSession,
-        selection: GraphicSessionUserSelection
+        session: GraphicSession
     ): Boolean {
         val shell = when (info.initSystem) {
             InitSystem.OPENRC -> "/bin/sh"
             InitSystem.SYSTEMD -> "/bin/bash"
         }
-        val script = if (selection.userName == "root" && !selection.createIfMissing) {
-            GraphicSessionInitFiles.rootSessionScript(session, shell)
-        } else {
-            GraphicSessionInitFiles.sessionScript(session, shell)
-        }
+        val script = GraphicSessionInitFiles.sessionScript(session, shell)
         return if (info.isRunning) {
             val command =
                 "mkdir -p /usr/local/bin && " +
