@@ -1,5 +1,7 @@
 package com.saas.x11manager.util
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -15,29 +17,46 @@ abstract class ContainerLogger {
 /**
  * Logger used by Compose ViewModels.
  *
- * Raw command stdout/stderr is deliberately discarded at the entry point. Only
- * semantic i/w/e checkpoints pass through ConciseLogReducer and reach Compose
- * state. This keeps apt/apk output, generated scripts, DroidSpaces banners,
- * PulseAudio probes and other diagnostic streams from being queued or retained.
+ * Both semantic checkpoints and streamed command output pass through the same
+ * concise reducer before they can reach Compose state. Raw apt/apk output,
+ * generated scripts, DroidSpaces banners, [CTX] diagnostics and PulseAudio
+ * probes are discarded by the reducer and are never retained behind a hidden
+ * details mode. Keeping logImmediate filtered (rather than dropping it entirely)
+ * is important because some Manager operations report their useful lifecycle
+ * events through callback streams.
  */
 class ViewModelLogger(
     private val onLog: (Int, String) -> Unit
 ) : ContainerLogger() {
     private val reducer = ConciseLogReducer()
     private val reducerLock = Any()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
-    /** Raw stream callback: intentionally not stored or rendered. */
-    override fun logImmediate(level: Int, msg: String) = Unit
+    override fun logImmediate(level: Int, msg: String) {
+        val entries = reduce(level, msg)
+        if (entries.isEmpty()) return
+
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            entries.forEach { onLog(it.first, it.second) }
+        } else {
+            mainHandler.post {
+                entries.forEach { onLog(it.first, it.second) }
+            }
+        }
+    }
 
     override suspend fun i(msg: String) = emitSemantic(Log.INFO, msg)
     override suspend fun w(msg: String) = emitSemantic(Log.WARN, msg)
     override suspend fun e(msg: String) = emitSemantic(Log.ERROR, msg)
 
     private suspend fun emitSemantic(level: Int, msg: String) {
-        val entries = synchronized(reducerLock) { reducer.reduce(level, msg) }
+        val entries = reduce(level, msg)
         if (entries.isEmpty()) return
         withContext(Dispatchers.Main.immediate) {
             entries.forEach { onLog(it.first, it.second) }
         }
     }
+
+    private fun reduce(level: Int, msg: String): List<Pair<Int, String>> =
+        synchronized(reducerLock) { reducer.reduce(level, msg) }
 }
