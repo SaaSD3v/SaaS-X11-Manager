@@ -90,22 +90,23 @@ class PulseAudioFixPolicyTest {
     }
 
     @Test
-    fun unifiedTransportMapsHostAndNatOntoTheSameCore() {
+    fun unifiedTransportKeepsHostValidatedAndNatExperimentalOnTheSameCore() {
         val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioUnifiedTransport.kt")
 
         assertTrue(transport.contains("BASE_PORT = 4713"))
         assertTrue(transport.contains("MAX_PORT_SHIFT = 64"))
         assertTrue(transport.contains("\"host\" -> \"127.0.0.1\""))
-        assertTrue(transport.contains("discoverNatGateway"))
-        assertTrue(transport.contains("172.28.0.1"))
+        assertTrue(transport.contains("DROIDSPACES_NAT_GATEWAY = \"172.28.0.1\""))
+        assertTrue(transport.contains("resolveNatEndpoint"))
+        assertTrue(transport.contains("discoverContainerDefaultGateway"))
+        assertTrue(transport.contains("HOST is the physically validated APK baseline"))
+        assertTrue(transport.contains("NAT transport status: experimental until physical APK verification"))
         assertTrue(transport.contains("configuredPortForwardOwner"))
         assertTrue(transport.contains("module-native-protocol-tcp"))
         assertTrue(transport.contains("auth-cookie="))
         assertTrue(transport.contains("private UNIX socket via Termux UID"))
         assertTrue(transport.contains("Listener verifier: PulseAudio module table + DroidSpaces container data path"))
 
-        // Assert that executable integration identifiers are absent. Prose may
-        // still mention historical transports while documenting why they are not used.
         assertFalse(transport.contains("com.termux.app.RunCommandService"))
         assertFalse(transport.contains("com.termux.permission.RUN_COMMAND"))
         assertFalse(transport.contains("am startservice"))
@@ -114,6 +115,7 @@ class PulseAudioFixPolicyTest {
         assertFalse(transport.contains("module-sles-sink"))
         assertFalse(transport.contains("auth-anonymous=1"))
         assertFalse(transport.contains("listen=0.0.0.0"))
+        assertFalse(transport.contains("hostOwnsIpv4"))
     }
 
     @Test
