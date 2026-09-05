@@ -93,4 +93,18 @@ class ConciseLogReducerTest {
         assertFalse(output.any { it.contains("Port 4713") })
         assertTrue(output.contains("[AUDIO] ✓ Audio ready (AAudio_sink, tcp:127.0.0.1:4714)"))
     }
+
+    @Test
+    fun graphicalRetryShowsOnlyFinalFailure() {
+        val reducer = ConciseLogReducer()
+        val output = buildList {
+            addAll(reducer.reduce(Log.WARN, "[!] Monitor 2 (:1) is ready, but IceWM could not be confirmed active (exit 1)"))
+            addAll(reducer.reduce(Log.WARN, "[!] Monitor 2 (:1) is ready, but the configured graphic session is not active"))
+            addAll(reducer.reduce(Log.ERROR, "[-] IceWM did not become active on Monitor 2 (:1)"))
+        }.map { it.second }
+
+        assertFalse(output.any { it.contains("could not be confirmed active") })
+        assertFalse(output.any { it.contains("configured graphic session is not active") })
+        assertTrue(output.contains("[SESSION] ✗ IceWM did not become active on Monitor 2 (:1)"))
+    }
 }
