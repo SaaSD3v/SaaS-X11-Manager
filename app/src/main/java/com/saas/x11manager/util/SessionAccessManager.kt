@@ -121,20 +121,24 @@ object SessionAccessManager {
         logger: ContainerLogger?
     ) {
         // HOST remains on the physically validated unified finalizer.
-        // NAT no longer invokes a second listener creator after the preflight:
-        // the APK has physically proven the authenticated 172.28.0.1:4713
-        // listener and now proceeds directly to the real container client proof.
+        // NAT first validates the Android-side endpoint/port ownership so a
+        // stale Manager core cannot race the exact 172.28.0.1:4713 listener.
         val mode = ContainerManager.getContainerInfo(containerName)
             ?.netMode
             ?.trim()
             ?.lowercase()
 
         if (mode == "nat") {
-            logger?.i("[CTX] NAT audio finalizer: validated listener -> container client")
-            PulseAudioNatPreflight.finalizeAfterContainerReady(
-                containerName = containerName,
-                logger = logger
-            )
+            logger?.i("[CTX] NAT audio finalizer: host readiness -> validated listener -> container client")
+            if (PulseAudioNatHostReadiness.prepare(logger)) {
+                PulseAudioNatPreflight.finalizeAfterContainerReady(
+                    containerName = containerName,
+                    logger = logger
+                )
+            } else {
+                logger?.w("[!] NAT host listener readiness failed; audio finalization was not attempted")
+                logger?.w("[!] Graphical startup will continue")
+            }
         } else {
             PulseAudioUnifiedTransport.finalizeAfterContainerReady(
                 containerName = containerName,
