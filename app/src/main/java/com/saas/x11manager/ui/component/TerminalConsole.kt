@@ -74,11 +74,15 @@ fun TerminalConsole(
     logs: List<Pair<Int, String>>,
     isProcessing: Boolean = true,
     modifier: Modifier = Modifier,
-    maxHeight: Dp? = null
+    maxHeight: Dp? = null,
+    showDetails: Boolean = false
 ) {
     val orientation = LocalConfiguration.current.orientation
     val listState = rememberLazyListState()
     val horizontalScrollState = rememberScrollState()
+    val displayLogs by remember(logs, showDetails) {
+        derivedStateOf { presentTerminalLogs(logs, showDetails) }
+    }
 
     var userScrolledUp by remember { mutableStateOf(false) }
     var isAutoScrolling by remember { mutableStateOf(false) }
@@ -94,15 +98,15 @@ fun TerminalConsole(
             }
     }
 
-    LaunchedEffect(orientation) {
+    LaunchedEffect(orientation, showDetails) {
         userScrolledUp = false
-        if (logs.isNotEmpty()) {
-            listState.scrollToItem(logs.lastIndex)
+        if (displayLogs.isNotEmpty()) {
+            listState.scrollToItem(displayLogs.lastIndex)
         }
     }
 
-    LaunchedEffect(logs.size, userScrolledUp) {
-        if (logs.isEmpty() || userScrolledUp) return@LaunchedEffect
+    LaunchedEffect(displayLogs.size, userScrolledUp, showDetails) {
+        if (displayLogs.isEmpty() || userScrolledUp) return@LaunchedEffect
 
         // Streaming package-manager output can append hundreds of lines quickly.
         // An animated scroll per line queues unnecessary animation work and makes
@@ -110,7 +114,7 @@ fun TerminalConsole(
         // the same auto-follow behavior while making the cost effectively constant.
         isAutoScrolling = true
         try {
-            listState.scrollToItem(logs.lastIndex)
+            listState.scrollToItem(displayLogs.lastIndex)
         } finally {
             isAutoScrolling = false
         }
@@ -134,22 +138,24 @@ fun TerminalConsole(
         ProvideTextStyle(
             MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMono)
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 12.dp, vertical = 16.dp)
-                    .horizontalScroll(horizontalScrollState)
-            ) {
+            val contentModifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 16.dp)
+                .let { base ->
+                    if (showDetails) base.horizontalScroll(horizontalScrollState) else base
+                }
+
+            Box(modifier = contentModifier) {
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxHeight(),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     items(
-                        count = logs.size,
+                        count = displayLogs.size,
                         key = { index -> index }
                     ) { index ->
-                        val (level, message) = logs[index]
+                        val (level, message) = displayLogs[index]
                         val annotatedText = remember(
                             level,
                             message,
@@ -192,8 +198,12 @@ fun TerminalConsole(
                         Text(
                             text = annotatedText,
                             style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMono),
-                            softWrap = false,
-                            modifier = Modifier.wrapContentWidth().heightIn(min = 16.dp)
+                            softWrap = !showDetails,
+                            modifier = if (showDetails) {
+                                Modifier.wrapContentWidth().heightIn(min = 16.dp)
+                            } else {
+                                Modifier.fillMaxWidth().heightIn(min = 16.dp)
+                            }
                         )
                     }
                 }
