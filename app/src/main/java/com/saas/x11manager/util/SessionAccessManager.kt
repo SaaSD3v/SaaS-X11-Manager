@@ -57,6 +57,9 @@ object SessionAccessManager {
                 if (slot == null) {
                     logger?.e("[-] Integrated X11 access failed")
                     false
+                } else if (!confirmManagedDesktop(containerName, session, slot)) {
+                    logger?.e("[-] ${session.label} did not become active on ${slot.describe()}")
+                    false
                 } else {
                     finalizeAudioAfterContainerReady(containerName, logger)
                     logger?.i("[+] Integrated X11 ready on ${slot.describe()}")
@@ -99,6 +102,12 @@ object SessionAccessManager {
                 if (slot == null) {
                     logger?.e("[-] Integrated X11 could not start; VNC mirror was not attempted")
                     false
+                } else if (!confirmManagedDesktop(containerName, session, slot)) {
+                    logger?.e(
+                        "[-] ${session.label} did not become active on ${slot.describe()}; " +
+                            "VNC mirror was not attempted"
+                    )
+                    false
                 } else {
                     finalizeAudioAfterContainerReady(containerName, logger)
                     logger?.i("")
@@ -132,6 +141,25 @@ object SessionAccessManager {
                 }
             }
         }
+    }
+
+    /**
+     * startX11Session historically returns the allocated display even when the
+     * init service has not stabilized yet. Re-check the managed desktop silently
+     * before declaring success. Besides removing false-positive "X11 ready" states,
+     * this gives OpenRC one clean second chance after the container has fully booted.
+     */
+    private suspend fun confirmManagedDesktop(
+        containerName: String,
+        session: GraphicSession,
+        slot: X11DisplaySlot
+    ): Boolean {
+        if (session == GraphicSession.NONE) return true
+        return X11SessionManager.ensureContainerGraphicSession(
+            containerName = containerName,
+            displaySlot = slot,
+            logger = null
+        )
     }
 
     private suspend fun finalizeAudioAfterContainerReady(
