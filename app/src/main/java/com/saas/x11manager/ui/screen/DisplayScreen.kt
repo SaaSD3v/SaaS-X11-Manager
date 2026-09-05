@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.saas.x11manager.util.Constants
 import com.saas.x11manager.util.X11ServerStatus
 import com.termux.x11.EmbeddedDisplayHost
 
@@ -24,7 +25,8 @@ fun DisplayScreen(
     viewModel: HomeViewModel,
     onOpenScreen: () -> Unit
 ) {
-    val monitors by viewModel.monitors.collectAsState()
+    val serverStatus by viewModel.x11ServerStatus.collectAsState()
+    val serverPid by viewModel.x11ServerPid.collectAsState()
     val context = LocalContext.current
     val prefs = remember(context) { EmbeddedDisplayHost.getPrefs(context) }
     val store = remember(prefs) { prefs.get() }
@@ -34,42 +36,22 @@ fun DisplayScreen(
         ensureManagedX11Defaults(context, store)
     }
 
-    val activeDisplays = remember(monitors) {
-        monitors
-            .asSequence()
-            .filter { it.status == X11ServerStatus.Running }
-            .sortedBy { it.slot.number }
-            .map { it.displayName }
-            .toList()
-    }
-
-    val screenSubtitle = when {
-        activeDisplays.isEmpty() -> "Open the managed X11 monitor workspace"
-        activeDisplays.size == 1 -> "1 monitor active · ${activeDisplays.first()}"
-        else -> {
-            val visible = activeDisplays.take(3).joinToString(", ")
-            val remaining = activeDisplays.size - 3
-            "${activeDisplays.size} monitors active · $visible" +
-                if (remaining > 0) " +$remaining" else ""
-        }
-    }
-
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
             Text(
                 "Integrated X11",
                 style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.Black
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "Configure the embedded X11 engine or switch between managed monitors.",
+                "Configure the embedded X11 engine or open its managed screen workspace.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -90,7 +72,11 @@ fun DisplayScreen(
                 index = "02",
                 icon = Icons.Default.DesktopWindows,
                 title = "Screen",
-                subtitle = screenSubtitle,
+                subtitle = when (serverStatus) {
+                    X11ServerStatus.Running ->
+                        "${Constants.X11_DISPLAY} running${serverPid?.let { " · PID $it" } ?: ""}"
+                    X11ServerStatus.Stopped -> "Open the full-size X11 workspace"
+                },
                 onClick = onOpenScreen
             )
         }
@@ -115,30 +101,27 @@ private fun DisplayLauncherCard(
     Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 0.dp,
         border = BorderStroke(
             1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
         )
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 15.dp),
+            modifier = Modifier.padding(18.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                tonalElevation = 0.dp
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
             ) {
-                Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(54.dp), contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        modifier = Modifier.size(22.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
             }
@@ -147,13 +130,12 @@ private fun DisplayLauncherCard(
                 Text(
                     index,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.primary
                 )
-                Spacer(Modifier.height(2.dp))
                 Text(
                     title,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.Bold
                 )
                 Text(
                     subtitle,
@@ -162,11 +144,7 @@ private fun DisplayLauncherCard(
                 )
             }
 
-            Icon(
-                Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Icon(Icons.Default.ChevronRight, contentDescription = null)
         }
     }
 }

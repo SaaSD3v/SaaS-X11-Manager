@@ -43,23 +43,12 @@ internal fun publishLoriePreferenceChange(context: Context, key: String) {
 
 @Composable
 internal fun EmbeddedX11Surface(
-    displayName: String = ":0",
     modifier: Modifier = Modifier,
     onConnectionChanged: (Boolean) -> Unit
 ) {
-    // Upstream Lorie is architected around one visible renderer. EmbeddedDisplayHost
-    // already keeps a display-keyed Binder map specifically so that one LorieView can
-    // disconnect from :0 and reconnect to :1/:2 without stopping either X server.
-    // Recreating LorieView for every monitor created overlapping native Renderer/EGL
-    // instances and made the second selected monitor render only the X root/cursor.
-    // Keep one native renderer alive and switch only its exact Binder connection.
     AndroidView(
         modifier = modifier,
         factory = { context ->
-            // Select before constructing LorieView. Its embedded host attach happens
-            // from LorieView.init(), so the first connection targets the requested display.
-            EmbeddedDisplayHost.selectDisplay(displayName)
-
             LorieView(context).apply {
                 val stylusInput = EmbeddedStylusInputController(this)
                 val touchInput = EmbeddedTouchInputController(this)
@@ -105,59 +94,14 @@ internal fun EmbeddedX11Surface(
                 }
                 requestFocus()
                 EmbeddedDisplayHost.tryConnect()
-                scheduleEmbeddedSurfaceResync(this)
             }
         },
         update = { view ->
-            val selectedChanged = EmbeddedDisplayHost.getSelectedDisplay() != displayName
-            if (selectedChanged) {
-                onConnectionChanged(false)
-                EmbeddedDisplayHost.selectDisplay(displayName)
-                // The Surface itself is intentionally retained. Once the exact new
-                // Binder is attached, re-assert viewport/window state on this renderer.
-                scheduleEmbeddedSurfaceResync(view)
-            }
-
             val connected = view.connected()
             onConnectionChanged(connected)
             if (!connected) EmbeddedDisplayHost.tryConnect()
         }
     )
-}
-
-/**
- * Re-assert the viewport after an X11 (re)connection once the Android Surface is
- * valid. This is bounded and never restarts the X server, container or desktop.
- */
-private fun scheduleEmbeddedSurfaceResync(view: LorieView, attempt: Int = 0) {
-    if (attempt >= 6) return
-
-    val delayMs = when (attempt) {
-        0 -> 60L
-        1 -> 120L
-        2 -> 240L
-        else -> 400L
-    }
-
-    view.postDelayed({
-        if (EmbeddedDisplayHost.getActiveView() !== view || !view.isAttachedToWindow) {
-            return@postDelayed
-        }
-
-        if (!view.connected()) {
-            EmbeddedDisplayHost.tryConnect()
-            scheduleEmbeddedSurfaceResync(view, attempt + 1)
-            return@postDelayed
-        }
-
-        if (!view.holder.surface.isValid) {
-            scheduleEmbeddedSurfaceResync(view, attempt + 1)
-            return@postDelayed
-        }
-
-        view.triggerCallback()
-        view.postInvalidateOnAnimation()
-    }, delayMs)
 }
 
 private val modifierKeyCodes = mapOf(

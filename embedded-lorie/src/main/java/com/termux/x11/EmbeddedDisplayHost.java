@@ -23,23 +23,17 @@ import com.termux.x11.input.RenderData;
 
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Host bridge used when LorieView is rendered directly inside SaaS X11 Manager.
  *
  * Upstream Termux:X11 routes its view connection and input pipeline through
- * MainActivity. Embedded mode keeps that responsibility inside this bridge. The
- * Manager may own several X servers at once, while a single visible LorieView is
- * explicitly routed to one selected display.
+ * MainActivity. Embedded mode keeps that responsibility inside this bridge so
+ * the Manager can host one LorieView without launching the standalone activity.
  */
 public final class EmbeddedDisplayHost {
     public static final Handler handler = new Handler(Looper.getMainLooper());
-    public static final String EXTRA_X11_DISPLAY =
-            "com.saas.x11manager.extra.X11_DISPLAY";
 
-    private static final String DEFAULT_X11_DISPLAY = ":0";
     private static final String ACTION_STOP = "com.termux.x11.ACTION_STOP";
     private static final String ACTION_PREFERENCES_CHANGED =
             "com.termux.x11.ACTION_PREFERENCES_CHANGED";
@@ -47,19 +41,11 @@ public final class EmbeddedDisplayHost {
     private static WeakReference<LorieView> activeView = new WeakReference<>(null);
     private static WeakReference<InputEventSender> inputSender = new WeakReference<>(null);
     private static WeakReference<RenderData> renderData = new WeakReference<>(null);
-    private static final Map<String, ICmdEntryInterface> services = new HashMap<>();
-    private static volatile String selectedDisplay = DEFAULT_X11_DISPLAY;
+    private static volatile ICmdEntryInterface service;
     private static Prefs prefs;
     private static int savedMouseButtonState;
 
     private EmbeddedDisplayHost() {}
-
-    private static String normalizeDisplay(String displayName) {
-        if (displayName == null)
-            return DEFAULT_X11_DISPLAY;
-        String normalized = displayName.trim();
-        return normalized.matches(":[0-9]+") ? normalized : DEFAULT_X11_DISPLAY;
-    }
 
     public static synchronized Prefs getPrefs(Context context) {
         if (prefs == null)
@@ -94,35 +80,6 @@ public final class EmbeddedDisplayHost {
 
     public static synchronized LorieView getActiveView() {
         return activeView.get();
-    }
-
-    public static synchronized String getSelectedDisplay() {
-        return selectedDisplay;
-    }
-
-    /**
-     * Route the visible embedded surface to one X11 display. Other server
-     * connections remain registered and can be selected later without stopping
-     * their containers.
-     */
-    public static synchronized void selectDisplay(String displayName) {
-        String requested = normalizeDisplay(displayName);
-        if (requested.equals(selectedDisplay)) {
-            handler.post(EmbeddedDisplayHost::tryConnect);
-            return;
-        }
-
-        LorieView view = activeView.get();
-        if (view != null) {
-            releasePointerCapture(view);
-            restoreAndroidPointer(view);
-            if (view.connected())
-                view.connect(-1);
-        }
-
-        selectedDisplay = requested;
-        savedMouseButtonState = 0;
-        handler.post(EmbeddedDisplayHost::tryConnect);
     }
 
     public static boolean isConnected() {
@@ -195,16 +152,6 @@ public final class EmbeddedDisplayHost {
                     PointerIcon.getSystemIcon(view.getContext(), PointerIcon.TYPE_DEFAULT)
             );
         }
-    }
-
-    private static void disconnectActiveView() {
-        LorieView view = getActiveView();
-        if (view == null)
-            return;
-        releasePointerCapture(view);
-        restoreAndroidPointer(view);
-        if (view.connected())
-            view.connect(-1);
     }
 
     private static boolean isMouseEvent(MotionEvent event) {
@@ -538,15 +485,17 @@ public final class EmbeddedDisplayHost {
         if (CmdEntryPoint.ACTION_START.equals(action)) {
             Bundle bundle = intent.getBundleExtra(null);
             IBinder binder = bundle == null ? null : bundle.getBinder(null);
-            if (binder != null) {
-                String displayName = intent.getStringExtra(EXTRA_X11_DISPLAY);
-                setService(displayName, ICmdEntryInterface.Stub.asInterface(binder));
-            }
+            if (binder != null)
+                setService(ICmdEntryInterface.Stub.asInterface(binder));
         } else if (ACTION_STOP.equals(action)) {
-            synchronized (EmbeddedDisplayHost.class) {
-                services.clear();
+            service = null;
+            LorieView view = getActiveView();
+            if (view != null) {
+                releasePointerCapture(view);
+                restoreAndroidPointer(view);
+                if (view.connected())
+                    view.connect(-1);
             }
-            disconnectActiveView();
         } else if (ACTION_PREFERENCES_CHANGED.equals(action)) {
             LorieView view = getActiveView();
             if (view != null) {
@@ -557,43 +506,32 @@ public final class EmbeddedDisplayHost {
         }
     }
 
-    private static synchronized void setService(
-            String displayName,
-            ICmdEntryInterface candidate
-    ) {
+    private static synchronized void setService(ICmdEntryInterface candidate) {
         if (candidate == null)
             return;
-
-        String key = normalizeDisplay(displayName);
-        ICmdEntryInterface existing = services.get(key);
-        if (existing != null && existing.asBinder() == candidate.asBinder()) {
-            if (key.equals(selectedDisplay))
-                handler.post(EmbeddedDisplayHost::tryConnect);
+        if (service != null && service.asBinder() == candidate.asBinder()) {
+            handler.post(EmbeddedDisplayHost::tryConnect);
             return;
         }
 
-        services.put(key, candidate);
-        IBinder binder = candidate.asBinder();
+        service = candidate;
         try {
-            binder.linkToDeath(() -> {
-                boolean selected;
-                synchronized (EmbeddedDisplayHost.class) {
-                    ICmdEntryInterface current = services.get(key);
-                    if (current != null && current.asBinder() == binder)
-                        services.remove(key);
-                    selected = key.equals(selectedDisplay);
-                }
-                if (selected)
-                    handler.post(EmbeddedDisplayHost::disconnectActiveView);
+            candidate.asBinder().linkToDeath(() -> {
+                service = null;
+                handler.post(() -> {
+                    LorieView view = getActiveView();
+                    if (view != null) {
+                        releasePointerCapture(view);
+                        restoreAndroidPointer(view);
+                        if (view.connected())
+                            view.connect(-1);
+                    }
+                });
             }, 0);
         } catch (RemoteException ignored) {
-            ICmdEntryInterface current = services.get(key);
-            if (current != null && current.asBinder() == binder)
-                services.remove(key);
+            service = null;
         }
-
-        if (key.equals(selectedDisplay))
-            handler.post(EmbeddedDisplayHost::tryConnect);
+        handler.post(EmbeddedDisplayHost::tryConnect);
     }
 
     public static void tryConnect() {
@@ -601,13 +539,7 @@ public final class EmbeddedDisplayHost {
         if (view == null || view.connected())
             return;
 
-        final String displayName;
-        final ICmdEntryInterface current;
-        synchronized (EmbeddedDisplayHost.class) {
-            displayName = selectedDisplay;
-            current = services.get(displayName);
-        }
-
+        ICmdEntryInterface current = service;
         if (current == null) {
             view.requestConnection();
             handler.postDelayed(EmbeddedDisplayHost::tryConnect, 250);
@@ -617,10 +549,7 @@ public final class EmbeddedDisplayHost {
         try {
             ParcelFileDescriptor fd = current.getXConnection();
             if (fd != null) {
-                Log.i(
-                        "EmbeddedDisplayHost",
-                        "Connecting embedded LorieView to X server " + displayName
-                );
+                Log.i("EmbeddedDisplayHost", "Connecting embedded LorieView to X server");
                 view.connect(fd.detachFd());
                 view.reloadPreferences(getPrefs(view.getContext()));
                 reloadInputPreferences(view);
@@ -630,16 +559,8 @@ public final class EmbeddedDisplayHost {
                 return;
             }
         } catch (Exception e) {
-            Log.w(
-                    "EmbeddedDisplayHost",
-                    "Embedded X11 connection failed for " + displayName + "; retrying",
-                    e
-            );
-            synchronized (EmbeddedDisplayHost.class) {
-                ICmdEntryInterface registered = services.get(displayName);
-                if (registered != null && registered.asBinder() == current.asBinder())
-                    services.remove(displayName);
-            }
+            Log.w("EmbeddedDisplayHost", "Embedded X11 connection failed; retrying", e);
+            service = null;
         }
 
         handler.postDelayed(EmbeddedDisplayHost::tryConnect, 250);
