@@ -23,10 +23,30 @@ class PulseAudioNatRoutingPolicyTest {
         ).readText()
 
         assertTrue(session.contains("if (mode == \"nat\")"))
-        assertTrue(session.contains("NAT audio finalizer: validated listener -> container client"))
+        assertTrue(session.contains("NAT audio finalizer: host readiness -> validated listener -> container client"))
+        assertTrue(session.contains("PulseAudioNatHostReadiness.prepare"))
         assertTrue(session.contains("PulseAudioNatPreflight.finalizeAfterContainerReady"))
         assertTrue(session.contains("PulseAudioUnifiedTransport.finalizeAfterContainerReady"))
         assertFalse(session.contains("PulseAudioFixManager.finalizeAfterContainerReady"))
+    }
+
+    @Test
+    fun natHostReadinessOnlyReleasesPositivelyOwnedStaleManagerCore() {
+        val readiness = projectFile(
+            "app/src/main/java/com/saas/x11manager/util/PulseAudioNatHostReadiness.kt"
+        ).readText()
+
+        assertTrue(readiness.contains("private const val NAT_GATEWAY = \"172.28.0.1\""))
+        assertTrue(readiness.contains("private const val NAT_PORT = 4713"))
+        assertTrue(readiness.contains("/proc/net/tcp"))
+        assertTrue(readiness.contains("HOME=\$MANAGER_PULSE_HOME"))
+        assertTrue(readiness.contains("uid"))
+        assertTrue(readiness.contains("*pulseaudio*"))
+        assertTrue(readiness.contains("pid == currentPid"))
+        assertTrue(readiness.contains("kill \$stalePid"))
+        assertTrue(readiness.contains("Existing listener is not proven stale Manager state; it will not be modified"))
+        assertFalse(readiness.contains("kill -9"))
+        assertFalse(readiness.contains("0.0.0.0"))
     }
 
     @Test
