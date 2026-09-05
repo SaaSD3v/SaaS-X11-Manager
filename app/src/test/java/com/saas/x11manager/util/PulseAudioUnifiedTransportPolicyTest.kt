@@ -51,7 +51,7 @@ class PulseAudioUnifiedTransportPolicyTest {
         assertTrue(transport.contains("auth-cookie="))
         assertTrue(transport.contains("private fun unixPactl"))
         assertTrue(transport.contains("unix:${'$'}CONTROL"))
-        assertTrue(transport.contains("pactl list short modules"))
+        assertTrue(transport.contains("unixPactl(owner, \"list short modules\")"))
         assertTrue(transport.contains("PulseAudio listener module loaded: id="))
         assertTrue(transport.contains("Listener verifier: PulseAudio module table + DroidSpaces container data path"))
 
