@@ -5,19 +5,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * HOST/NAT data-path finalizer for the single Manager-owned PulseAudio core.
+ * Final HOST/NAT data-path adapter for the single Manager-owned PulseAudio core.
  *
- * PulseAudioFixManager owns the daemon lifecycle and prepares exactly one
- * AAudio/OpenSL ES core with a private UNIX control socket and private cookie.
+ * Validation status:
+ * - HOST is the physically validated APK baseline.
+ * - NAT uses the DroidSpaces runtime topology and remains experimental until
+ *   the complete APK path is physically verified on-device.
  *
- * This object never launches another PulseAudio daemon and never uses Termux
- * RunCommandService. It controls the already-running daemon only through the
- * private UNIX socket using the resolved Termux UID. The actual TCP data path is
- * verified from the running DroidSpaces container, never by a host TCP
- * self-probe.
- *
- * Lifecycle ownership remains external: this class never starts/stops/restarts
- * DroidSpaces containers, X11, or VNC.
+ * This object never starts another PulseAudio daemon and never owns container,
+ * X11, VNC, or graphical-session lifecycle.
  */
 object PulseAudioUnifiedTransport {
     private const val TERMUX_HOME = "/data/data/com.termux/files/home"
@@ -27,10 +23,14 @@ object PulseAudioUnifiedTransport {
     private const val STATE = "$TERMUX_HOME/.saas-x11-manager/audio"
     private const val COOKIE = "$STATE/transport.cookie"
     private const val CONTROL = "$STATE/control.sock"
+    private const val CORE_PID_FILE = "$STATE/pulseaudio.pid"
     private const val PULSE_LOG = "$STATE/pulseaudio.log"
 
     private const val BASE_PORT = 4713
     private const val MAX_PORT_SHIFT = 64
+
+    // DroidSpaces v6.5.0 uses this address in both full-bridge and bridgeless NAT.
+    private const val DROIDSPACES_NAT_GATEWAY = "172.28.0.1"
 
     private const val MANAGED = "SaaS X11 Manager Audio Configuration"
     private const val BEGIN = "# BEGIN $MANAGED"
@@ -88,13 +88,10 @@ object PulseAudioUnifiedTransport {
                 "Manager audio core is not reachable through the private UNIX control socket"
             )
 
-        val endpoints = when (mode) {
-            "host" -> listOf("127.0.0.1")
-            else -> discoverNatEndpoints(info, logger)
-        }
-        if (endpoints.isEmpty()) {
-            return@withContext fail(logger, "Automatic NAT audio endpoint discovery failed")
-        }
+        val endpoint = when (mode) {
+            "host" -> "127.0.0.1"
+            else -> resolveNatEndpoint(info, logger)
+        } ?: return@withContext fail(logger, "Automatic NAT audio endpoint discovery failed")
 
         val cookieOctal = cookieOctal(owner, logger)
             ?: return@withContext fail(
@@ -103,86 +100,88 @@ object PulseAudioUnifiedTransport {
             )
 
         logger?.i("[CTX] Audio net_mode: $mode")
+        logger?.i("[CTX] Audio host endpoint: $endpoint (port selected automatically)")
         if (mode == "nat") {
-            logger?.i("[CTX] NAT audio endpoint candidates: ${endpoints.joinToString(", ")}")
+            logger?.i("[CTX] NAT transport status: experimental until physical APK verification")
+            logNatEndpointDiagnostics(endpoint, logger)
         }
 
         val maxPort = (BASE_PORT + MAX_PORT_SHIFT).coerceAtMost(65535)
+        var firstLoadFailureLogged = false
 
-        endpointLoop@ for (endpoint in endpoints) {
-            var firstLoadFailureLogged = false
-            logger?.i("[CTX] Audio host endpoint candidate: $endpoint (port selected automatically)")
-
-            for (port in BASE_PORT..maxPort) {
-                val reservedBy = if (mode == "nat") configuredPortForwardOwner(port) else null
-                if (reservedBy != null) {
-                    if (port == BASE_PORT) {
-                        logger?.w(
-                            "[!] Port $port is reserved by DroidSpaces TCP port-forward in $reservedBy; " +
-                                "selecting another audio port automatically"
-                        )
-                    }
-                    continue
-                }
-
-                val listener = loadOrReuseListener(
-                    owner = owner,
-                    ip = endpoint,
-                    port = port,
-                    expectedSink = sink,
-                    logger = logger,
-                    emitFullFailure = !firstLoadFailureLogged
-                )
-
-                if (listener == null) {
-                    firstLoadFailureLogged = true
-                    if (port == BASE_PORT) {
-                        logger?.w(
-                            "[!] Port $port could not load an authenticated listener on $endpoint; " +
-                                "selecting another audio port automatically"
-                        )
-                    }
-                    continue
-                }
-
-                val server = "tcp:$endpoint:$port"
-                val alreadyConfigured = verifyContainerClient(containerName, server)
-                val configured = alreadyConfigured ||
-                    installContainerClient(containerName, server, cookieOctal, logger)
-
-                if (!configured) {
-                    logger?.w("[!] Container audio client configuration failed for $server")
-                    if (listener.createdNow) unloadListener(owner, listener.moduleId, logger)
-                    logger?.w("[!] Rejecting audio endpoint candidate $endpoint")
-                    continue@endpointLoop
-                }
-
-                if (!verifyContainerClientDetailed(containerName, server, sink, logger)) {
+        for (port in BASE_PORT..maxPort) {
+            val reservedBy = if (mode == "nat") configuredPortForwardOwner(port) else null
+            if (reservedBy != null) {
+                if (port == BASE_PORT) {
                     logger?.w(
-                        "[!] Listener module ${listener.moduleId} exists, but the container could not " +
-                            "reach/authenticate $server"
+                        "[!] Port $port is reserved by DroidSpaces TCP port-forward in $reservedBy; " +
+                            "selecting another audio port automatically"
                     )
-                    if (listener.createdNow) unloadListener(owner, listener.moduleId, logger)
-                    logger?.w("[!] Rejecting audio endpoint candidate $endpoint")
-                    continue@endpointLoop
                 }
-
-                if (alreadyConfigured) {
-                    logger?.i("[+] Persistent container audio client already configured")
-                }
-                if (port != BASE_PORT) logger?.i("[+] Selected audio port: $port")
-                logger?.i("[+] Authenticated PulseAudio listener ready on $endpoint:$port")
-                FixSettings.setPulseAudioApplied(context, containerName, true)
-                logger?.i("[+] Audio ready (${listener.sink}, $server)")
-                return@withContext true
+                continue
             }
+
+            val listener = loadOrReuseListener(
+                owner = owner,
+                ip = endpoint,
+                port = port,
+                expectedSink = sink,
+                logger = logger,
+                emitFullFailure = !firstLoadFailureLogged
+            )
+
+            if (listener == null) {
+                firstLoadFailureLogged = true
+                if (port == BASE_PORT) {
+                    logger?.w(
+                        "[!] Port $port could not load an authenticated listener on $endpoint; " +
+                            "selecting another audio port automatically"
+                    )
+                }
+                continue
+            }
+
+            val server = "tcp:$endpoint:$port"
+            val alreadyConfigured = verifyContainerClient(containerName, server)
+            val configured = alreadyConfigured ||
+                installContainerClient(containerName, server, cookieOctal, logger)
+
+            if (!configured) {
+                logger?.w("[!] Container audio client configuration failed for $server")
+                if (listener.createdNow) unloadListener(owner, listener.moduleId, logger)
+                logCoreDiagnostics(owner, logger)
+                return@withContext fail(
+                    logger,
+                    "Listener loaded successfully but the container client could not be configured"
+                )
+            }
+
+            if (!verifyContainerClientDetailed(containerName, server, sink, logger)) {
+                logger?.w(
+                    "[!] Listener module ${listener.moduleId} exists, but the container could not " +
+                        "reach/authenticate $server"
+                )
+                if (listener.createdNow) unloadListener(owner, listener.moduleId, logger)
+                logCoreDiagnostics(owner, logger)
+                return@withContext fail(
+                    logger,
+                    "PulseAudio listener was loaded but the DroidSpaces container data path failed"
+                )
+            }
+
+            if (alreadyConfigured) logger?.i("[+] Persistent container audio client already configured")
+            if (port != BASE_PORT) logger?.i("[+] Selected audio port: $port")
+            logger?.i("[+] Authenticated PulseAudio listener ready on $endpoint:$port")
+            FixSettings.setPulseAudioApplied(context, containerName, true)
+            logger?.i("[+] Audio ready (${listener.sink}, $server)")
+            return@withContext true
         }
 
         logCoreDiagnostics(owner, logger)
         fail(
             logger,
-            "Could not create a verified PulseAudio listener on any endpoint " +
-                "(${endpoints.joinToString(", ")}) using ports $BASE_PORT-$maxPort"
+            "Could not create an authenticated PulseAudio listener on $endpoint " +
+                "using ports $BASE_PORT-$maxPort"
         )
     }
 
@@ -211,9 +210,9 @@ object PulseAudioUnifiedTransport {
     }
 
     /**
-     * Run a command as the Termux UID but keep all PulseAudio control on the
-     * private UNIX socket. The command is executed in a subshell so explicit
-     * `exit` calls do not suppress the synthetic exit-code marker.
+     * Run as the Termux UID while keeping control on the already-running core's
+     * private UNIX socket. Changing UID does not intentionally enter a network
+     * namespace here.
      */
     private fun execAsTermux(owner: TermuxOwner, command: String): DirectResult {
         val marker = "__SAAS_DIRECT_RC__"
@@ -298,13 +297,6 @@ object PulseAudioUnifiedTransport {
         logger: ContainerLogger?,
         emitFullFailure: Boolean
     ): Listener? {
-        if (emitFullFailure && !hostOwnsIpv4(ip)) {
-            logger?.w(
-                "[PA-LOAD] Android address inspection did not list endpoint $ip; " +
-                    "attempting the exact PulseAudio bind anyway"
-            )
-        }
-
         val before = unixPactl(owner, "list short modules")
         if (before.exitCode != 0) {
             if (emitFullFailure) {
@@ -354,20 +346,23 @@ object PulseAudioUnifiedTransport {
         val verified = findListenerModule(after.stdout, ip, port, requiredId = id)
         if (verified != id) {
             logger?.w("[PA-MODULE] id=$id was returned but is missing from the server module table")
-            logLines(logger, "[PA-MODULE]", after.stdout.filter { it.contains("module-native-protocol-tcp") })
+            logLines(
+                logger,
+                "[PA-MODULE]",
+                after.stdout.filter { it.contains("module-native-protocol-tcp") }
+            )
             unloadListener(owner, id, logger)
             if (emitFullFailure) logCoreDiagnostics(owner, logger)
             return null
         }
 
-        val moduleLine = after.stdout.firstOrNull { line ->
+        after.stdout.firstOrNull { line ->
             val fields = line.trim().split(Regex("""\s+"""), limit = 3)
             fields.getOrNull(0) == id.toString() &&
                 fields.getOrNull(1) == "module-native-protocol-tcp"
-        }
-        if (moduleLine != null) logger?.i("[PA-MODULE] $moduleLine")
-        logger?.i("[+] PulseAudio listener module loaded: id=$id endpoint=$ip:$port")
+        }?.let { logger?.i("[PA-MODULE] $it") }
 
+        logger?.i("[+] PulseAudio listener module loaded: id=$id endpoint=$ip:$port")
         return Listener(port, id, expectedSink, createdNow = true)
     }
 
@@ -382,8 +377,7 @@ object PulseAudioUnifiedTransport {
             val id = fields.getOrNull(0)?.toIntOrNull() ?: continue
             if (requiredId != null && id != requiredId) continue
             if (fields.getOrNull(1) != "module-native-protocol-tcp") continue
-            val args = fields.getOrNull(2).orEmpty()
-            val tokens = args.split(Regex("""\s+""")).toSet()
+            val tokens = fields.getOrNull(2).orEmpty().split(Regex("""\s+""")).toSet()
             if ("listen=$ip" in tokens && "port=$port" in tokens) return id
         }
         return null
@@ -441,11 +435,41 @@ object PulseAudioUnifiedTransport {
             .forEach { logger?.w("$prefix $it") }
     }
 
-    private suspend fun discoverNatEndpoints(
+    /**
+     * DroidSpaces v6.5.0 defines 172.28.0.1 as the NAT gateway in both:
+     * - full bridge: ds-br0 owns 172.28.0.1/16;
+     * - bridgeless fallback: ds-v<PID> owns 172.28.0.1/32.
+     *
+     * Prefer the live container route so future compatible DroidSpaces layouts
+     * can still work. If route inspection is unavailable, use the v6.5.0
+     * canonical gateway. Host address enumeration is intentionally not a gate:
+     * the exact PulseAudio bind is the authoritative local-address test.
+     */
+    private suspend fun resolveNatEndpoint(
         info: ContainerInfo,
         logger: ContainerLogger?
-    ): List<String> {
-        val pid = info.pid ?: return emptyList()
+    ): String? {
+        val discovered = discoverContainerDefaultGateway(info)
+        if (usableIpv4(discovered)) {
+            logger?.i("[CTX] NAT route gateway: $discovered")
+            if (discovered != DROIDSPACES_NAT_GATEWAY) {
+                logger?.w(
+                    "[!] NAT gateway differs from DroidSpaces v6.5.0 canonical " +
+                        "$DROIDSPACES_NAT_GATEWAY; using the live route value"
+                )
+            }
+            return discovered
+        }
+
+        logger?.w(
+            "[!] Live NAT route was not readable; using DroidSpaces v6.5.0 " +
+                "gateway $DROIDSPACES_NAT_GATEWAY"
+        )
+        return DROIDSPACES_NAT_GATEWAY
+    }
+
+    private fun discoverContainerDefaultGateway(info: ContainerInfo): String {
+        val pid = info.pid ?: return ""
         val busybox = "${Constants.DS_BASE_DIR}/bin/busybox"
         val command = """
             pid=$pid
@@ -470,122 +494,97 @@ object PulseAudioUnifiedTransport {
                         ;;
                 esac
             fi
-
-            if [ -x /system/bin/ip ]; then
-                host_lines=${'$'}(/system/bin/ip -4 -o addr show 2>/dev/null)
-            elif [ -x ${q(busybox)} ]; then
-                host_lines=${'$'}(${q(busybox)} ip -4 -o addr show 2>/dev/null)
-            else
-                host_lines=${'$'}(ip -4 -o addr show 2>/dev/null || true)
-            fi
-
-            printf 'GW=%s\n' "${'$'}gw"
-            printf '%s\n' "${'$'}host_lines" |
-                while read idx ifc fam cidr rest; do
-                    [ "${'$'}fam" = inet ] || continue
-                    ip=${'$'}{cidr%/*}
-                    ifc=${'$'}{ifc%%@*}
-                    case "${'$'}ip" in
-                        172.28.*) printf 'HOST=%s|%s\n' "${'$'}ifc" "${'$'}ip" ;;
-                    esac
-                done
+            printf '%s\n' "${'$'}gw"
         """.trimIndent()
 
-        val lines = try {
-            Shell.cmd(command).exec().out.map { it.trim() }.filter { it.isNotEmpty() }
+        return try {
+            Shell.cmd(command).exec().out.firstOrNull()?.trim().orEmpty()
         } catch (_: Exception) {
-            emptyList()
+            ""
         }
-
-        val gateway = lines.firstOrNull { it.startsWith("GW=") }
-            ?.removePrefix("GW=")
-            .orEmpty()
-
-        val hostCandidates = lines.asSequence()
-            .filter { it.startsWith("HOST=") }
-            .mapNotNull { line ->
-                val value = line.removePrefix("HOST=")
-                val separator = value.indexOf('|')
-                if (separator <= 0 || separator == value.lastIndex) return@mapNotNull null
-                val ifName = value.substring(0, separator)
-                val ip = value.substring(separator + 1)
-                if (!validIpv4(ip)) return@mapNotNull null
-                ifName to ip
-            }
-            .distinct()
-            .toList()
-
-        val exactInterface = "ds-v$pid"
-        val gatewayOwned =
-            validIpv4(gateway) &&
-                (hostCandidates.any { it.second == gateway } || hostOwnsIpv4(gateway))
-
-        val endpoints = linkedSetOf<String>()
-
-        hostCandidates.asSequence()
-            .filter { it.first == exactInterface }
-            .map { it.second }
-            .forEach(endpoints::add)
-
-        if (gatewayOwned) endpoints.add(gateway)
-
-        hostCandidates.asSequence()
-            .map { it.second }
-            .forEach(endpoints::add)
-
-        if (validIpv4(gateway) && gateway !in endpoints) {
-            logger?.w(
-                "[!] NAT gateway $gateway is not present in the Android IPv4 list; " +
-                    "keeping it as a final exact-bind candidate"
-            )
-            endpoints.add(gateway)
-        }
-
-        if (endpoints.isEmpty() && hostOwnsIpv4("172.28.0.1")) {
-            logger?.w(
-                "[!] Live NAT topology was incomplete; using verified DroidSpaces endpoint 172.28.0.1"
-            )
-            endpoints.add("172.28.0.1")
-        }
-
-        if (validIpv4(gateway)) {
-            logger?.i("[CTX] NAT route gateway: $gateway")
-        } else {
-            logger?.w("[!] Container default NAT gateway could not be read")
-        }
-
-        if (hostCandidates.isNotEmpty()) {
-            logger?.i(
-                "[CTX] Android-owned DroidSpaces IPv4: " +
-                    hostCandidates.joinToString(", ") { "${it.first}=${it.second}" }
-            )
-        } else {
-            logger?.w("[!] No Android-owned 172.28.x.x address was visible during NAT discovery")
-        }
-
-        return endpoints.toList()
     }
 
-    private fun hostOwnsIpv4(ip: String): Boolean {
-        if (!validIpv4(ip)) return false
-        if (ip == "127.0.0.1") return true
+    /** Diagnostic only. Never blocks listener creation. */
+    private suspend fun logNatEndpointDiagnostics(
+        endpoint: String,
+        logger: ContainerLogger?
+    ) {
         val busybox = "${Constants.DS_BASE_DIR}/bin/busybox"
         val command = """
-            ip=${q(ip)}
+            endpoint=${q(endpoint)}
+            found=''
             if [ -x /system/bin/ip ]; then
-                out=${'$'}(/system/bin/ip -4 -o addr show 2>/dev/null)
-            elif [ -x ${q(busybox)} ]; then
-                out=${'$'}(${q(busybox)} ip -4 -o addr show 2>/dev/null)
-            else
-                out=${'$'}(ip -4 -o addr show 2>/dev/null || true)
+                found=${'$'}(/system/bin/ip -4 -o addr show 2>/dev/null |
+                    grep -F " inet ${'$'}endpoint/" | sed -n '1p' || true)
             fi
-            printf '%s\n' "${'$'}out" | grep -Eq "[[:space:]]inet[[:space:]]${'$'}ip/"
+            if [ -z "${'$'}found" ] && [ -x ${q(busybox)} ]; then
+                found=${'$'}(${q(busybox)} ip -4 -o addr show 2>/dev/null |
+                    grep -F " inet ${'$'}endpoint/" | sed -n '1p' || true)
+            fi
+            if [ -z "${'$'}found" ] && command -v ip >/dev/null 2>&1; then
+                found=${'$'}(ip -4 -o addr show 2>/dev/null |
+                    grep -F " inet ${'$'}endpoint/" | sed -n '1p' || true)
+            fi
+
+            core_pid=${'$'}(sed -n 's/^pid=//p' ${q(CORE_PID_FILE)} 2>/dev/null | sed -n '1p')
+            case "${'$'}core_pid" in ''|*[!0-9]*) core_pid='' ;; esac
+            host_net=${'$'}(readlink /proc/1/ns/net 2>/dev/null || true)
+            core_net=''
+            [ -n "${'$'}core_pid" ] && core_net=${'$'}(readlink "/proc/${'$'}core_pid/ns/net" 2>/dev/null || true)
+            nonlocal=${'$'}(cat /proc/sys/net/ipv4/ip_nonlocal_bind 2>/dev/null || printf '?')
+
+            printf 'ADDR=%s\n' "${'$'}found"
+            printf 'HOST_NETNS=%s\n' "${'$'}host_net"
+            printf 'CORE_PID=%s\n' "${'$'}core_pid"
+            printf 'CORE_NETNS=%s\n' "${'$'}core_net"
+            printf 'IP_NONLOCAL_BIND=%s\n' "${'$'}nonlocal"
         """.trimIndent()
-        return try {
-            Shell.cmd(command).exec().isSuccess
+
+        val result = try {
+            Shell.cmd(command).exec()
         } catch (_: Exception) {
-            false
+            null
         }
+
+        val lines = result?.out.orEmpty()
+        val address = lines.firstOrNull { it.startsWith("ADDR=") }
+            ?.removePrefix("ADDR=")
+            .orEmpty()
+        val hostNet = lines.firstOrNull { it.startsWith("HOST_NETNS=") }
+            ?.removePrefix("HOST_NETNS=")
+            .orEmpty()
+        val corePid = lines.firstOrNull { it.startsWith("CORE_PID=") }
+            ?.removePrefix("CORE_PID=")
+            .orEmpty()
+        val coreNet = lines.firstOrNull { it.startsWith("CORE_NETNS=") }
+            ?.removePrefix("CORE_NETNS=")
+            .orEmpty()
+        val nonlocal = lines.firstOrNull { it.startsWith("IP_NONLOCAL_BIND=") }
+            ?.removePrefix("IP_NONLOCAL_BIND=")
+            .orEmpty()
+
+        if (address.isNotBlank()) {
+            logger?.i("[CTX] Android endpoint observation: $address")
+        } else {
+            logger?.w(
+                "[!] Android address enumeration did not show $endpoint; " +
+                    "the exact PulseAudio bind will be authoritative"
+            )
+        }
+
+        if (corePid.isNotBlank()) logger?.i("[CTX] PulseAudio core PID: $corePid")
+        if (hostNet.isNotBlank() || coreNet.isNotBlank()) {
+            logger?.i(
+                "[CTX] Network namespace: host=${hostNet.ifBlank { "unknown" }} " +
+                    "core=${coreNet.ifBlank { "unknown" }}"
+            )
+        }
+        if (nonlocal.isNotBlank()) logger?.i("[CTX] IPv4 ip_nonlocal_bind: $nonlocal")
+    }
+
+    private fun usableIpv4(value: String): Boolean {
+        if (!validIpv4(value)) return false
+        return value != "0.0.0.0" && value != "255.255.255.255"
     }
 
     private fun validIpv4(value: String): Boolean {
