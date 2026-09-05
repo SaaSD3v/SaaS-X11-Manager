@@ -10,15 +10,18 @@ internal enum class AlpineInstallProfile {
 /**
  * Applies the shared Alpine graphical base dependencies and holds the optional
  * desktop integration profile only while one install/reinstall is running.
- * Every Alpine graphical plan gets DBus support; FULL adds a small,
- * distro-native desktop integration bundle without adding an X server, display
- * manager or audio stack.
+ * Every Alpine graphical plan gets DBus and lightweight X11 client utilities;
+ * FULL adds a small distro-native desktop integration bundle without adding an
+ * X server, display manager or audio stack.
  */
 internal object AlpineInstallProfileOverride {
 
     internal val baseX11Packages = listOf(
         "dbus",
-        "dbus-x11"
+        "dbus-x11",
+        "xauth",
+        "xrandr",
+        "xset"
     )
 
     internal val fullDesktopPackages = listOf(
