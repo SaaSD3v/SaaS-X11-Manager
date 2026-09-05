@@ -58,22 +58,38 @@ class TerminalLogPresentationTest {
     }
 
     @Test
-    fun droidSpacesStartupIsSummarizedButImportantWarningsRemain() {
+    fun droidSpacesStartupBlockStaysOutOfSimpleViewAndLifecycleRemainsClear() {
         val raw = """
             Welcome to Droidspaces v6.5.0 !
             WARNING: PRIVILEGED MODE ACTIVE - DEVICE SECURITY COMPROMISED
             [!] Your kernel (3.18) is below recommended 4.14 - some functions might be unstable.
+            [!] Using legacy Cgroup V1 hierarchy (forced by --force-cgroupv1)
             Container: SaaS (RUNNING)
               OS: Debian GNU/Linux 13 (trixie)
               NAT IP: 172.28.12.12
             [+] Container 'SaaS' is running in background.
         """.trimIndent()
+        val logs = listOf(
+            4 to "[*] Starting container...",
+            4 to raw,
+            4 to "[+] Container runtime active (PID=47588)"
+        )
 
-        val simple = presentTerminalLogs(listOf(4 to raw), showDetails = false).map { it.second }
+        val simple = presentTerminalLogs(logs, showDetails = false).map { it.second }
 
-        assertTrue(simple.contains("[CONTAINER] ✓ SaaS running · Debian GNU/Linux 13 (trixie) · NAT 172.28.12.12"))
-        assertTrue(simple.any { it.contains("PRIVILEGED MODE ACTIVE") })
-        assertTrue(simple.any { it.contains("kernel (3.18)") })
-        assertFalse(simple.any { it.contains("Welcome to Droidspaces") })
+        assertEquals(
+            listOf(
+                "[CONTAINER] Starting container",
+                "[CONTAINER] ✓ Container started"
+            ),
+            simple
+        )
+        assertFalse(simple.any { it.contains("Droidspaces") })
+        assertFalse(simple.any { it.contains("PRIVILEGED MODE ACTIVE") })
+        assertFalse(simple.any { it.contains("kernel (3.18)") })
+        assertFalse(simple.any { it.contains("Cgroup V1") })
+        assertFalse(simple.any { it.contains("Debian GNU/Linux") })
+        assertFalse(simple.any { it.contains("172.28.12.12") })
+        assertEquals(logs, presentTerminalLogs(logs, showDetails = true))
     }
 }
