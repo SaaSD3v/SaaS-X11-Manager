@@ -18,7 +18,9 @@ class GraphicSessionInstallPlansTest {
         assertEquals("startxfce4", plan.verificationCommand)
         assertFalse(plan.installRecommendedPackages)
         assertTrue(plan.packages.containsAll(listOf(
+            "dbus",
             "dbus-x11",
+            "x11-xserver-utils",
             "libxfce4ui-utils",
             "thunar",
             "xfce4-appfinder",
@@ -43,7 +45,10 @@ class GraphicSessionInstallPlansTest {
         assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
         assertEquals("startlxqt", plan.verificationCommand)
         assertFalse(plan.installRecommendedPackages)
-        assertEquals(listOf("dbus-x11", "lxqt-core", "openbox"), plan.packages)
+        assertEquals(
+            listOf("dbus", "dbus-x11", "x11-xserver-utils", "lxqt-core", "openbox"),
+            plan.packages
+        )
         assertSafeAptPlan(plan)
     }
 
@@ -56,7 +61,17 @@ class GraphicSessionInstallPlansTest {
 
         assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
         assertEquals("openbox-session", plan.verificationCommand)
-        assertEquals(listOf("openbox", "xterm", "fonts-terminus"), plan.packages)
+        assertEquals(
+            listOf(
+                "dbus",
+                "dbus-x11",
+                "x11-xserver-utils",
+                "openbox",
+                "xterm",
+                "fonts-terminus"
+            ),
+            plan.packages
+        )
         assertFalse(plan.installRecommendedPackages)
         assertSafeAptPlan(plan)
 
@@ -82,7 +97,10 @@ class GraphicSessionInstallPlansTest {
 
         assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
         assertEquals("icewm-session", plan.verificationCommand)
-        assertEquals(listOf("icewm", "xterm"), plan.packages)
+        assertEquals(
+            listOf("dbus", "dbus-x11", "x11-xserver-utils", "icewm", "xterm"),
+            plan.packages
+        )
         assertFalse(plan.installRecommendedPackages)
         assertSafeAptPlan(plan)
     }
@@ -96,7 +114,10 @@ class GraphicSessionInstallPlansTest {
 
         assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
         assertEquals("jwm", plan.verificationCommand)
-        assertEquals(listOf("jwm", "xterm"), plan.packages)
+        assertEquals(
+            listOf("dbus", "dbus-x11", "x11-xserver-utils", "jwm", "xterm"),
+            plan.packages
+        )
         assertFalse(plan.installRecommendedPackages)
         assertSafeAptPlan(plan)
     }
@@ -181,6 +202,20 @@ class GraphicSessionInstallPlansTest {
         assertEquals(listOf("jwm", "xterm"), plan.packages)
         assertTrue(plan.installRecommendedPackages)
         assertNoDisplayManager(plan)
+    }
+
+    @Test
+    fun everyAptGraphicPlanIncludesSharedX11BaseDependencies() {
+        val required = setOf("dbus", "dbus-x11", "x11-xserver-utils")
+
+        GraphicSession.entries.forEach { session ->
+            GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, session)?.let { plan ->
+                assertTrue(
+                    "${session.name} is missing shared APT X11 base dependencies",
+                    plan.packages.containsAll(required)
+                )
+            }
+        }
     }
 
     @Test
