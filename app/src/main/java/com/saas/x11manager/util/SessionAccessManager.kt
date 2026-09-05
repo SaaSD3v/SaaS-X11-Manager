@@ -120,25 +120,19 @@ object SessionAccessManager {
         containerName: String,
         logger: ContainerLogger?
     ) {
-        // HOST remains on the physically validated unified finalizer.
-        // NAT first validates the Android-side endpoint/port ownership so a
-        // stale Manager core cannot race the exact 172.28.0.1:4713 listener.
+        // HOST stays on the already physically validated path. NAT deliberately
+        // follows the physically validated v3.2 shell implementation instead of
+        // the retired diagnostic/preflight stack.
         val mode = ContainerManager.getContainerInfo(containerName)
             ?.netMode
             ?.trim()
             ?.lowercase()
 
         if (mode == "nat") {
-            logger?.i("[CTX] NAT audio finalizer: host readiness -> validated listener -> container client")
-            if (PulseAudioNatHostReadiness.prepare(logger)) {
-                PulseAudioNatPreflight.finalizeAfterContainerReady(
-                    containerName = containerName,
-                    logger = logger
-                )
-            } else {
-                logger?.w("[!] NAT host listener readiness failed; audio finalization was not attempted")
-                logger?.w("[!] Graphical startup will continue")
-            }
+            PulseAudioNatScriptTransport.finalizeAfterContainerReady(
+                containerName = containerName,
+                logger = logger
+            )
         } else {
             PulseAudioUnifiedTransport.finalizeAfterContainerReady(
                 containerName = containerName,
