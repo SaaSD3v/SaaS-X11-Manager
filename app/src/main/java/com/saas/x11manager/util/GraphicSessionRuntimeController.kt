@@ -23,7 +23,7 @@ internal object GraphicSessionRuntimeController {
     ): String {
         val expectedSocket = "/tmp/.X11-unix/X${displaySlot.number}"
         val requireWayland = if (requireWaylandSocket) "1" else "0"
-        return "expected=${shellQuote(expectedSocket)}; require_wayland=$requireWayland; " +
+        return "expected=${shellQuote(expectedSocket)}; display=${shellQuote(displaySlot.displayName)}; require_wayland=$requireWayland; " +
             "{ " +
             "if command -v systemctl >/dev/null 2>&1 && " +
             "test -f /etc/systemd/system/x11-session.service; then " +
@@ -60,44 +60,41 @@ internal object GraphicSessionRuntimeController {
             "elif command -v rc-service >/dev/null 2>&1 && " +
             "test -x /etc/init.d/x11-session; then " +
             "printf '%s\\n' '${INIT_MARKER}openrc'; " +
-            "if [ -L /etc/runlevels/default/x11-session ]; then " +
-            "rm -f /etc/runlevels/default/x11-session; " +
-            "printf '%s\\n' '${ACTION_MARKER}boot-autostart-removed'; fi; " +
             "setup_exit=0; " +
             "rc-service x11-setup start >/dev/null 2>&1 || setup_exit=\$?; " +
             "printf '%s\\n' \"${ACTION_MARKER}socket-setup-exit=\$setup_exit\"; " +
             "if test -S \"\$expected\"; then " +
             "printf '%s\\n' '${ACTION_MARKER}socket-visible'; " +
             "else printf '%s\\n' '${ACTION_MARKER}socket-not-visible'; fi; " +
+            "if ! command -v xset >/dev/null 2>&1; then " +
+            "printf '%s\\n' '${ACTION_MARKER}x11-client-tool-missing'; " +
+            "printf '%s\\n' '${DIAG_MARKER}xset is unavailable inside the container; the Manager cannot verify the X11 transport'; " +
+            "exit 127; fi; " +
+            "x11_client_ready=0; attempt=0; " +
+            "while [ \"\$attempt\" -lt 10 ]; do " +
+            "if DISPLAY=\"\$display\" xset q >/dev/null 2>&1; then x11_client_ready=1; break; fi; " +
+            "attempt=\$((attempt + 1)); sleep 1; done; " +
+            "if [ \"\$x11_client_ready\" -eq 1 ]; then " +
+            "printf '%s\\n' '${ACTION_MARKER}x11-client-ready'; " +
+            "else " +
+            "printf '%s\\n' '${ACTION_MARKER}x11-client-not-ready'; " +
+            "printf '%s\\n' \"${DIAG_MARKER}X11 socket exists but an X11 client handshake failed on \$display\"; " +
+            "printf '%s\\n' \"${DIAG_MARKER}expected socket: \$expected\"; " +
+            "probe_output=\$(DISPLAY=\"\$display\" xset q 2>&1 || true); " +
+            "[ -n \"\$probe_output\" ] && printf '%s\\n' \"${DIAG_MARKER}xset: \$probe_output\"; " +
+            "exit 1; fi; " +
             "ready=0; " +
             "if rc-service x11-session status >/dev/null 2>&1; then " +
             "printf '%s\\n' '${ACTION_MARKER}already-active'; ready=1; " +
-            "elif [ -r /run/x11-session.pid ]; then " +
-            "session_pid=\$(cat /run/x11-session.pid 2>/dev/null || true); " +
-            "case \"\$session_pid\" in ''|*[!0-9]*) ;; *) " +
-            "if kill -0 \"\$session_pid\" 2>/dev/null; then " +
-            "printf '%s\\n' '${ACTION_MARKER}pid-active'; ready=1; fi ;; esac; " +
-            "fi; " +
-            "if [ \"\$ready\" -eq 0 ]; then " +
-            "status_text=\$(rc-service x11-session status 2>&1 || true); " +
-            "case \"\$status_text\" in *crashed*) " +
-            "rc-service x11-session zap >/dev/null 2>&1 || true; " +
-            "printf '%s\\n' '${ACTION_MARKER}crashed-reset' ;; " +
-            "*) rc-service x11-session zap >/dev/null 2>&1 || true; " +
-            "printf '%s\\n' '${ACTION_MARKER}service-state-reset' ;; esac; " +
-            "rm -f /run/x11-session.pid 2>/dev/null || true; " +
+            "else " +
             "printf '%s\\n' '${ACTION_MARKER}start-requested'; " +
-            "start_exit=0; rc-service x11-session start >/dev/null 2>&1 || start_exit=\$?; " +
+            "start_output=\$(rc-service x11-session start 2>&1); start_exit=\$?; " +
             "printf '%s\\n' \"${ACTION_MARKER}start-exit=\$start_exit\"; " +
+            "[ -n \"\$start_output\" ] && printf '%s\\n' \"${DIAG_MARKER}openrc start: \$start_output\"; " +
             "fi; " +
             "attempt=0; " +
             "while [ \"\$ready\" -eq 0 ] && [ \"\$attempt\" -lt 10 ]; do " +
             "if rc-service x11-session status >/dev/null 2>&1; then ready=1; break; fi; " +
-            "if [ -r /run/x11-session.pid ]; then " +
-            "session_pid=\$(cat /run/x11-session.pid 2>/dev/null || true); " +
-            "case \"\$session_pid\" in ''|*[!0-9]*) ;; *) " +
-            "if kill -0 \"\$session_pid\" 2>/dev/null; then " +
-            "printf '%s\\n' '${ACTION_MARKER}pid-active'; ready=1; break; fi ;; esac; fi; " +
             "attempt=\$((attempt + 1)); sleep 1; " +
             "done; " +
             "if [ \"\$ready\" -eq 1 ]; then " +
@@ -107,9 +104,9 @@ internal object GraphicSessionRuntimeController {
             "printf '%s\\n' \"${DIAG_MARKER}socket visible: \$(test -S \"\$expected\" && echo yes || echo no)\"; " +
             "status_text=\$(rc-service x11-session status 2>&1 || true); " +
             "printf '%s\\n' \"${DIAG_MARKER}service status: \$status_text\"; " +
-            "if [ -r /run/x11-session.pid ]; then " +
-            "printf '%s\\n' \"${DIAG_MARKER}pidfile: \$(cat /run/x11-session.pid 2>/dev/null || true)\"; " +
-            "else printf '%s\\n' '${DIAG_MARKER}pidfile: absent'; fi; false; fi; " +
+            "probe_output=\$(DISPLAY=\"\$display\" xset q 2>&1 || true); " +
+            "[ -n \"\$probe_output\" ] && printf '%s\\n' \"${DIAG_MARKER}xset after session failure: \$probe_output\"; " +
+            "false; fi; " +
             "else echo 'No Manager x11-session service is provisioned' >&2; exit 127; fi; " +
             "}; service_rc=\$?; [ \"\$service_rc\" -eq 0 ] || exit \"\$service_rc\"; " +
             "if [ \"\$require_wayland\" -eq 1 ]; then " +
@@ -135,9 +132,7 @@ internal object GraphicSessionRuntimeController {
             "test -x /etc/init.d/x11-session; then " +
             "printf '%s\\n' '${INIT_MARKER}openrc'; " +
             "if rc-service x11-session status >/dev/null 2>&1; then " +
-            "rc-service x11-session stop; else " +
-            "rc-service x11-session zap >/dev/null 2>&1 || true; " +
-            "rm -f /run/x11-session.pid 2>/dev/null || true; true; fi; " +
+            "rc-service x11-session stop; else true; fi; " +
             "else echo 'No Manager x11-session service is provisioned' >&2; exit 127; fi"
 
     suspend fun ensureRunning(
@@ -172,15 +167,52 @@ internal object GraphicSessionRuntimeController {
         }
         logger?.i("[*] Ensuring ${configuredSession.label} session on ${displaySlot.describe()}...")
         val startedAt = System.nanoTime()
-        val result = runContainerCommand(
+        var result = runContainerCommand(
             containerName,
             buildStartCommand(
                 displaySlot = displaySlot,
                 requireWaylandSocket = configuredSession.protocol == GraphicProtocol.WAYLAND
             )
         )
-        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L
         logRuntimeMarkers(result.out, logger)
+
+        val transportHandshakeFailed = result.out.any {
+            it.trim() == "${ACTION_MARKER}x11-client-not-ready"
+        }
+        if (transportHandshakeFailed) {
+            logger?.w(
+                "[!] ${displaySlot.describe()} has a process/socket but rejected a real X11 client; " +
+                    "restarting only this Manager X11 server once"
+            )
+            val stopped = X11SessionManager.stopIntegratedServer(displaySlot, logger)
+            if (stopped) {
+                val restarted = X11SessionManager.startIntegratedServer(
+                    displaySlot = displaySlot,
+                    containerName = containerName,
+                    logger = logger
+                )
+                if (restarted.isSuccess) {
+                    logger?.i("[*] Retrying ${configuredSession.label} after X11 transport restart...")
+                    result = runContainerCommand(
+                        containerName,
+                        buildStartCommand(
+                            displaySlot = displaySlot,
+                            requireWaylandSocket = configuredSession.protocol == GraphicProtocol.WAYLAND
+                        )
+                    )
+                    logRuntimeMarkers(result.out, logger)
+                } else {
+                    logger?.w(
+                        "[!] X11 transport restart failed: " +
+                            (restarted.exceptionOrNull()?.message ?: "unknown error")
+                    )
+                }
+            } else {
+                logger?.w("[!] Could not restart the unusable ${displaySlot.describe()} transport")
+            }
+        }
+
+        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L
         logger?.i("[CTX] Controller exit code: ${result.code}")
         logger?.i("[CTX] Synchronization duration: ${elapsedMs}ms")
 
@@ -192,8 +224,8 @@ internal object GraphicSessionRuntimeController {
             true
         } else {
             logger?.w(
-                "[!] ${displaySlot.describe()} is ready, but ${configuredSession.label} " +
-                    "could not be confirmed active (exit ${result.code})"
+                "[!] ${configuredSession.label} could not be confirmed active on " +
+                    "${displaySlot.describe()} (exit ${result.code})"
             )
             logFailureDiagnostics(result.out, result.err, logger)
             false
@@ -273,20 +305,18 @@ internal object GraphicSessionRuntimeController {
                     logger?.w("[!] X11 transport socket setup service returned ${action.substringAfter('=')}")
                 action == "socket-visible" ->
                     logger?.i("[+] Expected container X11 transport socket is visible")
+                action == "x11-client-ready" ->
+                    logger?.i("[+] Container completed a real X11 client handshake")
+                action == "x11-client-not-ready" ->
+                    logger?.w("[!] X11 socket is visible, but a real X11 client cannot connect")
+                action == "x11-client-tool-missing" ->
+                    logger?.w("[!] xset is missing; X11 client readiness cannot be verified")
                 action == "wayland-visible" ->
                     logger?.i("[+] Wayland compositor socket is visible")
                 action == "wayland-not-visible" ->
                     logger?.w("[!] Wayland compositor socket did not appear")
                 action == "already-active" ->
                     logger?.i("[+] Graphic session service was already active; preserving it")
-                action == "boot-autostart-removed" ->
-                    logger?.i("[+] Removed legacy OpenRC boot autostart for the graphical session")
-                action == "crashed-reset" ->
-                    logger?.w("[!] Reset crashed OpenRC graphical session state before retry")
-                action == "service-state-reset" ->
-                    logger?.i("[+] Reset inactive OpenRC graphical session state before start")
-                action == "pid-active" ->
-                    logger?.i("[+] Graphic session process confirmed alive by its OpenRC pidfile")
                 action == "start-requested" ->
                     logger?.i("[*] Graphic session service was inactive; start requested")
                 action.startsWith("start-exit=") && action != "start-exit=0" ->
