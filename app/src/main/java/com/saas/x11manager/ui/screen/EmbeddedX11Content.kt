@@ -47,70 +47,81 @@ internal fun EmbeddedX11Surface(
     modifier: Modifier = Modifier,
     onConnectionChanged: (Boolean) -> Unit
 ) {
-    AndroidView(
-        modifier = modifier,
-        factory = { context ->
-            LorieView(context).apply {
-                val stylusInput = EmbeddedStylusInputController(this)
-                val touchInput = EmbeddedTouchInputController(this)
-
-                setZOrderOnTop(false)
-                setZOrderMediaOverlay(false)
-                isFocusable = true
-                isFocusableInTouchMode = true
-                setCallback { screenWidth, screenHeight, inputTransform ->
-                    EmbeddedDisplayHost.updateInputTransform(
-                        this,
-                        screenWidth,
-                        screenHeight,
-                        inputTransform
-                    )
-                    stylusInput.updateInputTransform(
-                        screenWidth,
-                        screenHeight,
-                        inputTransform
-                    )
-                    touchInput.updateInputTransform(
-                        screenWidth,
-                        screenHeight,
-                        inputTransform
-                    )
-                    onConnectionChanged(connected())
-                }
-
-                fun routeMotion(event: android.view.MotionEvent): Boolean = when {
-                    stylusInput.handles(event) -> stylusInput.handle(event)
-                    touchInput.handles(event) -> touchInput.handle(event)
-                    else -> EmbeddedDisplayHost.handleMotion(this, event)
-                }
-
-                setOnTouchListener { _, event -> routeMotion(event) }
-                setOnHoverListener { _, event -> routeMotion(event) }
-                setOnGenericMotionListener { _, event -> routeMotion(event) }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    setOnCapturedPointerListener { _, event -> routeMotion(event) }
-                }
-                setOnKeyListener { _, _, event ->
-                    connected() && EmbeddedDisplayHost.handleKey(this, event)
-                }
-                requestFocus()
+    // LorieView owns native renderer/X-connection state. Reusing the same native
+    // view while changing :0 -> :1 (or back) can leave Android reporting a live
+    // connection to the previously selected server. Give every selected display
+    // a fresh native view lifecycle instead. The X servers themselves remain
+    // running and their Binder endpoints stay registered in EmbeddedDisplayHost.
+    key(displayName) {
+        AndroidView(
+            modifier = modifier,
+            factory = { context ->
+                // Select before constructing LorieView. Its embedded host attach
+                // happens from LorieView.init(), so the very first connection
+                // attempt must already target the requested display.
                 EmbeddedDisplayHost.selectDisplay(displayName)
-                EmbeddedDisplayHost.tryConnect()
-                scheduleEmbeddedSurfaceResync(this)
-            }
-        },
-        update = { view ->
-            val selectedChanged = EmbeddedDisplayHost.getSelectedDisplay() != displayName
-            if (selectedChanged) {
-                onConnectionChanged(false)
-                EmbeddedDisplayHost.selectDisplay(displayName)
-            }
 
-            val connected = view.connected()
-            onConnectionChanged(connected)
-            if (!connected) EmbeddedDisplayHost.tryConnect()
-        }
-    )
+                LorieView(context).apply {
+                    val stylusInput = EmbeddedStylusInputController(this)
+                    val touchInput = EmbeddedTouchInputController(this)
+
+                    setZOrderOnTop(false)
+                    setZOrderMediaOverlay(false)
+                    isFocusable = true
+                    isFocusableInTouchMode = true
+                    setCallback { screenWidth, screenHeight, inputTransform ->
+                        EmbeddedDisplayHost.updateInputTransform(
+                            this,
+                            screenWidth,
+                            screenHeight,
+                            inputTransform
+                        )
+                        stylusInput.updateInputTransform(
+                            screenWidth,
+                            screenHeight,
+                            inputTransform
+                        )
+                        touchInput.updateInputTransform(
+                            screenWidth,
+                            screenHeight,
+                            inputTransform
+                        )
+                        onConnectionChanged(connected())
+                    }
+
+                    fun routeMotion(event: android.view.MotionEvent): Boolean = when {
+                        stylusInput.handles(event) -> stylusInput.handle(event)
+                        touchInput.handles(event) -> touchInput.handle(event)
+                        else -> EmbeddedDisplayHost.handleMotion(this, event)
+                    }
+
+                    setOnTouchListener { _, event -> routeMotion(event) }
+                    setOnHoverListener { _, event -> routeMotion(event) }
+                    setOnGenericMotionListener { _, event -> routeMotion(event) }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        setOnCapturedPointerListener { _, event -> routeMotion(event) }
+                    }
+                    setOnKeyListener { _, _, event ->
+                        connected() && EmbeddedDisplayHost.handleKey(this, event)
+                    }
+                    requestFocus()
+                    EmbeddedDisplayHost.tryConnect()
+                    scheduleEmbeddedSurfaceResync(this)
+                }
+            },
+            update = { view ->
+                val selectedChanged = EmbeddedDisplayHost.getSelectedDisplay() != displayName
+                if (selectedChanged) {
+                    onConnectionChanged(false)
+                    EmbeddedDisplayHost.selectDisplay(displayName)
+                }
+
+                val connected = view.connected()
+                onConnectionChanged(connected)
+                if (!connected) EmbeddedDisplayHost.tryConnect()
+            }
+        )
+    }
 }
 
 /**
