@@ -17,57 +17,53 @@ class PulseAudioNatRoutingPolicyTest {
     }
 
     @Test
-    fun natUsesValidatedListenerHandoffWhileHostKeepsUnifiedFinalizer() {
+    fun natUsesScriptParityTransportWhileHostKeepsValidatedFinalizer() {
         val session = projectFile(
             "app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt"
         ).readText()
 
         assertTrue(session.contains("if (mode == \"nat\")"))
-        assertTrue(session.contains("NAT audio finalizer: host readiness -> validated listener -> container client"))
-        assertTrue(session.contains("PulseAudioNatHostReadiness.prepare"))
-        assertTrue(session.contains("PulseAudioNatPreflight.finalizeAfterContainerReady"))
+        assertTrue(session.contains("PulseAudioNatScriptTransport.finalizeAfterContainerReady"))
         assertTrue(session.contains("PulseAudioUnifiedTransport.finalizeAfterContainerReady"))
+        assertFalse(session.contains("PulseAudioNatHostReadiness"))
+        assertFalse(session.contains("PulseAudioNatPreflight"))
         assertFalse(session.contains("PulseAudioFixManager.finalizeAfterContainerReady"))
     }
 
     @Test
-    fun natHostReadinessIsBoundedToTcpTableAndCurrentManagerPid() {
-        val readiness = projectFile(
-            "app/src/main/java/com/saas/x11manager/util/PulseAudioNatHostReadiness.kt"
+    fun natTransportMirrorsPhysicallyValidatedV32ListenerContract() {
+        val transport = projectFile(
+            "app/src/main/java/com/saas/x11manager/util/PulseAudioNatScriptTransport.kt"
         ).readText()
 
-        assertTrue(readiness.contains("private const val NAT_GATEWAY = \"172.28.0.1\""))
-        assertTrue(readiness.contains("private const val NAT_PORT = 4713"))
-        assertTrue(readiness.contains("/proc/net/tcp"))
-        assertTrue(readiness.contains("processOwnsSocket(currentPid, listener.inode)"))
-        assertTrue(readiness.contains("/proc/\$pid/fd/*"))
-        assertTrue(readiness.contains("global process scanning is intentionally disabled"))
-        assertFalse(readiness.contains("/proc/[0-9]*/fd/*"))
-        assertFalse(readiness.contains("kill \$stalePid"))
-        assertFalse(readiness.contains("kill -9"))
-        assertFalse(readiness.contains("0.0.0.0"))
+        assertTrue(transport.contains("private const val BASE_PORT = 4713"))
+        assertTrue(transport.contains("private const val MAX_PORT_SHIFT = 64"))
+        assertTrue(transport.contains("private const val VERIFIED_FALLBACK_GATEWAY = \"172.28.0.1\""))
+        assertTrue(transport.contains("PULSE_SERVER="))
+        assertTrue(transport.contains("PULSE_COOKIE="))
+        assertTrue(transport.contains("PULSE_CLIENTCONFIG="))
+        assertTrue(transport.contains("load-module module-native-protocol-tcp"))
+        assertTrue(transport.contains("auth-cookie=\$COOKIE"))
+        assertTrue(transport.contains("for (port in BASE_PORT..(BASE_PORT + MAX_PORT_SHIFT))"))
+        assertTrue(transport.contains("list short modules"))
+        assertTrue(transport.contains("unload-module \$moduleId"))
+        assertFalse(transport.contains("auth-anonymous=1"))
+        assertFalse(transport.contains("listen=0.0.0.0"))
+        assertFalse(transport.contains("/proc/[0-9]*/fd/*"))
     }
 
     @Test
-    fun natFinalizerMirrorsValidatedListenerEnvironmentAndVerifiesRealContainer() {
-        val preflight = projectFile(
-            "app/src/main/java/com/saas/x11manager/util/PulseAudioNatPreflight.kt"
+    fun natTransportVerifiesTheRealDroidSpacesContainer() {
+        val transport = projectFile(
+            "app/src/main/java/com/saas/x11manager/util/PulseAudioNatScriptTransport.kt"
         ).readText()
 
-        assertTrue(preflight.contains("private const val NAT_GATEWAY = \"172.28.0.1\""))
-        assertTrue(preflight.contains("private const val SERVER = \"tcp:\$NAT_GATEWAY:\$BASE_PORT\""))
-        assertTrue(preflight.contains("PULSE_SERVER="))
-        assertTrue(preflight.contains("PULSE_COOKIE="))
-        assertTrue(preflight.contains("PULSE_CLIENTCONFIG="))
-        assertTrue(preflight.contains("load-module module-native-protocol-tcp"))
-        assertTrue(preflight.contains("auth-cookie=\$COOKIE"))
-        assertTrue(preflight.contains("unload-module \$moduleId"))
-        assertTrue(preflight.contains("__SAAS_NAT_AUDIO_READY__"))
-        assertTrue(preflight.contains("Server String: \${'$'}SERVER"))
-        assertTrue(preflight.contains("Default Sink: (AAudio_sink|OpenSL_ES_sink)"))
-        assertTrue(preflight.contains("Constants.DS_BINARY_PATH"))
-        assertFalse(preflight.contains("auth-anonymous=1"))
-        assertFalse(preflight.contains("listen=0.0.0.0"))
-        assertFalse(preflight.contains("list short modules"))
+        assertTrue(transport.contains("Constants.DS_BINARY_PATH"))
+        assertTrue(transport.contains("run /bin/sh -lc"))
+        assertTrue(transport.contains("/root/.config/pulse/saas-audio.cookie"))
+        assertTrue(transport.contains("default-server = \$server"))
+        assertTrue(transport.contains("__SAAS_AUDIO_TRANSPORT_READY__"))
+        assertTrue(transport.contains("Default Sink: (AAudio_sink|OpenSL_ES_sink)"))
+        assertTrue(transport.contains("NAT audio transport verified from inside the container"))
     }
 }
