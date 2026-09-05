@@ -3,11 +3,9 @@ package com.saas.x11manager.ui.component
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
@@ -25,14 +23,6 @@ import com.saas.x11manager.ui.theme.JetBrainsMono
 import com.saas.x11manager.util.AnsiColorParser
 import com.saas.x11manager.util.Constants
 
-/**
- * Compatibility wrapper kept for callers that already use the old shimmer API.
- *
- * A continuously animated gradient is intentionally avoided here. Package-manager
- * output can update the terminal many times per second, so animating the entire
- * console at the same time adds GPU/composition work without conveying additional
- * progress information. The streamed output itself is the activity indicator.
- */
 @Suppress("UNUSED_PARAMETER")
 @Composable
 fun ShimmerAnimation(
@@ -74,15 +64,10 @@ fun TerminalConsole(
     logs: List<Pair<Int, String>>,
     isProcessing: Boolean = true,
     modifier: Modifier = Modifier,
-    maxHeight: Dp? = null,
-    showDetails: Boolean = false
+    maxHeight: Dp? = null
 ) {
     val orientation = LocalConfiguration.current.orientation
     val listState = rememberLazyListState()
-    val horizontalScrollState = rememberScrollState()
-    val displayLogs by remember(logs, showDetails) {
-        derivedStateOf { presentTerminalLogs(logs, showDetails) }
-    }
 
     var userScrolledUp by remember { mutableStateOf(false) }
     var isAutoScrolling by remember { mutableStateOf(false) }
@@ -98,23 +83,18 @@ fun TerminalConsole(
             }
     }
 
-    LaunchedEffect(orientation, showDetails) {
+    LaunchedEffect(orientation) {
         userScrolledUp = false
-        if (displayLogs.isNotEmpty()) {
-            listState.scrollToItem(displayLogs.lastIndex)
+        if (logs.isNotEmpty()) {
+            listState.scrollToItem(logs.lastIndex)
         }
     }
 
-    LaunchedEffect(displayLogs.size, userScrolledUp, showDetails) {
-        if (displayLogs.isEmpty() || userScrolledUp) return@LaunchedEffect
-
-        // Streaming package-manager output can append hundreds of lines quickly.
-        // An animated scroll per line queues unnecessary animation work and makes
-        // the terminal lag behind the producer. Jumping to the newest item keeps
-        // the same auto-follow behavior while making the cost effectively constant.
+    LaunchedEffect(logs.size, userScrolledUp) {
+        if (logs.isEmpty() || userScrolledUp) return@LaunchedEffect
         isAutoScrolling = true
         try {
-            listState.scrollToItem(displayLogs.lastIndex)
+            listState.scrollToItem(logs.lastIndex)
         } finally {
             isAutoScrolling = false
         }
@@ -138,24 +118,21 @@ fun TerminalConsole(
         ProvideTextStyle(
             MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMono)
         ) {
-            val contentModifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 12.dp, vertical = 16.dp)
-                .let { base ->
-                    if (showDetails) base.horizontalScroll(horizontalScrollState) else base
-                }
-
-            Box(modifier = contentModifier) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp, vertical = 16.dp)
+            ) {
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxHeight(),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     items(
-                        count = displayLogs.size,
+                        count = logs.size,
                         key = { index -> index }
                     ) { index ->
-                        val (level, message) = displayLogs[index]
+                        val (level, message) = logs[index]
                         val annotatedText = remember(
                             level,
                             message,
@@ -167,13 +144,7 @@ fun TerminalConsole(
                                 Regex(Regex.escape(Constants.DS_BINARY_PATH)),
                                 "droidspaces"
                             )
-                            val displayMessage = if (processedMessage.isEmpty()) {
-                                "\u00A0"
-                            } else {
-                                processedMessage.replace(Regex("""^( +)""")) { match ->
-                                    match.value.replace(" ", "\u00A0")
-                                }
-                            }
+                            val displayMessage = processedMessage.ifEmpty { "\u00A0" }
                             if (displayMessage.contains("\u001B[")) {
                                 val defaultColor = when (level) {
                                     Log.ERROR -> errorColor
@@ -198,12 +169,8 @@ fun TerminalConsole(
                         Text(
                             text = annotatedText,
                             style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMono),
-                            softWrap = !showDetails,
-                            modifier = if (showDetails) {
-                                Modifier.wrapContentWidth().heightIn(min = 16.dp)
-                            } else {
-                                Modifier.fillMaxWidth().heightIn(min = 16.dp)
-                            }
+                            softWrap = true,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 16.dp)
                         )
                     }
                 }
