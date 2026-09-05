@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.ui.theme.JetBrainsMono
 import com.saas.x11manager.util.AnsiColorParser
+import com.saas.x11manager.util.ConciseLogReducer
 import com.saas.x11manager.util.Constants
 
 @Suppress("UNUSED_PARAMETER")
@@ -68,6 +69,10 @@ fun TerminalConsole(
 ) {
     val orientation = LocalConfiguration.current.orientation
     val listState = rememberLazyListState()
+    val displayLogs = remember(logs) {
+        val reducer = ConciseLogReducer()
+        logs.flatMap { (level, message) -> reducer.reduce(level, message) }
+    }
 
     var userScrolledUp by remember { mutableStateOf(false) }
     var isAutoScrolling by remember { mutableStateOf(false) }
@@ -85,16 +90,16 @@ fun TerminalConsole(
 
     LaunchedEffect(orientation) {
         userScrolledUp = false
-        if (logs.isNotEmpty()) {
-            listState.scrollToItem(logs.lastIndex)
+        if (displayLogs.isNotEmpty()) {
+            listState.scrollToItem(displayLogs.lastIndex)
         }
     }
 
-    LaunchedEffect(logs.size, userScrolledUp) {
-        if (logs.isEmpty() || userScrolledUp) return@LaunchedEffect
+    LaunchedEffect(displayLogs.size, userScrolledUp) {
+        if (displayLogs.isEmpty() || userScrolledUp) return@LaunchedEffect
         isAutoScrolling = true
         try {
-            listState.scrollToItem(logs.lastIndex)
+            listState.scrollToItem(displayLogs.lastIndex)
         } finally {
             isAutoScrolling = false
         }
@@ -129,10 +134,10 @@ fun TerminalConsole(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     items(
-                        count = logs.size,
+                        count = displayLogs.size,
                         key = { index -> index }
                     ) { index ->
-                        val (level, message) = logs[index]
+                        val (level, message) = displayLogs[index]
                         val annotatedText = remember(
                             level,
                             message,
