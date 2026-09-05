@@ -14,7 +14,8 @@ internal object AptInstallRecommendationOverride {
     private val baseX11Packages = listOf(
         "dbus",
         "dbus-x11",
-        "x11-xserver-utils"
+        "x11-xserver-utils",
+        "xauth"
     )
 
     fun set(session: GraphicSession, installRecommendedPackages: Boolean) {
