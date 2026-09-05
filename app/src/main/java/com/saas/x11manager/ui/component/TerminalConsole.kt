@@ -16,12 +16,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.ui.theme.JetBrainsMono
 import com.saas.x11manager.util.AnsiColorParser
-import com.saas.x11manager.util.ConciseLogReducer
 import com.saas.x11manager.util.Constants
 
 @Suppress("UNUSED_PARAMETER")
@@ -69,10 +67,13 @@ fun TerminalConsole(
 ) {
     val orientation = LocalConfiguration.current.orientation
     val listState = rememberLazyListState()
-    val displayLogs = remember(logs) {
-        val reducer = ConciseLogReducer()
-        logs.flatMap { (level, message) -> reducer.reduce(level, message) }
-    }
+
+    // ViewModelLogger already reduces every stored entry to the concise stream.
+    // Do not wrap the mutable SnapshotStateList in remember(logs): the list object
+    // stays the same while entries are appended, so remember would cache the first
+    // (often empty) snapshot forever and leave the terminal visually blank even
+    // though Copy can still read the live list.
+    val displayLogs = logs
 
     var userScrolledUp by remember { mutableStateOf(false) }
     var isAutoScrolling by remember { mutableStateOf(false) }
