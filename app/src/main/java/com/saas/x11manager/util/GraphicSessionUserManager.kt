@@ -135,7 +135,7 @@ object GraphicSessionUserManager {
             logger?.e("[-] Could not persist graphical user selection for $containerName")
             return@withContext null
         }
-        if (!writeCurrentSessionLauncher(info, session)) {
+        if (!writeCurrentSessionLauncher(info, session, requested)) {
             logger?.e("[-] Could not refresh the user-aware graphical session launcher")
             return@withContext null
         }
@@ -202,13 +202,18 @@ object GraphicSessionUserManager {
 
     private fun writeCurrentSessionLauncher(
         info: ContainerInfo,
-        session: GraphicSession
+        session: GraphicSession,
+        selection: GraphicSessionUserSelection
     ): Boolean {
         val shell = when (info.initSystem) {
             InitSystem.OPENRC -> "/bin/sh"
             InitSystem.SYSTEMD -> "/bin/bash"
         }
-        val script = GraphicSessionInitFiles.sessionScript(session, shell)
+        val script = if (selection.userName == "root" && !selection.createIfMissing) {
+            GraphicSessionInitFiles.rootSessionScript(session, shell)
+        } else {
+            GraphicSessionInitFiles.sessionScript(session, shell)
+        }
         return if (info.isRunning) {
             val command =
                 "mkdir -p /usr/local/bin && " +
