@@ -24,7 +24,7 @@ class ConciseLogReducerTest {
         assertTrue(output.contains("[SESSION] • Access: Integrated X11"))
         assertTrue(output.contains("[SESSION] • Desktop: IceWM"))
         assertTrue(output.contains("[USER] • Desktop user: SaaS"))
-        assertTrue(output.contains("[X11] ✓ Integrated X11 session started on :0"))
+        assertTrue(output.contains("[SESSION] ✓ Integrated X11 session started on :0"))
         assertTrue(output.contains("[X11] ✓ Integrated X11 ready on :0"))
         assertFalse(output.any { it.contains("Runtime:") })
     }
