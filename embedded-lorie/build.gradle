@@ -100,6 +100,14 @@ tasks.register('prepareEmbeddedLorieJava') {
              'EmbeddedDisplayHost.refreshInputDevices(this);'],
             ['mNativeContext = nativeInit();',
              'mNativeContext = nativeInit();\n        EmbeddedDisplayHost.attach(this);'],
+            // Upstream's requestConnection() reaches one process-global TCP port.
+            // With several Manager-owned X servers that fallback cannot identify
+            // :0 vs :1 vs :2 and can attach a new surface to whichever server
+            // wins SO_REUSEPORT. Embedded mode already has a display-keyed Binder
+            // map, so wait for that exact Binder instead of using the ambiguous
+            // legacy TCP fallback.
+            ['public boolean requestConnection() { return requestConnection(mNativeContext); }',
+             'public boolean requestConnection() { return false; }'],
             ['super.onDetachedFromWindow();\n        nativeDestroy(mNativeContext);',
              'super.onDetachedFromWindow();\n        EmbeddedDisplayHost.detach(this);\n        nativeDestroy(mNativeContext);']
         ]
