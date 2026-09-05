@@ -105,7 +105,7 @@ class TerminalLogPresentationTest {
             root@alpine-host: mkdir -p '/usr/local/bin' && printf '%s' '#!/bin/sh
             X11_SOCKET=
             for candidate in /tmp/.X11-unix/X*; do
-                [ -S "$candidate" ] || continue
+                [ -S "${'$'}candidate" ] || continue
             done
             ' > '/usr/local/bin/x11-session.sh' && chmod 755 '/usr/local/bin/x11-session.sh'
         """.trimIndent()
