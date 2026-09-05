@@ -28,11 +28,29 @@ class GraphicSessionInitFilesTest {
     }
 
     @Test
-    fun sessionScriptSecuresXdgRuntimeDirectory() {
+    fun sessionScriptSecuresXdgRuntimeDirectoryForSelectedOwner() {
         val script = GraphicSessionInitFiles.sessionScript(GraphicSession.OPENBOX, "/bin/sh")
 
         assertTrue(script.contains("export XDG_RUNTIME_DIR=/tmp/runtime-root"))
-        assertTrue(script.contains("mkdir -p \"\$XDG_RUNTIME_DIR\" && chmod 700 \"\$XDG_RUNTIME_DIR\""))
+        assertTrue(script.contains("mkdir -p \"\$XDG_RUNTIME_DIR\""))
+        assertTrue(script.contains("chown \"\$SESSION_UID:\$SESSION_GID\" \"\$XDG_RUNTIME_DIR\""))
+        assertTrue(script.contains("chmod 700 \"\$XDG_RUNTIME_DIR\""))
+    }
+
+    @Test
+    fun sessionScriptDefaultsToRootButSupportsBasicUserCreationAndPrivilegeDrop() {
+        val script = GraphicSessionInitFiles.sessionScript(GraphicSession.OPENBOX, "/bin/sh")
+
+        assertTrue(script.contains("SESSION_USER=root"))
+        assertTrue(script.contains("SESSION_USER_FILE=/etc/saas-x11-manager/session-user"))
+        assertTrue(script.contains("adduser -D \"\$SESSION_USER\""))
+        assertTrue(script.contains("adduser --disabled-password --gecos '' \"\$SESSION_USER\""))
+        assertTrue(script.contains("useradd -m \"\$SESSION_USER\""))
+        assertTrue(script.contains("export HOME=\$SESSION_HOME"))
+        assertTrue(script.contains("export USER=\$SESSION_USER"))
+        assertTrue(script.contains("export LOGNAME=\$SESSION_USER"))
+        assertTrue(script.contains("chown \"\$SESSION_UID:\$SESSION_GID\" \"\$SESSION_HOME\""))
+        assertTrue(script.contains("exec su -p -s \"\$SESSION_SHELL\" \"\$SESSION_USER\""))
     }
 
     @Test
