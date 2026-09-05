@@ -1,36 +1,16 @@
 package com.saas.x11manager.util
 
-/** Pure templates for init-owned graphical session files on the integrated X11 transport. */
+/** Pure templates for init-owned graphical session files on the fixed :0 X11 transport. */
 internal object GraphicSessionInitFiles {
 
-    private fun dynamicDisplayEnvironment(): String =
-        "X11_SOCKET=\n" +
-            "for candidate in /tmp/.X11-unix/X*; do\n" +
-            "    [ -S \"\$candidate\" ] || continue\n" +
-            "    if [ -n \"\$X11_SOCKET\" ]; then\n" +
-            "        echo \"Multiple X11 sockets are mounted; refusing ambiguous display selection\" >&2\n" +
-            "        exit 1\n" +
-            "    fi\n" +
-            "    X11_SOCKET=\$candidate\n" +
-            "done\n" +
-            "if [ -z \"\$X11_SOCKET\" ]; then\n" +
-            "    echo \"No X11 socket is mounted in /tmp/.X11-unix\" >&2\n" +
-            "    exit 1\n" +
-            "fi\n" +
-            "X11_DISPLAY_NUMBER=\${X11_SOCKET##*/X}\n" +
-            "case \"\$X11_DISPLAY_NUMBER\" in\n" +
-            "    ''|*[!0-9]*) echo \"Invalid X11 socket name: \$X11_SOCKET\" >&2; exit 1 ;;\n" +
-            "esac\n" +
-            "export DISPLAY=:\$X11_DISPLAY_NUMBER\n" +
-            "export SAAS_HOST_DISPLAY=\$DISPLAY\n"
+    private fun fixedDisplayEnvironment(): String =
+        "export DISPLAY=:0\n" +
+            "export SAAS_HOST_DISPLAY=:0\n"
 
     /**
      * Compatibility launcher for the traditional root-owned desktop path.
-     *
-     * This deliberately preserves the launcher semantics that were physically
-     * stable before graphical-user selection was added. OpenRC still receives
-     * /bin/sh and systemd still receives /bin/bash from the caller; their init
-     * services remain completely separate.
+     * OpenRC still receives /bin/sh and systemd still receives /bin/bash from
+     * the caller; their init services remain completely separate.
      */
     fun rootSessionScript(session: GraphicSession, shell: String): String {
         val sessionType = if (session.protocol == GraphicProtocol.WAYLAND) "wayland" else "x11"
@@ -48,7 +28,7 @@ internal object GraphicSessionInitFiles {
         }
 
         return "#!$shell\n" +
-            dynamicDisplayEnvironment() +
+            fixedDisplayEnvironment() +
             "export HOME=/root\n" +
             "export USER=root\n" +
             "export LOGNAME=root\n" +
@@ -123,8 +103,6 @@ internal object GraphicSessionInitFiles {
             "export USER=\$SESSION_USER\n" +
             "export LOGNAME=\$SESSION_USER\n" +
             "export SHELL=\$SESSION_SHELL\n" +
-            // Keep the established runtime path so existing Wayland/X11 health checks
-            // remain compatible; ownership follows the selected graphical user.
             "export XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
             "mkdir -p \"\$XDG_RUNTIME_DIR\" || exit 1\n" +
             "chown \"\$SESSION_UID:\$SESSION_GID\" \"\$XDG_RUNTIME_DIR\" || exit 1\n" +
@@ -135,8 +113,6 @@ internal object GraphicSessionInitFiles {
         val protocolEnvironment = if (session.protocol == GraphicProtocol.WAYLAND) {
             "export XDG_SESSION_TYPE=wayland\n" +
                 "export SAAS_WAYLAND_SOCKET=wayland-0\n" +
-                // Do not export WAYLAND_DISPLAY here: the selected compositor is the
-                // Wayland server, not a client of another Wayland compositor.
                 "unset WAYLAND_DISPLAY\n"
         } else {
             "export XDG_SESSION_TYPE=x11\n"
@@ -151,7 +127,7 @@ internal object GraphicSessionInitFiles {
         }
 
         return "#!$shell\n" +
-            dynamicDisplayEnvironment() +
+            fixedDisplayEnvironment() +
             selectedUserEnvironment(shell) +
             protocolEnvironment +
             "export SAAS_GRAPHIC_PROTOCOL=$sessionType\n" +
@@ -249,10 +225,6 @@ internal object GraphicSessionInitFiles {
             "Restart=on-failure\n" +
             "RestartSec=3\n\n" +
             "[Install]\n" +
-            // DroidSpaces containers commonly reach multi-user.target without
-            // transitioning through graphical.target. The runtime controller can
-            // still start this service on demand, but installing it in multi-user
-            // makes automatic startup match the container's real boot target.
             "WantedBy=multi-user.target\n"
     }
 }
