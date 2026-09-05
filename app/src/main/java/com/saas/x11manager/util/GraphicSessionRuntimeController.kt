@@ -60,6 +60,9 @@ internal object GraphicSessionRuntimeController {
             "elif command -v rc-service >/dev/null 2>&1 && " +
             "test -x /etc/init.d/x11-session; then " +
             "printf '%s\\n' '${INIT_MARKER}openrc'; " +
+            "if [ -L /etc/runlevels/default/x11-session ]; then " +
+            "rm -f /etc/runlevels/default/x11-session; " +
+            "printf '%s\\n' '${ACTION_MARKER}boot-autostart-removed'; fi; " +
             "setup_exit=0; " +
             "rc-service x11-setup start >/dev/null 2>&1 || setup_exit=\$?; " +
             "printf '%s\\n' \"${ACTION_MARKER}socket-setup-exit=\$setup_exit\"; " +
@@ -69,21 +72,44 @@ internal object GraphicSessionRuntimeController {
             "ready=0; " +
             "if rc-service x11-session status >/dev/null 2>&1; then " +
             "printf '%s\\n' '${ACTION_MARKER}already-active'; ready=1; " +
-            "else " +
+            "elif [ -r /run/x11-session.pid ]; then " +
+            "session_pid=\$(cat /run/x11-session.pid 2>/dev/null || true); " +
+            "case \"\$session_pid\" in ''|*[!0-9]*) ;; *) " +
+            "if kill -0 \"\$session_pid\" 2>/dev/null; then " +
+            "printf '%s\\n' '${ACTION_MARKER}pid-active'; ready=1; fi ;; esac; " +
+            "fi; " +
+            "if [ \"\$ready\" -eq 0 ]; then " +
+            "status_text=\$(rc-service x11-session status 2>&1 || true); " +
+            "case \"\$status_text\" in *crashed*) " +
+            "rc-service x11-session zap >/dev/null 2>&1 || true; " +
+            "printf '%s\\n' '${ACTION_MARKER}crashed-reset' ;; " +
+            "*) rc-service x11-session zap >/dev/null 2>&1 || true; " +
+            "printf '%s\\n' '${ACTION_MARKER}service-state-reset' ;; esac; " +
+            "rm -f /run/x11-session.pid 2>/dev/null || true; " +
             "printf '%s\\n' '${ACTION_MARKER}start-requested'; " +
-            "rc-service x11-session start >/dev/null 2>&1 || true; " +
+            "start_exit=0; rc-service x11-session start >/dev/null 2>&1 || start_exit=\$?; " +
+            "printf '%s\\n' \"${ACTION_MARKER}start-exit=\$start_exit\"; " +
             "fi; " +
             "attempt=0; " +
             "while [ \"\$ready\" -eq 0 ] && [ \"\$attempt\" -lt 10 ]; do " +
             "if rc-service x11-session status >/dev/null 2>&1; then ready=1; break; fi; " +
+            "if [ -r /run/x11-session.pid ]; then " +
+            "session_pid=\$(cat /run/x11-session.pid 2>/dev/null || true); " +
+            "case \"\$session_pid\" in ''|*[!0-9]*) ;; *) " +
+            "if kill -0 \"\$session_pid\" 2>/dev/null; then " +
+            "printf '%s\\n' '${ACTION_MARKER}pid-active'; ready=1; break; fi ;; esac; fi; " +
             "attempt=\$((attempt + 1)); sleep 1; " +
             "done; " +
             "if [ \"\$ready\" -eq 1 ]; then " +
             "printf '%s\\n' '${ACTION_MARKER}active'; true; else " +
-            "printf '%s\\n' '${DIAG_MARKER}openrc session did not stabilize' >&2; " +
-            "printf '%s\\n' \"${DIAG_MARKER}expected socket: \$expected\" >&2; " +
-            "printf '%s\\n' \"${DIAG_MARKER}socket visible: \$(test -S \"\$expected\" && echo yes || echo no)\" >&2; " +
-            "rc-service x11-session status >&2 || true; false; fi; " +
+            "printf '%s\\n' '${DIAG_MARKER}openrc session did not stabilize'; " +
+            "printf '%s\\n' \"${DIAG_MARKER}expected socket: \$expected\"; " +
+            "printf '%s\\n' \"${DIAG_MARKER}socket visible: \$(test -S \"\$expected\" && echo yes || echo no)\"; " +
+            "status_text=\$(rc-service x11-session status 2>&1 || true); " +
+            "printf '%s\\n' \"${DIAG_MARKER}service status: \$status_text\"; " +
+            "if [ -r /run/x11-session.pid ]; then " +
+            "printf '%s\\n' \"${DIAG_MARKER}pidfile: \$(cat /run/x11-session.pid 2>/dev/null || true)\"; " +
+            "else printf '%s\\n' '${DIAG_MARKER}pidfile: absent'; fi; false; fi; " +
             "else echo 'No Manager x11-session service is provisioned' >&2; exit 127; fi; " +
             "}; service_rc=\$?; [ \"\$service_rc\" -eq 0 ] || exit \"\$service_rc\"; " +
             "if [ \"\$require_wayland\" -eq 1 ]; then " +
@@ -109,7 +135,9 @@ internal object GraphicSessionRuntimeController {
             "test -x /etc/init.d/x11-session; then " +
             "printf '%s\\n' '${INIT_MARKER}openrc'; " +
             "if rc-service x11-session status >/dev/null 2>&1; then " +
-            "rc-service x11-session stop; else true; fi; " +
+            "rc-service x11-session stop; else " +
+            "rc-service x11-session zap >/dev/null 2>&1 || true; " +
+            "rm -f /run/x11-session.pid 2>/dev/null || true; true; fi; " +
             "else echo 'No Manager x11-session service is provisioned' >&2; exit 127; fi"
 
     suspend fun ensureRunning(
@@ -251,8 +279,18 @@ internal object GraphicSessionRuntimeController {
                     logger?.w("[!] Wayland compositor socket did not appear")
                 action == "already-active" ->
                     logger?.i("[+] Graphic session service was already active; preserving it")
+                action == "boot-autostart-removed" ->
+                    logger?.i("[+] Removed legacy OpenRC boot autostart for the graphical session")
+                action == "crashed-reset" ->
+                    logger?.w("[!] Reset crashed OpenRC graphical session state before retry")
+                action == "service-state-reset" ->
+                    logger?.i("[+] Reset inactive OpenRC graphical session state before start")
+                action == "pid-active" ->
+                    logger?.i("[+] Graphic session process confirmed alive by its OpenRC pidfile")
                 action == "start-requested" ->
                     logger?.i("[*] Graphic session service was inactive; start requested")
+                action.startsWith("start-exit=") && action != "start-exit=0" ->
+                    logger?.w("[!] OpenRC graphical session start returned ${action.substringAfter('=')}")
                 action == "active" ->
                     logger?.i("[+] Graphic session service confirmed active")
                 else -> logger?.i("[CTX] Graphic session action: $action")
