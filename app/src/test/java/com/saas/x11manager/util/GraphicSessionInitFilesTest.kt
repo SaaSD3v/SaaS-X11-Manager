@@ -43,8 +43,10 @@ class GraphicSessionInitFilesTest {
 
         assertTrue(script.contains("SESSION_USER=root"))
         assertTrue(script.contains("SESSION_USER_FILE=/etc/saas-x11-manager/session-user"))
+        assertTrue(script.contains("[!A-Za-z_]*|*[!A-Za-z0-9_-]*"))
         assertTrue(script.contains("adduser -D \"\$SESSION_USER\""))
-        assertTrue(script.contains("adduser --disabled-password --gecos '' \"\$SESSION_USER\""))
+        assertTrue(script.contains("adduser --allow-bad-names --disabled-password --gecos '' \"\$SESSION_USER\""))
+        assertTrue(script.contains("adduser --force-badname --disabled-password --gecos '' \"\$SESSION_USER\""))
         assertTrue(script.contains("useradd -m \"\$SESSION_USER\""))
         assertTrue(script.contains("export HOME=\$SESSION_HOME"))
         assertTrue(script.contains("export USER=\$SESSION_USER"))
