@@ -41,11 +41,7 @@ internal class ConciseLogReducer {
                 if (message == "--- Start X11 ---" || message == "--- Graphic Access Start ---") {
                     installMode = false
                 }
-                if (installMode) {
-                    reduceInstall(level, message)
-                } else {
-                    reduceRuntime(level, message)
-                }
+                if (installMode) reduceInstall(level, message) else reduceRuntime(level, message)
             }
         }
 
@@ -210,8 +206,8 @@ internal class ConciseLogReducer {
 
         if (isRoutineDetail(body) || looksLikePackageManagerNoise(message)) return emptyList()
 
-        // These are recovered/intermediate conditions. A final success or failure
-        // is emitted separately and is the only useful result in the compact UI.
+        // Recovered/intermediate conditions are never retained. The caller emits
+        // one final success or failure after the retry/verification path finishes.
         if (body.startsWith("X11 transport socket setup service returned", ignoreCase = true) ||
             body.startsWith("Container X11 transport socket was not visible during the prerequisite check", ignoreCase = true) ||
             body.startsWith("Port 4713 could not be bound", ignoreCase = true) ||
@@ -220,13 +216,48 @@ internal class ConciseLogReducer {
             body.equals("Graphical startup will continue", ignoreCase = true) ||
             (body.contains("is ready, but", ignoreCase = true) &&
                 body.contains("could not be confirmed active", ignoreCase = true)) ||
-            body.contains("is ready, but the configured graphic session is not active", ignoreCase = true)) {
+            body.contains("is ready, but the configured graphic session is not active", ignoreCase = true) ||
+            body.equals("Graphic session diagnostics:", ignoreCase = true)) {
             return emptyList()
         }
 
         if (looksLikeDroidSpacesLine(body)) return emptyList()
+        if (!isAllowedRuntimeEvent(message, body)) return emptyList()
 
         return listOf(level to formatSemanticMessage(message))
+    }
+
+    /**
+     * Runtime logging is intentionally whitelist-based. Unknown informational or
+     * warning lines are diagnostic noise and must not silently become new UI logs.
+     * Hard errors are retained because they are actionable final outcomes.
+     */
+    private fun isAllowedRuntimeEvent(message: String, body: String): Boolean {
+        if (message.startsWith("[X11]") || message.startsWith("[SESSION]") ||
+            message.startsWith("[USER]") || message.startsWith("[AUDIO]") ||
+            message.startsWith("[VNC]") || message.startsWith("[CONTAINER]") ||
+            message.startsWith("[MANAGER]")) return true
+
+        if (message.startsWith("[-]") || message.startsWith("Error:", ignoreCase = true)) return true
+
+        if (message.startsWith("[!]")) {
+            return body.contains("audio client configuration failed", ignoreCase = true) ||
+                body.contains("listener loaded successfully but the container client could not be configured", ignoreCase = true) ||
+                body.contains("VNC mirror failed", ignoreCase = true)
+        }
+
+        if (!message.startsWith("[+]")) return false
+
+        return body.startsWith("Manager audio core already ready", ignoreCase = true) ||
+            body.startsWith("Host audio core ready", ignoreCase = true) ||
+            body.startsWith("Manager audio core ready", ignoreCase = true) ||
+            body.startsWith("Audio configuration disabled", ignoreCase = true) ||
+            body.startsWith("Audio ready (", ignoreCase = true) ||
+            (body.startsWith("Monitor ", ignoreCase = true) && body.contains(" ready", ignoreCase = true)) ||
+            body.contains(" session active on Monitor ", ignoreCase = true) ||
+            body.startsWith("Integrated X11 session started", ignoreCase = true) ||
+            body.startsWith("Integrated X11 ready", ignoreCase = true) ||
+            body.contains("VNC", ignoreCase = true)
     }
 
     private fun sectionSummary(message: String): String? = when (message) {
