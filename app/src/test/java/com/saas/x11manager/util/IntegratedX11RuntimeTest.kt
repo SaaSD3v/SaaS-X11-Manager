@@ -26,7 +26,8 @@ class IntegratedX11RuntimeTest {
 
         assertTrue("getServerStatus" in methodNames)
         assertTrue("getServerPid" in methodNames)
-        assertTrue("startIntegratedServer" in methodNames)
+        // Kotlin mangles methods returning Result<T> because Result is an inline class.
+        assertTrue(methodNames.any { it == "startIntegratedServer" || it.startsWith("startIntegratedServer-") })
         assertTrue("stopIntegratedServer" in methodNames)
         assertTrue("stopX11Session" in methodNames)
         assertTrue("startX11Session" in methodNames)
