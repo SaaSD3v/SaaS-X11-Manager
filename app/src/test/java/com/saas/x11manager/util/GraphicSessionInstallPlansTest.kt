@@ -18,10 +18,7 @@ class GraphicSessionInstallPlansTest {
         assertEquals("startxfce4", plan.verificationCommand)
         assertFalse(plan.installRecommendedPackages)
         assertTrue(plan.packages.containsAll(listOf(
-            "dbus",
             "dbus-x11",
-            "x11-xserver-utils",
-            "xauth",
             "libxfce4ui-utils",
             "thunar",
             "xfce4-appfinder",
@@ -47,7 +44,7 @@ class GraphicSessionInstallPlansTest {
         assertEquals("startlxqt", plan.verificationCommand)
         assertFalse(plan.installRecommendedPackages)
         assertEquals(
-            listOf("dbus", "dbus-x11", "x11-xserver-utils", "xauth", "lxqt-core", "openbox"),
+            listOf("dbus-x11", "lxqt-core", "openbox"),
             plan.packages
         )
         assertSafeAptPlan(plan)
@@ -63,15 +60,7 @@ class GraphicSessionInstallPlansTest {
         assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
         assertEquals("openbox-session", plan.verificationCommand)
         assertEquals(
-            listOf(
-                "dbus",
-                "dbus-x11",
-                "x11-xserver-utils",
-                "xauth",
-                "openbox",
-                "xterm",
-                "fonts-terminus"
-            ),
+            listOf("openbox", "xterm", "fonts-terminus"),
             plan.packages
         )
         assertFalse(plan.installRecommendedPackages)
@@ -98,10 +87,7 @@ class GraphicSessionInstallPlansTest {
 
         assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
         assertEquals("icewm-session", plan.verificationCommand)
-        assertEquals(
-            listOf("dbus", "dbus-x11", "x11-xserver-utils", "xauth", "icewm", "xterm"),
-            plan.packages
-        )
+        assertEquals(listOf("icewm", "xterm"), plan.packages)
         assertFalse(plan.installRecommendedPackages)
         assertSafeAptPlan(plan)
     }
@@ -115,10 +101,7 @@ class GraphicSessionInstallPlansTest {
 
         assertEquals(RepositoryRequirement.APT_UNIVERSE, plan.repositoryRequirement)
         assertEquals("jwm", plan.verificationCommand)
-        assertEquals(
-            listOf("dbus", "dbus-x11", "x11-xserver-utils", "xauth", "jwm", "xterm"),
-            plan.packages
-        )
+        assertEquals(listOf("jwm", "xterm"), plan.packages)
         assertFalse(plan.installRecommendedPackages)
         assertSafeAptPlan(plan)
     }
@@ -136,9 +119,6 @@ class GraphicSessionInstallPlansTest {
         assertTrue(plan.packages.containsAll(listOf(
             "dbus",
             "dbus-x11",
-            "xauth",
-            "xrandr",
-            "xset",
             "xfce4",
             "xfce4-terminal"
         )))
@@ -155,14 +135,7 @@ class GraphicSessionInstallPlansTest {
         assertEquals(RepositoryRequirement.APK_COMMUNITY, plan.repositoryRequirement)
         assertEquals("startlxqt", plan.verificationCommand)
         assertTrue(plan.installRecommendedPackages)
-        assertTrue(plan.packages.containsAll(listOf(
-            "dbus",
-            "dbus-x11",
-            "xauth",
-            "xrandr",
-            "xset",
-            "lxqt-desktop"
-        )))
+        assertEquals(listOf("dbus", "dbus-x11", "lxqt-desktop"), plan.packages)
         assertNoDisplayManager(plan)
     }
 
@@ -176,16 +149,7 @@ class GraphicSessionInstallPlansTest {
         assertEquals(RepositoryRequirement.APK_COMMUNITY, plan.repositoryRequirement)
         assertEquals("openbox-session", plan.verificationCommand)
         assertEquals(
-            listOf(
-                "dbus",
-                "dbus-x11",
-                "xauth",
-                "xrandr",
-                "xset",
-                "openbox",
-                "xterm",
-                "font-terminus"
-            ),
+            listOf("openbox", "xterm", "font-terminus"),
             plan.packages
         )
         assertTrue(plan.installRecommendedPackages)
@@ -212,10 +176,7 @@ class GraphicSessionInstallPlansTest {
 
         assertEquals(RepositoryRequirement.APK_COMMUNITY, plan.repositoryRequirement)
         assertEquals("icewm-session", plan.verificationCommand)
-        assertEquals(
-            listOf("dbus", "dbus-x11", "xauth", "xrandr", "xset", "icewm", "xterm"),
-            plan.packages
-        )
+        assertEquals(listOf("icewm", "xterm"), plan.packages)
         assertTrue(plan.installRecommendedPackages)
         assertNoDisplayManager(plan)
     }
@@ -229,24 +190,33 @@ class GraphicSessionInstallPlansTest {
 
         assertEquals(RepositoryRequirement.APK_COMMUNITY, plan.repositoryRequirement)
         assertEquals("jwm", plan.verificationCommand)
-        assertEquals(
-            listOf("dbus", "dbus-x11", "xauth", "xrandr", "xset", "jwm", "xterm"),
-            plan.packages
-        )
+        assertEquals(listOf("jwm", "xterm"), plan.packages)
         assertTrue(plan.installRecommendedPackages)
         assertNoDisplayManager(plan)
     }
 
     @Test
-    fun everyAptGraphicPlanIncludesSharedX11BaseDependencies() {
+    fun everyAptInstallScopedPlanIncludesSharedX11BaseDependencies() {
         val required = setOf("dbus", "dbus-x11", "x11-xserver-utils", "xauth")
 
         GraphicSession.entries.forEach { session ->
-            GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, session)?.let { plan ->
-                assertTrue(
-                    "${session.name} is missing shared APT X11 base dependencies",
-                    plan.packages.containsAll(required)
+            val baseline = GraphicSessionInstallPlans.forSelection(
+                ContainerPlatform.UBUNTU,
+                session
+            ) ?: return@forEach
+
+            AptInstallRecommendationOverride.set(session, installRecommendedPackages = false)
+            try {
+                val installPlan = requireNotNull(
+                    GraphicSessionInstallPlans.forSelection(ContainerPlatform.UBUNTU, session)
                 )
+                assertTrue(
+                    "${session.name} is missing shared APT X11 base dependencies during install",
+                    installPlan.packages.containsAll(required)
+                )
+                assertTrue(installPlan.packages.containsAll(baseline.packages))
+            } finally {
+                AptInstallRecommendationOverride.clear(session)
             }
         }
     }
