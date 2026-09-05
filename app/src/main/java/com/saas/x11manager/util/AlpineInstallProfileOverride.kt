@@ -8,15 +8,20 @@ internal enum class AlpineInstallProfile {
 }
 
 /**
- * Holds the Alpine package profile only while one install/reinstall is running.
- * Minimal preserves the researched session plan exactly. Full adds a small,
+ * Applies the shared Alpine graphical base dependencies and holds the optional
+ * desktop integration profile only while one install/reinstall is running.
+ * Every Alpine graphical plan gets DBus support; FULL adds a small,
  * distro-native desktop integration bundle without adding an X server, display
  * manager or audio stack.
  */
 internal object AlpineInstallProfileOverride {
 
+    internal val baseX11Packages = listOf(
+        "dbus",
+        "dbus-x11"
+    )
+
     internal val fullDesktopPackages = listOf(
-        "dbus-x11",
         "xdg-utils",
         "font-dejavu",
         "hicolor-icon-theme",
@@ -35,7 +40,15 @@ internal object AlpineInstallProfileOverride {
 
     fun apply(plan: GraphicSessionInstallPlan): GraphicSessionInstallPlan {
         if (plan.platform != ContainerPlatform.ALPINE) return plan
-        if (values[plan.session] != AlpineInstallProfile.FULL) return plan
-        return plan.copy(packages = (plan.packages + fullDesktopPackages).distinct())
+
+        val packages = buildList {
+            addAll(baseX11Packages)
+            addAll(plan.packages)
+            if (values[plan.session] == AlpineInstallProfile.FULL) {
+                addAll(fullDesktopPackages)
+            }
+        }.distinct()
+
+        return plan.copy(packages = packages)
     }
 }
