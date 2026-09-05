@@ -31,7 +31,7 @@ class PulseAudioNatRoutingPolicyTest {
     }
 
     @Test
-    fun natHostReadinessOnlyReleasesPositivelyOwnedStaleManagerCore() {
+    fun natHostReadinessIsBoundedToTcpTableAndCurrentManagerPid() {
         val readiness = projectFile(
             "app/src/main/java/com/saas/x11manager/util/PulseAudioNatHostReadiness.kt"
         ).readText()
@@ -39,12 +39,11 @@ class PulseAudioNatRoutingPolicyTest {
         assertTrue(readiness.contains("private const val NAT_GATEWAY = \"172.28.0.1\""))
         assertTrue(readiness.contains("private const val NAT_PORT = 4713"))
         assertTrue(readiness.contains("/proc/net/tcp"))
-        assertTrue(readiness.contains("HOME=\$MANAGER_PULSE_HOME"))
-        assertTrue(readiness.contains("uid"))
-        assertTrue(readiness.contains("*pulseaudio*"))
-        assertTrue(readiness.contains("pid == currentPid"))
-        assertTrue(readiness.contains("kill \$stalePid"))
-        assertTrue(readiness.contains("Existing listener is not proven stale Manager state; it will not be modified"))
+        assertTrue(readiness.contains("processOwnsSocket(currentPid, listener.inode)"))
+        assertTrue(readiness.contains("/proc/\$pid/fd/*"))
+        assertTrue(readiness.contains("global process scanning is intentionally disabled"))
+        assertFalse(readiness.contains("/proc/[0-9]*/fd/*"))
+        assertFalse(readiness.contains("kill \$stalePid"))
         assertFalse(readiness.contains("kill -9"))
         assertFalse(readiness.contains("0.0.0.0"))
     }
