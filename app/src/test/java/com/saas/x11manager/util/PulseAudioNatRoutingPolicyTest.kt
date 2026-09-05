@@ -17,31 +17,36 @@ class PulseAudioNatRoutingPolicyTest {
     }
 
     @Test
-    fun natUsesTrackedListenerWhileHostKeepsValidatedUnifiedFinalizer() {
+    fun natUsesValidatedListenerHandoffWhileHostKeepsUnifiedFinalizer() {
         val session = projectFile(
             "app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt"
         ).readText()
 
         assertTrue(session.contains("if (mode == \"nat\")"))
-        assertTrue(session.contains("NAT audio finalizer: tracked authenticated listener"))
-        assertTrue(session.contains("PulseAudioNatPreflight.ensureBaseListener"))
-        assertTrue(session.contains("PulseAudioFixManager.finalizeAfterContainerReady"))
+        assertTrue(session.contains("NAT audio finalizer: validated listener -> container client"))
+        assertTrue(session.contains("PulseAudioNatPreflight.finalizeAfterContainerReady"))
         assertTrue(session.contains("PulseAudioUnifiedTransport.finalizeAfterContainerReady"))
+        assertFalse(session.contains("PulseAudioFixManager.finalizeAfterContainerReady"))
     }
 
     @Test
-    fun natPreflightMirrorsValidatedTermuxListenerEnvironmentAndCleansByReturnedId() {
+    fun natFinalizerMirrorsValidatedListenerEnvironmentAndVerifiesRealContainer() {
         val preflight = projectFile(
             "app/src/main/java/com/saas/x11manager/util/PulseAudioNatPreflight.kt"
         ).readText()
 
         assertTrue(preflight.contains("private const val NAT_GATEWAY = \"172.28.0.1\""))
+        assertTrue(preflight.contains("private const val SERVER = \"tcp:\$NAT_GATEWAY:\$BASE_PORT\""))
         assertTrue(preflight.contains("PULSE_SERVER="))
         assertTrue(preflight.contains("PULSE_COOKIE="))
         assertTrue(preflight.contains("PULSE_CLIENTCONFIG="))
         assertTrue(preflight.contains("load-module module-native-protocol-tcp"))
         assertTrue(preflight.contains("auth-cookie=\$COOKIE"))
         assertTrue(preflight.contains("unload-module \$moduleId"))
+        assertTrue(preflight.contains("__SAAS_NAT_AUDIO_READY__"))
+        assertTrue(preflight.contains("Server String: \${'$'}SERVER"))
+        assertTrue(preflight.contains("Default Sink: (AAudio_sink|OpenSL_ES_sink)"))
+        assertTrue(preflight.contains("Constants.DS_BINARY_PATH"))
         assertFalse(preflight.contains("auth-anonymous=1"))
         assertFalse(preflight.contains("listen=0.0.0.0"))
         assertFalse(preflight.contains("list short modules"))
