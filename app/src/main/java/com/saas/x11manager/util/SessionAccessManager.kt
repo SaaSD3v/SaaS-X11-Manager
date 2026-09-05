@@ -120,9 +120,10 @@ object SessionAccessManager {
         containerName: String,
         logger: ContainerLogger?
     ) {
-        // HOST stays on the already physically validated path. NAT deliberately
-        // follows the physically validated v3.2 shell implementation instead of
-        // the retired diagnostic/preflight stack.
+        // Both active transports are physically validated on real hardware.
+        // HOST keeps the established unified path. NAT keeps the v3.2 script-parity
+        // path that was validated end-to-end from the running container through
+        // the authenticated TCP listener to the Android AAudio/OpenSL ES sink.
         val mode = ContainerManager.getContainerInfo(containerName)
             ?.netMode
             ?.trim()
