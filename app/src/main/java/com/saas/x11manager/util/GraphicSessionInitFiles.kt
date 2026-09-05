@@ -24,6 +24,42 @@ internal object GraphicSessionInitFiles {
             "export DISPLAY=:\$X11_DISPLAY_NUMBER\n" +
             "export SAAS_HOST_DISPLAY=\$DISPLAY\n"
 
+    /**
+     * Compatibility launcher for the traditional root-owned desktop path.
+     *
+     * This deliberately preserves the launcher semantics that were physically
+     * stable before graphical-user selection was added. OpenRC still receives
+     * /bin/sh and systemd still receives /bin/bash from the caller; their init
+     * services remain completely separate.
+     */
+    fun rootSessionScript(session: GraphicSession, shell: String): String {
+        val sessionType = if (session.protocol == GraphicProtocol.WAYLAND) "wayland" else "x11"
+        val protocolEnvironment = if (session.protocol == GraphicProtocol.WAYLAND) {
+            "export XDG_SESSION_TYPE=wayland\n" +
+                "export SAAS_WAYLAND_SOCKET=wayland-0\n" +
+                "unset WAYLAND_DISPLAY\n"
+        } else {
+            "export XDG_SESSION_TYPE=x11\n"
+        }
+        val launch = if (session == GraphicSession.NONE) {
+            "exit 0\n"
+        } else {
+            "exec ${session.startCommand}\n"
+        }
+
+        return "#!$shell\n" +
+            dynamicDisplayEnvironment() +
+            "export HOME=/root\n" +
+            "export USER=root\n" +
+            "export LOGNAME=root\n" +
+            "export SHELL=$shell\n" +
+            protocolEnvironment +
+            "export SAAS_GRAPHIC_PROTOCOL=$sessionType\n" +
+            "export XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
+            "mkdir -p \"\$XDG_RUNTIME_DIR\" && chmod 700 \"\$XDG_RUNTIME_DIR\"\n" +
+            launch
+    }
+
     private fun selectedUserEnvironment(defaultShell: String): String =
         "SESSION_USER=root\n" +
             "SESSION_CREATE=0\n" +
