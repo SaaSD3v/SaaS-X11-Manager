@@ -41,7 +41,11 @@ object GraphicSessionUserManager {
     private const val SETTINGS_DIR = "/etc/saas-x11-manager"
     private const val SETTINGS_FILE = "$SETTINGS_DIR/session-user"
     private const val SESSION_LAUNCHER = "/usr/local/bin/x11-session.sh"
-    private val validUserName = Regex("^[a-z_][a-z0-9_-]{0,31}$")
+
+    // Keep a conservative shell-safe subset while preserving Linux's
+    // case-sensitive account names. Existing users such as `SaaS`, and newly
+    // created users such as `UserX`, must not be silently rewritten to lower-case.
+    private val validUserName = Regex("^[A-Za-z_][A-Za-z0-9_-]{0,31}$")
     private val selectedForStart = ConcurrentHashMap<String, GraphicSessionUserSelection>()
 
     fun isValidUserName(value: String): Boolean = validUserName.matches(value)
