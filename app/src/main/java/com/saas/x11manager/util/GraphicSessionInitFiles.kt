@@ -32,8 +32,8 @@ internal object GraphicSessionInitFiles {
             "    requested_user=\$(sed -n 's/^user=//p' \"\$SESSION_USER_FILE\" | head -n 1)\n" +
             "    requested_create=\$(sed -n 's/^create=//p' \"\$SESSION_USER_FILE\" | head -n 1)\n" +
             "    case \"\$requested_user\" in\n" +
-            "        [a-z_][a-z0-9_-]*) SESSION_USER=\$requested_user ;;\n" +
-            "        *) echo \"Invalid Manager graphical user selection\" >&2; exit 1 ;;\n" +
+            "        ''|[!a-z_]*|*[!a-z0-9_-]*) echo \"Invalid Manager graphical user selection\" >&2; exit 1 ;;\n" +
+            "        *) SESSION_USER=\$requested_user ;;\n" +
             "    esac\n" +
             "    [ \"\$requested_create\" = 1 ] && SESSION_CREATE=1\n" +
             "fi\n" +
@@ -71,6 +71,7 @@ internal object GraphicSessionInitFiles {
             "if [ \"\$SESSION_CREATED\" = 1 ]; then\n" +
             "    mkdir -p \"\$SESSION_HOME/.config\" \"\$SESSION_HOME/.local\" \"\$SESSION_HOME/.cache\" || exit 1\n" +
             "    chown \"\$SESSION_UID:\$SESSION_GID\" \"\$SESSION_HOME\" \"\$SESSION_HOME/.config\" \"\$SESSION_HOME/.local\" \"\$SESSION_HOME/.cache\" || exit 1\n" +
+            "    sed -i 's/^create=1$/create=0/' \"\$SESSION_USER_FILE\" 2>/dev/null || true\n" +
             "fi\n" +
             "export HOME=\$SESSION_HOME\n" +
             "export USER=\$SESSION_USER\n" +
@@ -131,7 +132,7 @@ internal object GraphicSessionInitFiles {
             "        return 0\n" +
             "    fi\n" +
             "    mount --bind /usr/.X11-unix /tmp/.X11-unix\n" +
-            "    rc=$?\n" +
+            "    rc=\$?\n" +
             "    eend \$rc\n" +
             "    return \$rc\n" +
             "}\n\n" +
@@ -139,7 +140,7 @@ internal object GraphicSessionInitFiles {
             "    ebegin \"Unmounting Manager X11 transport socket\"\n" +
             "    if mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n" +
             "        umount /tmp/.X11-unix\n" +
-            "        rc=$?\n" +
+            "        rc=\$?\n" +
             "        eend \$rc\n" +
             "        return \$rc\n" +
             "    fi\n" +
