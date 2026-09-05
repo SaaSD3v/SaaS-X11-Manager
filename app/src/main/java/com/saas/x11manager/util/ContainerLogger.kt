@@ -19,12 +19,10 @@ abstract class ContainerLogger {
 /**
  * Logger used by Compose ViewModels.
  *
- * libsu's CallbackList may deliver package-manager stdout/stderr from a worker
- * thread and can emit hundreds of lines per second. Mutating Compose snapshot
- * state directly from those callbacks is both unsafe and expensive. Streamed
- * lines are therefore queued and drained on the main looper in short batches.
- * Semantic suspend logs (i/w/e) remain immediate and flush pending stream output
- * first so messages such as "[+] OK" stay after the command output they describe.
+ * Only the concise semantic stream is stored in Compose state. Legacy raw output
+ * is reduced before it reaches the UI, so package-manager chatter, generated
+ * scripts, [CTX] diagnostics, PulseAudio probes and the DroidSpaces banner do not
+ * accumulate behind a hidden "Details" mode.
  */
 class ViewModelLogger(
     private val onLog: (Int, String) -> Unit
@@ -32,6 +30,8 @@ class ViewModelLogger(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val pending = ConcurrentLinkedQueue<Pair<Int, String>>()
     private val flushScheduled = AtomicBoolean(false)
+    private val reducer = ConciseLogReducer()
+    private val reducerLock = Any()
 
     private val flushRunnable = object : Runnable {
         override fun run() {
@@ -41,8 +41,8 @@ class ViewModelLogger(
     }
 
     override fun logImmediate(level: Int, msg: String) {
-        pending.add(level to msg)
-        scheduleFlush()
+        reduce(level, msg).forEach(pending::add)
+        if (pending.isNotEmpty()) scheduleFlush()
     }
 
     override suspend fun i(msg: String) = emitSemantic(Log.INFO, msg)
@@ -50,11 +50,15 @@ class ViewModelLogger(
     override suspend fun e(msg: String) = emitSemantic(Log.ERROR, msg)
 
     private suspend fun emitSemantic(level: Int, msg: String) {
+        val entries = reduce(level, msg)
         withContext(Dispatchers.Main.immediate) {
             drainPendingOnMain()
-            onLog(level, msg)
+            entries.forEach { onLog(it.first, it.second) }
         }
     }
+
+    private fun reduce(level: Int, msg: String): List<Pair<Int, String>> =
+        synchronized(reducerLock) { reducer.reduce(level, msg) }
 
     private fun scheduleFlush() {
         if (flushScheduled.compareAndSet(false, true)) {
@@ -68,9 +72,6 @@ class ViewModelLogger(
             onLog(entry.first, entry.second)
         }
 
-        // A producer may append while this drain is running. If it observed the
-        // previous scheduled state before it was cleared, ensure that tail still
-        // receives a future flush instead of waiting for another log line.
         if (pending.isNotEmpty()) {
             scheduleFlush()
         }
