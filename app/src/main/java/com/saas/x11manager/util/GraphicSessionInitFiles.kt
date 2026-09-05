@@ -24,6 +24,65 @@ internal object GraphicSessionInitFiles {
             "export DISPLAY=:\$X11_DISPLAY_NUMBER\n" +
             "export SAAS_HOST_DISPLAY=\$DISPLAY\n"
 
+    private fun selectedUserEnvironment(defaultShell: String): String =
+        "SESSION_USER=root\n" +
+            "SESSION_CREATE=0\n" +
+            "SESSION_USER_FILE=/etc/saas-x11-manager/session-user\n" +
+            "if [ -r \"\$SESSION_USER_FILE\" ]; then\n" +
+            "    requested_user=\$(sed -n 's/^user=//p' \"\$SESSION_USER_FILE\" | head -n 1)\n" +
+            "    requested_create=\$(sed -n 's/^create=//p' \"\$SESSION_USER_FILE\" | head -n 1)\n" +
+            "    case \"\$requested_user\" in\n" +
+            "        [a-z_][a-z0-9_-]*) SESSION_USER=\$requested_user ;;\n" +
+            "        *) echo \"Invalid Manager graphical user selection\" >&2; exit 1 ;;\n" +
+            "    esac\n" +
+            "    [ \"\$requested_create\" = 1 ] && SESSION_CREATE=1\n" +
+            "fi\n" +
+            "SESSION_ENTRY=\$(awk -F: -v user=\"\$SESSION_USER\" '\$1 == user { print \$3 \":\" \$4 \":\" \$6 \":\" \$7; exit }' /etc/passwd)\n" +
+            "SESSION_CREATED=0\n" +
+            "if [ -z \"\$SESSION_ENTRY\" ] && [ \"\$SESSION_CREATE\" = 1 ]; then\n" +
+            "    if command -v apk >/dev/null 2>&1; then\n" +
+            "        adduser -D \"\$SESSION_USER\" || exit 1\n" +
+            "    elif command -v adduser >/dev/null 2>&1; then\n" +
+            "        adduser --disabled-password --gecos '' \"\$SESSION_USER\" || exit 1\n" +
+            "    elif command -v useradd >/dev/null 2>&1; then\n" +
+            "        useradd -m \"\$SESSION_USER\" || exit 1\n" +
+            "    else\n" +
+            "        echo \"No supported user creation command is available\" >&2\n" +
+            "        exit 1\n" +
+            "    fi\n" +
+            "    SESSION_CREATED=1\n" +
+            "    SESSION_ENTRY=\$(awk -F: -v user=\"\$SESSION_USER\" '\$1 == user { print \$3 \":\" \$4 \":\" \$6 \":\" \$7; exit }' /etc/passwd)\n" +
+            "fi\n" +
+            "if [ -z \"\$SESSION_ENTRY\" ]; then\n" +
+            "    echo \"Selected graphical user does not exist: \$SESSION_USER\" >&2\n" +
+            "    exit 1\n" +
+            "fi\n" +
+            "SESSION_UID=\${SESSION_ENTRY%%:*}\n" +
+            "SESSION_REST=\${SESSION_ENTRY#*:}\n" +
+            "SESSION_GID=\${SESSION_REST%%:*}\n" +
+            "SESSION_REST=\${SESSION_REST#*:}\n" +
+            "SESSION_HOME=\${SESSION_REST%%:*}\n" +
+            "SESSION_SHELL=\${SESSION_REST#*:}\n" +
+            "case \"\$SESSION_UID:\$SESSION_GID\" in\n" +
+            "    *[!0-9:]*|'':*|*:'') echo \"Invalid UID/GID for graphical user: \$SESSION_USER\" >&2; exit 1 ;;\n" +
+            "esac\n" +
+            "case \"\$SESSION_HOME\" in /*) ;; *) echo \"Invalid home for graphical user: \$SESSION_USER\" >&2; exit 1 ;; esac\n" +
+            "[ -x \"\$SESSION_SHELL\" ] || SESSION_SHELL=$defaultShell\n" +
+            "if [ \"\$SESSION_CREATED\" = 1 ]; then\n" +
+            "    mkdir -p \"\$SESSION_HOME/.config\" \"\$SESSION_HOME/.local\" \"\$SESSION_HOME/.cache\" || exit 1\n" +
+            "    chown \"\$SESSION_UID:\$SESSION_GID\" \"\$SESSION_HOME\" \"\$SESSION_HOME/.config\" \"\$SESSION_HOME/.local\" \"\$SESSION_HOME/.cache\" || exit 1\n" +
+            "fi\n" +
+            "export HOME=\$SESSION_HOME\n" +
+            "export USER=\$SESSION_USER\n" +
+            "export LOGNAME=\$SESSION_USER\n" +
+            "export SHELL=\$SESSION_SHELL\n" +
+            // Keep the established runtime path so existing Wayland/X11 health checks
+            // remain compatible; ownership follows the selected graphical user.
+            "export XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
+            "mkdir -p \"\$XDG_RUNTIME_DIR\" || exit 1\n" +
+            "chown \"\$SESSION_UID:\$SESSION_GID\" \"\$XDG_RUNTIME_DIR\" || exit 1\n" +
+            "chmod 700 \"\$XDG_RUNTIME_DIR\" || exit 1\n"
+
     fun sessionScript(session: GraphicSession, shell: String): String {
         val sessionType = if (session.protocol == GraphicProtocol.WAYLAND) "wayland" else "x11"
         val protocolEnvironment = if (session.protocol == GraphicProtocol.WAYLAND) {
@@ -38,18 +97,17 @@ internal object GraphicSessionInitFiles {
         val launch = if (session == GraphicSession.NONE) {
             "exit 0\n"
         } else {
-            "exec ${session.startCommand}\n"
+            "if [ \"\$SESSION_UID\" = 0 ]; then\n" +
+                "    exec ${session.startCommand}\n" +
+                "fi\n" +
+                "exec su -p -s \"\$SESSION_SHELL\" \"\$SESSION_USER\" -c 'exec ${session.startCommand}'\n"
         }
 
         return "#!$shell\n" +
             dynamicDisplayEnvironment() +
-            "export HOME=/root\n" +
-            "export USER=root\n" +
-            "export SHELL=$shell\n" +
+            selectedUserEnvironment(shell) +
             protocolEnvironment +
             "export SAAS_GRAPHIC_PROTOCOL=$sessionType\n" +
-            "export XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
-            "mkdir -p \"\$XDG_RUNTIME_DIR\" && chmod 700 \"\$XDG_RUNTIME_DIR\"\n" +
             launch
     }
 
