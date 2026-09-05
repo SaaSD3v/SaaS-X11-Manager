@@ -17,6 +17,8 @@ import androidx.compose.ui.unit.dp
 import com.saas.x11manager.ui.component.ContainerCard
 import com.saas.x11manager.ui.component.ContainerCardActions
 import com.saas.x11manager.ui.component.TerminalDialog
+import com.saas.x11manager.util.ContainerInfo
+import com.saas.x11manager.util.GraphicSessionUserManager
 import com.saas.x11manager.util.SessionAccessMode
 import com.saas.x11manager.util.VncSettings
 
@@ -31,12 +33,31 @@ fun HomeScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val expandedContainerName = remember { mutableStateOf<String?>(null) }
     var generalSettingsContainer by remember { mutableStateOf<String?>(null) }
+    var pendingStartContainer by remember { mutableStateOf<ContainerInfo?>(null) }
     val activeOperation = viewModel.runningOperationContainer
 
     generalSettingsContainer?.let { containerName ->
         GeneralSettingsDialog(
             containerName = containerName,
             onDismiss = { generalSettingsContainer = null }
+        )
+    }
+
+    pendingStartContainer?.let { container ->
+        val accessMode = VncSettings.getAccessMode(context, container.name)
+        val vncPort = VncSettings.getPort(context, container.name)
+        GraphicSessionUserDialog(
+            containerName = container.name,
+            onDismiss = { pendingStartContainer = null },
+            onConfirm = { selection ->
+                GraphicSessionUserManager.selectForNextStart(container.name, selection)
+                pendingStartContainer = null
+                viewModel.startSession(
+                    container = container,
+                    accessMode = accessMode,
+                    vncPort = vncPort
+                )
+            }
         )
     }
 
@@ -95,7 +116,6 @@ fun HomeScreen(
                 ) {
                     items(containers, key = { it.name }) { container ->
                         val accessMode = VncSettings.getAccessMode(context, container.name)
-                        val vncPort = VncSettings.getPort(context, container.name)
                         val startLabel = when (accessMode) {
                             SessionAccessMode.INTEGRATED_X11 -> "Start X11"
                             SessionAccessMode.VNC -> "Start VNC"
@@ -114,11 +134,7 @@ fun HomeScreen(
                                 },
                                 onShowLogs = { viewModel.showLogs(container) },
                                 onStartX11 = {
-                                    viewModel.startSession(
-                                        container = container,
-                                        accessMode = accessMode,
-                                        vncPort = vncPort
-                                    )
+                                    pendingStartContainer = container
                                 },
                                 onStop = { viewModel.stopContainer(container) },
                                 onEdit = {
