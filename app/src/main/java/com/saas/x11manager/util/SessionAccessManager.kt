@@ -41,6 +41,16 @@ object SessionAccessManager {
         }
         logger?.i("")
 
+        // The physical v3.2 shell baseline owns exactly one Android-audio core.
+        // Before accepting a long-lived Manager control socket, retire only
+        // positively-owned competing/stale cores and force one clean generation
+        // refresh when the runtime contract changes. No container/X11/VNC
+        // lifecycle action is performed here.
+        PulseAudioRuntimeSanitizer.prepare(
+            containerName = containerName,
+            logger = logger
+        )
+
         // Prepare exactly one Manager-owned PulseAudio core. HOST and NAT share
         // this same AAudio/OpenSL ES daemon and private UNIX control socket.
         PulseAudioFixManager.prepareBeforeGraphicalStart(
