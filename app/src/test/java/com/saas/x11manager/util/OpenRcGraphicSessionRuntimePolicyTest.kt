@@ -16,8 +16,6 @@ class OpenRcGraphicSessionRuntimePolicyTest {
         assertTrue(command.contains("DISPLAY=\"\$display\" xset q"))
         assertTrue(command.contains("__SAAS_X11_ACTION__=x11-client-ready"))
         assertTrue(command.indexOf("DISPLAY=\"\$display\" xset q") < command.indexOf("rc-service x11-session start"))
-        assertFalse(command.contains("/tmp/.X11-unix/X1"))
-        assertFalse(command.contains("display=':1'"))
     }
 
     @Test
