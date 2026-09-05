@@ -8,6 +8,17 @@ import org.junit.Test
 class AlpineInstallProfilePolicyTest {
 
     @Test
+    fun everyAlpinePlanIncludesSharedDbusBaseDependencies() {
+        GraphicSessionSupport.installableSessions.forEach { session ->
+            val plan = GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, session)
+                ?: return@forEach
+
+            assertTrue(plan.packages.containsAll(AlpineInstallProfileOverride.baseX11Packages))
+            assertEquals(plan.packages.distinct(), plan.packages)
+        }
+    }
+
+    @Test
     fun minimalProfilePreservesEveryAlpinePlan() {
         GraphicSessionSupport.installableSessions.forEach { session ->
             val baseline = GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, session)
@@ -19,6 +30,7 @@ class AlpineInstallProfilePolicyTest {
                     GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, session)
                 )
                 assertEquals(baseline, minimal)
+                assertTrue(minimal.packages.containsAll(AlpineInstallProfileOverride.baseX11Packages))
             } finally {
                 AlpineInstallProfileOverride.clear(session)
             }
@@ -37,6 +49,7 @@ class AlpineInstallProfilePolicyTest {
                     GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, session)
                 )
                 assertTrue(full.packages.containsAll(minimal.packages))
+                assertTrue(full.packages.containsAll(AlpineInstallProfileOverride.baseX11Packages))
                 assertTrue(full.packages.containsAll(AlpineInstallProfileOverride.fullDesktopPackages))
                 assertEquals(full.packages.distinct(), full.packages)
             } finally {
@@ -46,7 +59,7 @@ class AlpineInstallProfilePolicyTest {
     }
 
     @Test
-    fun fullProfileReachesLegacyAndGenericApkInstallCommands() {
+    fun sharedBaseAndFullProfileReachLegacyAndGenericApkInstallCommands() {
         listOf(
             GraphicSession.OPENBOX to true,
             GraphicSession.XFCE to false
@@ -61,8 +74,10 @@ class AlpineInstallProfilePolicyTest {
                 } else {
                     AdditionalGraphicSessionInstaller.stepsFor(plan)
                 }
+                assertTrue(steps.any { it.command == "apk update" })
                 val installCommand = steps.single { it.command.startsWith("apk add ") }.command
-                AlpineInstallProfileOverride.fullDesktopPackages.forEach { packageName ->
+                (AlpineInstallProfileOverride.baseX11Packages +
+                    AlpineInstallProfileOverride.fullDesktopPackages).forEach { packageName ->
                     assertTrue(installCommand.split(' ').contains(packageName))
                 }
             } finally {
@@ -90,7 +105,7 @@ class AlpineInstallProfilePolicyTest {
     }
 
     @Test
-    fun fullDesktopBundleDoesNotContainHostOwnedInfrastructure() {
+    fun alpineBaseAndFullDesktopBundleDoNotContainHostOwnedInfrastructure() {
         val blocked = setOf(
             "xorg-server",
             "lightdm",
@@ -104,6 +119,9 @@ class AlpineInstallProfilePolicyTest {
             "pipewire-pulse"
         )
 
-        assertFalse(AlpineInstallProfileOverride.fullDesktopPackages.any(blocked::contains))
+        assertFalse(
+            (AlpineInstallProfileOverride.baseX11Packages +
+                AlpineInstallProfileOverride.fullDesktopPackages).any(blocked::contains)
+        )
     }
 }
