@@ -7,38 +7,40 @@ import org.junit.Test
 class OpenRcGraphicSessionRuntimePolicyTest {
 
     @Test
-    fun startCommandRecoversStaleOpenRcStateBeforeRetryingSession() {
+    fun openRcStartVerifiesRealX11ClientHandshakeBeforeSessionStart() {
         val command = GraphicSessionRuntimeController.buildStartCommand(X11DisplaySlot(1))
 
-        assertTrue(command.contains("rm -f /etc/runlevels/default/x11-session"))
-        assertTrue(command.contains("rc-service x11-session zap"))
-        assertTrue(command.contains("rm -f /run/x11-session.pid"))
-        assertTrue(command.contains("__SAAS_X11_ACTION__=crashed-reset"))
-        assertTrue(command.contains("__SAAS_X11_ACTION__=service-state-reset"))
+        assertTrue(command.contains("display=':1'"))
+        assertTrue(command.contains("command -v xset"))
+        assertTrue(command.contains("DISPLAY=\"\$display\" xset q"))
+        assertTrue(command.contains("__SAAS_X11_ACTION__=x11-client-ready"))
+        assertTrue(command.contains("__SAAS_X11_ACTION__=x11-client-not-ready"))
+        assertTrue(command.indexOf("DISPLAY=\"\$display\" xset q") < command.indexOf("rc-service x11-session start"))
+    }
+
+    @Test
+    fun openRcStartCapturesTheActualServiceStartResult() {
+        val command = GraphicSessionRuntimeController.buildStartCommand(X11DisplaySlot(1))
+
+        assertTrue(command.contains("start_output=\$(rc-service x11-session start 2>&1)"))
         assertTrue(command.contains("__SAAS_X11_ACTION__=start-exit="))
-    }
-
-    @Test
-    fun startCommandCanConfirmLiveOpenRcPidWithoutStartingDuplicateDesktop() {
-        val command = GraphicSessionRuntimeController.buildStartCommand(X11DisplaySlot(3))
-
-        assertTrue(command.contains("cat /run/x11-session.pid"))
-        assertTrue(command.contains("kill -0"))
-        assertTrue(command.contains("__SAAS_X11_ACTION__=pid-active"))
-    }
-
-    @Test
-    fun openRcFailureDiagnosticsTravelOnCapturedStdout() {
-        val command = GraphicSessionRuntimeController.buildStartCommand(X11DisplaySlot(1))
-
-        assertTrue(command.contains("__SAAS_X11_DIAG__=openrc session did not stabilize"))
+        assertTrue(command.contains("__SAAS_X11_DIAG__=openrc start:"))
         assertTrue(command.contains("__SAAS_X11_DIAG__=service status:"))
-        assertTrue(command.contains("__SAAS_X11_DIAG__=pidfile:"))
-        assertFalse(command.contains("__SAAS_X11_DIAG__=openrc session did not stabilize' >&2"))
     }
 
     @Test
-    fun systemdStillResetsFailedStateIndependently() {
+    fun runtimeNoLongerMutatesOpenRcStateBasedOnAnUnprovenCrashTheory() {
+        val command = GraphicSessionRuntimeController.buildStartCommand(X11DisplaySlot(1))
+        val stop = GraphicSessionRuntimeController.buildStopCommand()
+
+        assertFalse(command.contains("rc-service x11-session zap"))
+        assertFalse(command.contains("rm -f /etc/runlevels/default/x11-session"))
+        assertFalse(command.contains("rm -f /run/x11-session.pid"))
+        assertFalse(stop.contains("rc-service x11-session zap"))
+    }
+
+    @Test
+    fun systemdPathKeepsItsExistingFailureResetBehavior() {
         val command = GraphicSessionRuntimeController.buildStartCommand(X11DisplaySlot(0))
 
         assertTrue(command.contains("systemctl reset-failed x11-session.service"))
