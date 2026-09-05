@@ -179,7 +179,7 @@ internal fun GraphicSessionUserPicker(
 
         UserChoice(
             title = "Create a user",
-            subtitle = "Creates a basic account with its own home. No admin groups are added.",
+            subtitle = "Creates a basic account with its own home. No admin groups or password login are configured.",
             selected = selection.createIfMissing,
             onClick = {
                 onSelectionChange(
@@ -195,12 +195,11 @@ internal fun GraphicSessionUserPicker(
             OutlinedTextField(
                 value = newUserName,
                 onValueChange = { value ->
-                    val normalized = value.lowercase()
-                    if (normalized.length <= 32 && normalized.none { it.isWhitespace() }) {
-                        newUserName = normalized
+                    if (value.length <= 32 && value.none { it.isWhitespace() }) {
+                        newUserName = value
                         onSelectionChange(
                             GraphicSessionUserSelection(
-                                userName = normalized,
+                                userName = value,
                                 createIfMissing = true
                             )
                         )
@@ -209,7 +208,7 @@ internal fun GraphicSessionUserPicker(
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("User name") },
                 supportingText = {
-                    Text("Lower-case Linux user name. Home and UID/GID are created automatically.")
+                    Text("Case-sensitive Linux user name. Home and UID/GID are created automatically.")
                 },
                 singleLine = true,
                 isError = newUserName.isNotEmpty() &&
