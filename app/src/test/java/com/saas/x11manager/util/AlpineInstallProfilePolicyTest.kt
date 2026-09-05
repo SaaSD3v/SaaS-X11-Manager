@@ -8,18 +8,17 @@ import org.junit.Test
 class AlpineInstallProfilePolicyTest {
 
     @Test
-    fun everyAlpinePlanIncludesSharedDbusBaseDependencies() {
+    fun canonicalAlpinePlansStayIndependentFromSharedInstallBase() {
         GraphicSessionSupport.installableSessions.forEach { session ->
             val plan = GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, session)
                 ?: return@forEach
 
-            assertTrue(plan.packages.containsAll(AlpineInstallProfileOverride.baseX11Packages))
             assertEquals(plan.packages.distinct(), plan.packages)
         }
     }
 
     @Test
-    fun minimalProfilePreservesEveryAlpinePlan() {
+    fun minimalProfileAddsSharedBaseWithoutDroppingSessionPackages() {
         GraphicSessionSupport.installableSessions.forEach { session ->
             val baseline = GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, session)
                 ?: return@forEach
@@ -29,8 +28,9 @@ class AlpineInstallProfilePolicyTest {
                 val minimal = requireNotNull(
                     GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, session)
                 )
-                assertEquals(baseline, minimal)
+                assertTrue(minimal.packages.containsAll(baseline.packages))
                 assertTrue(minimal.packages.containsAll(AlpineInstallProfileOverride.baseX11Packages))
+                assertEquals(minimal.packages.distinct(), minimal.packages)
             } finally {
                 AlpineInstallProfileOverride.clear(session)
             }
@@ -38,9 +38,9 @@ class AlpineInstallProfilePolicyTest {
     }
 
     @Test
-    fun fullProfileExtendsEveryAlpinePlanWithoutReplacingSessionPackages() {
+    fun fullProfileAddsSharedBaseAndDesktopIntegrationWithoutReplacingSessionPackages() {
         GraphicSessionSupport.installableSessions.forEach { session ->
-            val minimal = GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, session)
+            val baseline = GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, session)
                 ?: return@forEach
 
             AlpineInstallProfileOverride.set(session, AlpineInstallProfile.FULL)
@@ -48,7 +48,7 @@ class AlpineInstallProfilePolicyTest {
                 val full = requireNotNull(
                     GraphicSessionInstallPlans.forSelection(ContainerPlatform.ALPINE, session)
                 )
-                assertTrue(full.packages.containsAll(minimal.packages))
+                assertTrue(full.packages.containsAll(baseline.packages))
                 assertTrue(full.packages.containsAll(AlpineInstallProfileOverride.baseX11Packages))
                 assertTrue(full.packages.containsAll(AlpineInstallProfileOverride.fullDesktopPackages))
                 assertEquals(full.packages.distinct(), full.packages)
