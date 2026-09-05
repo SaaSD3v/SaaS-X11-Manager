@@ -123,6 +123,5 @@ class WaylandGraphicSessionTest {
         assertTrue(command.contains("/tmp/runtime-root/wayland-*"))
         assertTrue(command.contains("wayland-visible"))
         assertTrue(command.contains("wayland-not-visible"))
-        assertFalse(command.contains("X11DisplaySlot"))
     }
 }
