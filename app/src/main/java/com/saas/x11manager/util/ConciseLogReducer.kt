@@ -210,14 +210,17 @@ internal class ConciseLogReducer {
 
         if (isRoutineDetail(body) || looksLikePackageManagerNoise(message)) return emptyList()
 
-        // These are recovered/intermediate conditions. Final success/failure is
-        // already logged separately and is the only thing useful in the compact UI.
+        // These are recovered/intermediate conditions. A final success or failure
+        // is emitted separately and is the only useful result in the compact UI.
         if (body.startsWith("X11 transport socket setup service returned", ignoreCase = true) ||
             body.startsWith("Container X11 transport socket was not visible during the prerequisite check", ignoreCase = true) ||
             body.startsWith("Port 4713 could not be bound", ignoreCase = true) ||
             body.startsWith("Port 4713 could not load", ignoreCase = true) ||
             body.startsWith("Selected audio port:", ignoreCase = true) ||
-            body.equals("Graphical startup will continue", ignoreCase = true)) {
+            body.equals("Graphical startup will continue", ignoreCase = true) ||
+            (body.contains("is ready, but", ignoreCase = true) &&
+                body.contains("could not be confirmed active", ignoreCase = true)) ||
+            body.contains("is ready, but the configured graphic session is not active", ignoreCase = true)) {
             return emptyList()
         }
 
