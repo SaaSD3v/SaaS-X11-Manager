@@ -43,7 +43,7 @@ internal fun presentTerminalLogs(
             if (plainMessage.contains('\n')) {
                 plainMessage.lineSequence()
                     .map(String::trim)
-                    .filter(String::isNotEmpty)
+                    .filter { it.isNotEmpty() }
                     .forEach { line ->
                         presentOne(level, line, x11Ready, sessionReady, audioReady)?.let(::add)
                     }
@@ -54,7 +54,7 @@ internal fun presentTerminalLogs(
         }
     }
 
-    return presented.fold(mutableListOf()) { output, entry ->
+    return presented.fold(mutableListOf<Pair<Int, String>>()) { output, entry ->
         if (output.lastOrNull()?.second != entry.second) output.add(entry)
         output
     }
@@ -203,7 +203,7 @@ private fun summarizeDroidSpacesStart(
     level: Int,
     message: String
 ): List<Pair<Int, String>> {
-    val lines = message.lineSequence().map(String::trim).filter(String::isNotEmpty).toList()
+    val lines = message.lineSequence().map(String::trim).filter { it.isNotEmpty() }.toList()
     val containerLine = lines.firstOrNull { it.startsWith("Container:") }
     val os = lines.firstOrNull { it.startsWith("OS:") }?.substringAfter(':')?.trim()
     val natIp = lines.firstOrNull { it.startsWith("NAT IP:") }?.substringAfter(':')?.trim()
@@ -213,8 +213,8 @@ private fun summarizeDroidSpacesStart(
         val name = containerLine.substringAfter("Container:").substringBefore("(").trim()
         val status = containerLine.substringAfter('(', "").substringBefore(')', "").trim()
         val details = buildList {
-            os?.takeIf(String::isNotEmpty)?.let(::add)
-            natIp?.takeIf(String::isNotEmpty)?.let { add("NAT $it") }
+            os?.takeIf { it.isNotEmpty() }?.let { add(it) }
+            natIp?.takeIf { it.isNotEmpty() }?.let { add("NAT $it") }
         }.joinToString(" · ")
         val statusText = if (status.equals("RUNNING", ignoreCase = true)) "running" else status.lowercase()
         result += level to buildString {
@@ -230,7 +230,7 @@ private fun summarizeDroidSpacesStart(
                 it.startsWith("[!]")
         }
         .map { it.removePrefix("[!]").removePrefix("WARNING:").trim() }
-        .filter(String::isNotEmpty)
+        .filter { it.isNotEmpty() }
         .distinct()
         .forEach { warning -> result += level to "[CONTAINER] ! $warning" }
 
@@ -238,10 +238,10 @@ private fun summarizeDroidSpacesStart(
 }
 
 private fun removeLegacyMarker(message: String): String = when {
-    message.startsWith("[+]" ) -> message.removePrefix("[+]").trim()
-    message.startsWith("[*]" ) -> message.removePrefix("[*]").trim()
-    message.startsWith("[!]" ) -> message.removePrefix("[!]").trim()
-    message.startsWith("[-]" ) -> message.removePrefix("[-]").trim()
+    message.startsWith("[+]") -> message.removePrefix("[+]").trim()
+    message.startsWith("[*]") -> message.removePrefix("[*]").trim()
+    message.startsWith("[!]") -> message.removePrefix("[!]").trim()
+    message.startsWith("[-]") -> message.removePrefix("[-]").trim()
     else -> message.trim()
 }
 
@@ -275,7 +275,8 @@ private fun inferComponent(body: String): String {
     val value = body.lowercase()
     return when {
         value.contains("pulseaudio") || value.contains("audio") ||
-            value.contains("aaudio") || value.contains("opensl") -> "AUDIO"
+            value.contains("aaudio") || value.contains("opensl") ||
+            (value.startsWith("port ") && value.contains("bound")) -> "AUDIO"
         value.contains("vnc") -> "VNC"
         value.contains("user") || value.contains("account") -> "USER"
         value.contains("session") || value.contains("icewm") || value.contains("xfce") ||
