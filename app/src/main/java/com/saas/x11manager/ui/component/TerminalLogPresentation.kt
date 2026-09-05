@@ -35,8 +35,10 @@ internal fun presentTerminalLogs(
             val plainMessage = AnsiColorParser.stripAnsi(original).trim()
             if (plainMessage.isEmpty()) return@forEach
 
+            // DroidSpaces owns this block. Do not reinterpret, shorten or duplicate
+            // its banner, feature list or warnings in the concise Manager view.
+            // The complete original block remains available unchanged in Details.
             if (looksLikeDroidSpacesStartBlock(plainMessage)) {
-                addAll(summarizeDroidSpacesStart(level, plainMessage))
                 return@forEach
             }
 
@@ -85,6 +87,16 @@ private fun presentOne(
     if (message.startsWith("---") && message.endsWith("---")) return null
 
     val body = removeLegacyMarker(message)
+
+    // Keep the Manager's normal view about lifecycle only. DroidSpaces' own
+    // startup banner/warnings stay untouched in Details instead of being copied
+    // into a second, shortened representation.
+    if (body.startsWith("Starting container", ignoreCase = true)) {
+        return level to "[CONTAINER] Starting container"
+    }
+    if (body.startsWith("Container runtime active", ignoreCase = true)) {
+        return level to "[CONTAINER] ✓ Container started"
+    }
 
     if (isRoutineDetail(body)) return null
     if (looksLikePackageManagerNoise(message)) return null
@@ -144,6 +156,7 @@ private fun isRoutineDetail(body: String): Boolean {
         "User-aware graphical session launcher ready",
         "Assigned Monitor ",
         "Preparing container X11 config",
+        "Reading existing container configuration",
         "Container config read",
         "Integrated X11 container config already ready",
         "Container X11 configuration confirmed",
@@ -153,9 +166,7 @@ private fun isRoutineDetail(body: String): Boolean {
         "Launching integrated X11 app_process",
         "Waiting up to ",
         "X11 socket:",
-        "Starting container",
         "Confirming container runtime",
-        "Container runtime active",
         "Waiting for container command readiness",
         "Container command channel ready",
         "Synchronizing configured graphic session",
@@ -198,44 +209,6 @@ private fun looksLikePackageManagerNoise(message: String): Boolean {
 private fun looksLikeDroidSpacesStartBlock(message: String): Boolean =
     message.contains("Welcome to Droidspaces", ignoreCase = true) &&
         message.lineSequence().any { it.trimStart().startsWith("Container:") }
-
-private fun summarizeDroidSpacesStart(
-    level: Int,
-    message: String
-): List<Pair<Int, String>> {
-    val lines = message.lineSequence().map(String::trim).filter { it.isNotEmpty() }.toList()
-    val containerLine = lines.firstOrNull { it.startsWith("Container:") }
-    val os = lines.firstOrNull { it.startsWith("OS:") }?.substringAfter(':')?.trim()
-    val natIp = lines.firstOrNull { it.startsWith("NAT IP:") }?.substringAfter(':')?.trim()
-
-    val result = mutableListOf<Pair<Int, String>>()
-    if (containerLine != null) {
-        val name = containerLine.substringAfter("Container:").substringBefore("(").trim()
-        val status = containerLine.substringAfter('(', "").substringBefore(')', "").trim()
-        val details = buildList {
-            os?.takeIf { it.isNotEmpty() }?.let { add(it) }
-            natIp?.takeIf { it.isNotEmpty() }?.let { add("NAT $it") }
-        }.joinToString(" · ")
-        val statusText = if (status.equals("RUNNING", ignoreCase = true)) "running" else status.lowercase()
-        result += level to buildString {
-            append("[CONTAINER] ✓ $name")
-            if (statusText.isNotEmpty()) append(" $statusText")
-            if (details.isNotEmpty()) append(" · $details")
-        }
-    }
-
-    lines
-        .filter {
-            it.startsWith("WARNING:", ignoreCase = true) ||
-                it.startsWith("[!]")
-        }
-        .map { it.removePrefix("[!]").removePrefix("WARNING:").trim() }
-        .filter { it.isNotEmpty() }
-        .distinct()
-        .forEach { warning -> result += level to "[CONTAINER] ! $warning" }
-
-    return result
-}
 
 private fun removeLegacyMarker(message: String): String = when {
     message.startsWith("[+]") -> message.removePrefix("[+]").trim()
