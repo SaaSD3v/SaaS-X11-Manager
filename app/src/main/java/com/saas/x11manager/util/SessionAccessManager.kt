@@ -123,9 +123,9 @@ object SessionAccessManager {
         logger: ContainerLogger?
     ) {
         // Keep the physically validated HOST finalizer unchanged. NAT currently
-        // uses the Manager's tracked-listener path because that path can create
-        // and verify a listener without requiring `pactl list modules`, which is
-        // unavailable on the physical DroidSpaces v6.5.0 test device.
+        // uses the Manager's tracked-listener path. Before that path runs, test
+        // the base NAT listener with the exact environment used by the physically
+        // validated v3.2 HOST+NAT script so any load/probe failure is observable.
         val mode = ContainerManager.getContainerInfo(containerName)
             ?.netMode
             ?.trim()
@@ -133,6 +133,7 @@ object SessionAccessManager {
 
         if (mode == "nat") {
             logger?.i("[CTX] NAT audio finalizer: tracked authenticated listener")
+            PulseAudioNatPreflight.ensureBaseListener(logger)
             PulseAudioFixManager.finalizeAfterContainerReady(
                 containerName = containerName,
                 logger = logger
