@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.saas.x11manager.util.AnsiColorParser
+import com.saas.x11manager.util.ConciseLogReducer
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -149,7 +150,13 @@ fun TerminalDialog(
                             .clickable(
                                 enabled = canCopy,
                                 onClick = {
-                                    val logText = logs.joinToString("\n") { AnsiColorParser.stripAnsi(it.second) }
+                                    val reducer = ConciseLogReducer()
+                                    val copiedLogs = logs.flatMap { (level, message) ->
+                                        reducer.reduce(level, message)
+                                    }
+                                    val logText = copiedLogs.joinToString("\n") {
+                                        AnsiColorParser.stripAnsi(it.second)
+                                    }
                                     val clipboard = context.getSystemService(ClipboardManager::class.java)
                                     val clip = ClipData.newPlainText("Terminal Logs", logText)
                                     clipboard.setPrimaryClip(clip)
