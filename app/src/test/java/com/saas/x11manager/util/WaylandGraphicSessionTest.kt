@@ -85,10 +85,12 @@ class WaylandGraphicSessionTest {
     }
 
     @Test
-    fun waylandSessionLauncherKeepsDynamicX11TransportAndWaylandIdentity() {
+    fun waylandSessionLauncherUsesFixedX0TransportAndWaylandIdentity() {
         val script = GraphicSessionInitFiles.sessionScript(GraphicSession.WESTON, "/bin/sh")
 
-        assertTrue(script.contains("export DISPLAY=:\$X11_DISPLAY_NUMBER"))
+        assertTrue(script.contains("export DISPLAY=:0"))
+        assertTrue(script.contains("export SAAS_HOST_DISPLAY=:0"))
+        assertFalse(script.contains("X11_DISPLAY_NUMBER"))
         assertTrue(script.contains("export XDG_SESSION_TYPE=wayland"))
         assertTrue(script.contains("export SAAS_WAYLAND_SOCKET=wayland-0"))
         assertTrue(script.contains("unset WAYLAND_DISPLAY"))
@@ -110,15 +112,17 @@ class WaylandGraphicSessionTest {
     }
 
     @Test
-    fun runtimeControllerRequiresWaylandSocketForWaylandSessions() {
+    fun runtimeControllerRequiresWaylandSocketOnFixedX0() {
         val command = GraphicSessionRuntimeController.buildStartCommand(
-            X11DisplaySlot(2),
             requireWaylandSocket = true
         )
 
+        assertTrue(command.contains("expected='/tmp/.X11-unix/X0'"))
+        assertTrue(command.contains("display=':0'"))
         assertTrue(command.contains("require_wayland=1"))
         assertTrue(command.contains("/tmp/runtime-root/wayland-*"))
         assertTrue(command.contains("wayland-visible"))
         assertTrue(command.contains("wayland-not-visible"))
+        assertFalse(command.contains("X11DisplaySlot"))
     }
 }
