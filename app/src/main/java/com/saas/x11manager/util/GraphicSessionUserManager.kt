@@ -40,6 +40,7 @@ data class GraphicSessionUserPreparation(
 object GraphicSessionUserManager {
     private const val SETTINGS_DIR = "/etc/saas-x11-manager"
     private const val SETTINGS_FILE = "$SETTINGS_DIR/session-user"
+    private const val SESSION_LAUNCHER = "/usr/local/bin/x11-session.sh"
     private val validUserName = Regex("^[a-z_][a-z0-9_-]{0,31}$")
     private val selectedForStart = ConcurrentHashMap<String, GraphicSessionUserSelection>()
 
@@ -90,13 +91,14 @@ object GraphicSessionUserManager {
         }
 
     /**
-     * Persists the selected user before the normal X11 lifecycle begins.
-     * Stopped containers are edited through their rootfs; running containers are
-     * updated through the DroidSpaces command channel. No container lifecycle is
-     * changed here.
+     * Persists the selected user and refreshes the generic session launcher
+     * before the normal X11 lifecycle begins. Stopped containers are edited
+     * through their rootfs; running containers use the DroidSpaces command
+     * channel. No container lifecycle is changed here.
      */
     suspend fun prepareForStart(
         containerName: String,
+        session: GraphicSession,
         logger: ContainerLogger? = null
     ): GraphicSessionUserPreparation? = withContext(Dispatchers.IO) {
         val info = ContainerManager.getContainerInfo(containerName) ?: run {
@@ -112,9 +114,12 @@ object GraphicSessionUserManager {
         }
 
         val previous = readPersistedSelection(info)
-        val written = writePersistedSelection(info, requested)
-        if (!written) {
+        if (!writePersistedSelection(info, requested)) {
             logger?.e("[-] Could not persist graphical user selection for $containerName")
+            return@withContext null
+        }
+        if (!writeCurrentSessionLauncher(info, session)) {
+            logger?.e("[-] Could not refresh the user-aware graphical session launcher")
             return@withContext null
         }
 
@@ -124,6 +129,7 @@ object GraphicSessionUserManager {
         } else {
             logger?.i("[CTX] User policy: existing account required")
         }
+        logger?.i("[+] User-aware graphical session launcher ready")
         GraphicSessionUserPreparation(requested, previous != requested)
     }
 
@@ -172,6 +178,37 @@ object GraphicSessionUserManager {
                 Shell.cmd(
                     "mkdir -p $dir && chmod 755 $dir && " +
                         "printf '%s' ${shellQuote(body)} > $file && chmod 600 $file"
+                ).exec().isSuccess
+            } ?: false
+        }
+    }
+
+    private fun writeCurrentSessionLauncher(
+        info: ContainerInfo,
+        session: GraphicSession
+    ): Boolean {
+        val shell = when (info.initSystem) {
+            InitSystem.OPENRC -> "/bin/sh"
+            InitSystem.SYSTEMD -> "/bin/bash"
+        }
+        val script = GraphicSessionInitFiles.sessionScript(session, shell)
+        return if (info.isRunning) {
+            val command =
+                "mkdir -p /usr/local/bin && " +
+                    "printf '%s' ${shellQuote(script)} > $SESSION_LAUNCHER && " +
+                    "chmod 755 $SESSION_LAUNCHER"
+            runContainerCommand(info.name, command).isSuccess
+        } else {
+            RootfsAccessor.use(
+                rootfsPath = info.rootfsPath,
+                tag = "graphic_user_launcher_${info.name}"
+            ) { root ->
+                val directory = shellQuote("$root/usr/local/bin")
+                val launcher = shellQuote("$root$SESSION_LAUNCHER")
+                Shell.cmd(
+                    "mkdir -p $directory && " +
+                        "printf '%s' ${shellQuote(script)} > $launcher && " +
+                        "chmod 755 $launcher"
                 ).exec().isSuccess
             } ?: false
         }
