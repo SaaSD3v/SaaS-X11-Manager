@@ -58,6 +58,19 @@ object GraphicSessionUserManager {
     fun selectedForNextStart(containerName: String): GraphicSessionUserSelection? =
         selectedForStart[containerName]
 
+    /**
+     * Returns the effective saved graphical-user choice without changing the
+     * container or its lifecycle. In-memory selections win for the current app
+     * process; otherwise the persisted per-container choice is restored.
+     */
+    suspend fun currentSelection(containerName: String): GraphicSessionUserSelection? =
+        withContext(Dispatchers.IO) {
+            selectedForStart[containerName]?.let { return@withContext it }
+            val info = ContainerManager.getContainerInfo(containerName)
+                ?: return@withContext null
+            readPersistedSelection(info)
+        }
+
     internal fun parsePasswd(lines: List<String>): List<GraphicSessionUser> =
         lines.mapNotNull { line ->
             val parts = line.split(':')
