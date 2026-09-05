@@ -8,11 +8,9 @@ internal enum class AlpineInstallProfile {
 }
 
 /**
- * Applies the shared Alpine graphical base dependencies and holds the optional
- * desktop integration profile only while one install/reinstall is running.
- * Every Alpine graphical plan gets DBus and lightweight X11 client utilities;
- * FULL adds a small distro-native desktop integration bundle without adding an
- * X server, display manager or audio stack.
+ * Holds the Alpine package profile only while one install/reinstall is running.
+ * Shared graphical base dependencies are injected into that install transaction
+ * instead of changing the canonical distro/session package catalog.
  */
 internal object AlpineInstallProfileOverride {
 
@@ -43,11 +41,12 @@ internal object AlpineInstallProfileOverride {
 
     fun apply(plan: GraphicSessionInstallPlan): GraphicSessionInstallPlan {
         if (plan.platform != ContainerPlatform.ALPINE) return plan
+        val profile = values[plan.session] ?: return plan
 
         val packages = buildList {
             addAll(baseX11Packages)
             addAll(plan.packages)
-            if (values[plan.session] == AlpineInstallProfile.FULL) {
+            if (profile == AlpineInstallProfile.FULL) {
                 addAll(fullDesktopPackages)
             }
         }.distinct()
