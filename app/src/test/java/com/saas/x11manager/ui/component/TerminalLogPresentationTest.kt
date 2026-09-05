@@ -45,6 +45,7 @@ class TerminalLogPresentationTest {
             5 to "[!] Container X11 transport socket was not visible during the prerequisite check",
             4 to "[+] IceWM X11 session active on Monitor 1 (:0)",
             5 to "[!] Port 4713 could not be bound or verified on 172.28.0.1; selecting another automatically",
+            4 to "[+] Authenticated PulseAudio listener ready on 172.28.0.1:4715",
             4 to "[+] Audio ready (AAudio_sink, tcp:172.28.0.1:4715)"
         )
 
