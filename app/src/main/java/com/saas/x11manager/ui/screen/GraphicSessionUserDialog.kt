@@ -47,6 +47,12 @@ internal fun GraphicSessionUserDialog(
         mutableStateOf(GraphicSessionUserSelection.ROOT)
     }
 
+    LaunchedEffect(containerName) {
+        GraphicSessionUserManager.currentSelection(containerName)?.let { saved ->
+            selection = saved
+        }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
