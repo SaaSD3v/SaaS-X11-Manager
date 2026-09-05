@@ -15,18 +15,18 @@ class ConciseLogReducerTest {
             addAll(reducer.reduce(Log.INFO, "[CTX] Access method: Integrated X11"))
             addAll(reducer.reduce(Log.INFO, "[CTX] Session: IceWM"))
             addAll(reducer.reduce(Log.INFO, "[CTX] Graphic user: SaaS"))
-            addAll(reducer.reduce(Log.INFO, "[CTX] Selected runtime: /data/local/tmp/saas-x11/display-0"))
-            addAll(reducer.reduce(Log.INFO, "[+] Monitor 1 (:0) ready (PID=1234)"))
-            addAll(reducer.reduce(Log.INFO, "[+] Integrated X11 ready on Monitor 1 (:0)"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Runtime: /data/local/tmp/saas-x11"))
+            addAll(reducer.reduce(Log.INFO, "[+] Integrated X11 session started on :0"))
+            addAll(reducer.reduce(Log.INFO, "[+] Integrated X11 ready on :0"))
         }.map { it.second }
 
         assertTrue(output.contains("[SESSION] Starting graphical access"))
         assertTrue(output.contains("[SESSION] • Access: Integrated X11"))
         assertTrue(output.contains("[SESSION] • Desktop: IceWM"))
         assertTrue(output.contains("[USER] • Desktop user: SaaS"))
-        assertTrue(output.contains("[X11] ✓ Monitor 1 (:0) ready (PID=1234)"))
-        assertTrue(output.contains("[X11] ✓ Integrated X11 ready on Monitor 1 (:0)"))
-        assertFalse(output.any { it.contains("Selected runtime") })
+        assertTrue(output.contains("[X11] ✓ Integrated X11 session started on :0"))
+        assertTrue(output.contains("[X11] ✓ Integrated X11 ready on :0"))
+        assertFalse(output.any { it.contains("Runtime:") })
     }
 
     @Test
@@ -98,13 +98,13 @@ class ConciseLogReducerTest {
     fun graphicalRetryShowsOnlyFinalFailure() {
         val reducer = ConciseLogReducer()
         val output = buildList {
-            addAll(reducer.reduce(Log.WARN, "[!] Monitor 2 (:1) is ready, but IceWM could not be confirmed active (exit 1)"))
-            addAll(reducer.reduce(Log.WARN, "[!] Monitor 2 (:1) is ready, but the configured graphic session is not active"))
-            addAll(reducer.reduce(Log.ERROR, "[-] IceWM did not become active on Monitor 2 (:1)"))
+            addAll(reducer.reduce(Log.WARN, "[!] :0 is ready, but IceWM could not be confirmed active (exit 1)"))
+            addAll(reducer.reduce(Log.WARN, "[!] :0 is ready, but the configured graphic session is not active"))
+            addAll(reducer.reduce(Log.ERROR, "[-] IceWM did not become active on :0"))
         }.map { it.second }
 
         assertFalse(output.any { it.contains("could not be confirmed active") })
         assertFalse(output.any { it.contains("configured graphic session is not active") })
-        assertTrue(output.contains("[SESSION] ✗ IceWM did not become active on Monitor 2 (:1)"))
+        assertTrue(output.contains("[SESSION] ✗ IceWM did not become active on :0"))
     }
 }
