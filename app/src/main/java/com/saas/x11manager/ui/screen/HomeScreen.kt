@@ -19,6 +19,7 @@ import com.saas.x11manager.ui.component.ContainerCardActions
 import com.saas.x11manager.ui.component.TerminalDialog
 import com.saas.x11manager.util.ContainerInfo
 import com.saas.x11manager.util.GraphicSessionUserManager
+import com.saas.x11manager.util.GraphicSessionUserSelection
 import com.saas.x11manager.util.SessionAccessMode
 import com.saas.x11manager.util.VncSettings
 
@@ -116,6 +117,7 @@ fun HomeScreen(
                 ) {
                     items(containers, key = { it.name }) { container ->
                         val accessMode = VncSettings.getAccessMode(context, container.name)
+                        val vncPort = VncSettings.getPort(context, container.name)
                         val startLabel = when (accessMode) {
                             SessionAccessMode.INTEGRATED_X11 -> "Start X11"
                             SessionAccessMode.VNC -> "Start VNC"
@@ -134,7 +136,19 @@ fun HomeScreen(
                                 },
                                 onShowLogs = { viewModel.showLogs(container) },
                                 onStartX11 = {
-                                    pendingStartContainer = container
+                                    if (accessMode == SessionAccessMode.VNC) {
+                                        GraphicSessionUserManager.selectForNextStart(
+                                            container.name,
+                                            GraphicSessionUserSelection.ROOT
+                                        )
+                                        viewModel.startSession(
+                                            container = container,
+                                            accessMode = accessMode,
+                                            vncPort = vncPort
+                                        )
+                                    } else {
+                                        pendingStartContainer = container
+                                    }
                                 },
                                 onStop = { viewModel.stopContainer(container) },
                                 onEdit = {
