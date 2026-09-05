@@ -43,12 +43,16 @@ internal object GraphicSessionInitFiles {
             "    if command -v apk >/dev/null 2>&1; then\n" +
             "        adduser -D \"\$SESSION_USER\" || exit 1\n" +
             "    elif command -v adduser >/dev/null 2>&1; then\n" +
+            "        ADDUSER_NAME_OPT=\n" +
             "        if adduser --help 2>&1 | grep -q -- '--allow-bad-names'; then\n" +
-            "            adduser --allow-bad-names --disabled-password --gecos '' \"\$SESSION_USER\" || exit 1\n" +
+            "            ADDUSER_NAME_OPT=--allow-bad-names\n" +
             "        elif adduser --help 2>&1 | grep -q -- '--force-badname'; then\n" +
-            "            adduser --force-badname --disabled-password --gecos '' \"\$SESSION_USER\" || exit 1\n" +
+            "            ADDUSER_NAME_OPT=--force-badname\n" +
+            "        fi\n" +
+            "        if adduser --help 2>&1 | grep -q -- '--comment'; then\n" +
+            "            adduser \$ADDUSER_NAME_OPT --disabled-password --comment '' \"\$SESSION_USER\" || exit 1\n" +
             "        else\n" +
-            "            adduser --disabled-password --gecos '' \"\$SESSION_USER\" || exit 1\n" +
+            "            adduser \$ADDUSER_NAME_OPT --disabled-password --gecos '' \"\$SESSION_USER\" || exit 1\n" +
             "        fi\n" +
             "    elif command -v useradd >/dev/null 2>&1; then\n" +
             "        useradd -m \"\$SESSION_USER\" || exit 1\n" +
