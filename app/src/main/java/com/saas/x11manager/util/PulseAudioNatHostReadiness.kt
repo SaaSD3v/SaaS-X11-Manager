@@ -6,20 +6,19 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 /**
- * Read-only/targeted host readiness gate for the NAT PulseAudio listener.
+ * Bounded host readiness gate for the NAT PulseAudio listener.
  *
- * It waits for DroidSpaces' canonical 172.28.0.1 endpoint and detects an
- * existing 172.28.0.1:4713 listener before PulseAudioNatPreflight tries to load
- * module-native-protocol-tcp. It may terminate a listener owner only when that
- * process is positively proven to be a stale X11 Manager PulseAudio core:
- * same Termux UID, pulseaudio cmdline, Manager-private HOME, and not the PID in
- * the current Manager core pid file. Unrelated listeners are never modified.
+ * This deliberately avoids scanning /proc/[pid]/fd for every Android process.
+ * On older kernels that global walk can take an unbounded amount of time and
+ * stall the graphical-start finalizer. We only inspect /proc/net/tcp plus the
+ * small fd table of the current Manager PulseAudio PID.
+ *
+ * If 172.28.0.1:4713 is occupied by anything other than the current Manager
+ * core, readiness fails closed and leaves that process untouched.
  */
 object PulseAudioNatHostReadiness {
     private const val TERMUX_HOME = "/data/data/com.termux/files/home"
-    private const val TERMUX_PREFIX = "/data/data/com.termux/files/usr"
     private const val MANAGER_STATE = "$TERMUX_HOME/.saas-x11-manager/audio"
-    private const val MANAGER_PULSE_HOME = "$MANAGER_STATE/pulse-home"
     private const val MANAGER_PID_FILE = "$MANAGER_STATE/pulseaudio.pid"
     private const val NAT_GATEWAY = "172.28.0.1"
     private const val NAT_PORT = 4713
@@ -27,11 +26,9 @@ object PulseAudioNatHostReadiness {
     // /proc/net/tcp stores IPv4 octets little-endian. 172.28.0.1:4713.
     private const val PROC_LOCAL = "01001CAC:1269"
 
-    private data class ListenerOwner(
+    private data class ListenerSocket(
         val inode: String,
-        val pid: Int?,
-        val uid: Int?,
-        val command: String
+        val uid: Int?
     )
 
     suspend fun prepare(logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
@@ -42,10 +39,10 @@ object PulseAudioNatHostReadiness {
         }
 
         var gatewayReady = false
-        repeat(30) {
+        for (attempt in 0 until 30) {
             if (hostHasGateway()) {
                 gatewayReady = true
-                return@repeat
+                break
             }
             delay(100)
         }
@@ -58,48 +55,38 @@ object PulseAudioNatHostReadiness {
         val currentPid = currentManagerCorePid()
         logger?.i("[PA-NAT-HOST] current Manager PulseAudio PID=${currentPid ?: "unknown"}")
 
-        val owner = listenerOwner()
-        if (owner == null) {
+        // Give a just-terminated previous Manager core a short bounded grace
+        // period before testing the TCP table. This replaces the old global
+        // /proc fd walk and cannot block indefinitely.
+        delay(250)
+
+        val listener = listenerSocket()
+        if (listener == null) {
             logger?.i("[PA-NAT-HOST] $NAT_GATEWAY:$NAT_PORT is free before listener load")
             return@withContext true
         }
 
         logger?.w(
             "[PA-NAT-HOST] $NAT_GATEWAY:$NAT_PORT already LISTENs " +
-                "inode=${owner.inode} pid=${owner.pid ?: "unknown"} uid=${owner.uid ?: "unknown"}"
+                "inode=${listener.inode} uid=${listener.uid ?: "unknown"}"
         )
-        if (owner.command.isNotBlank()) {
-            logger?.w("[PA-NAT-HOST] listener cmd=${owner.command.take(300)}")
-        }
 
-        if (owner.pid != null && owner.pid == currentPid) {
-            logger?.i("[PA-NAT-HOST] Listener belongs to the current Manager audio core")
+        if (currentPid != null && processOwnsSocket(currentPid, listener.inode)) {
+            logger?.i("[PA-NAT-HOST] Listener belongs to the current Manager audio core PID=$currentPid")
             return@withContext true
         }
 
-        val stalePid = owner.pid
-        if (stalePid == null || !isOwnedStaleManagerCore(stalePid, termuxUid, currentPid)) {
-            logger?.w("[PA-NAT-HOST] Existing listener is not proven stale Manager state; it will not be modified")
-            return@withContext false
+        if (listener.uid != null && listener.uid != termuxUid) {
+            logger?.w(
+                "[PA-NAT-HOST] Listener UID ${listener.uid} is not the Termux UID $termuxUid; " +
+                    "it will not be modified"
+            )
+        } else {
+            logger?.w(
+                "[PA-NAT-HOST] Listener is not owned by the current Manager core; " +
+                    "global process scanning is intentionally disabled and nothing will be killed"
+            )
         }
-
-        logger?.w("[PA-NAT-HOST] Releasing stale Manager PulseAudio core PID=$stalePid")
-        try {
-            Shell.cmd("kill $stalePid 2>/dev/null || true").exec()
-        } catch (_: Exception) {
-        }
-
-        repeat(40) {
-            val live = pidAlive(stalePid)
-            val stillListening = listenerOwner()?.pid == stalePid
-            if (!live && !stillListening) {
-                logger?.i("[PA-NAT-HOST] Stale Manager listener released")
-                return@withContext true
-            }
-            delay(100)
-        }
-
-        logger?.w("[PA-NAT-HOST] Stale Manager core did not release $NAT_GATEWAY:$NAT_PORT")
         false
     }
 
@@ -148,69 +135,42 @@ object PulseAudioNatHostReadiness {
         }
     }
 
-    private fun listenerOwner(): ListenerOwner? {
+    private fun listenerSocket(): ListenerSocket? {
         val command = """
-            inode=''
             while read sl local remote state tx tr retr uid timeout ino rest; do
                 [ "${'$'}local" = ${q(PROC_LOCAL)} ] || continue
                 [ "${'$'}state" = 0A ] || continue
-                inode="${'$'}ino"
-                break
+                printf '%s|%s\n' "${'$'}ino" "${'$'}uid"
+                exit 0
             done < /proc/net/tcp 2>/dev/null
-            [ -n "${'$'}inode" ] || exit 1
-
-            owner_pid=''; owner_uid=''; owner_cmd=''
-            for fd in /proc/[0-9]*/fd/*; do
-                [ -e "${'$'}fd" ] || continue
-                link=${'$'}(readlink "${'$'}fd" 2>/dev/null || true)
-                [ "${'$'}link" = "socket:[${'$'}inode]" ] || continue
-                p=${'$'}{fd#/proc/}; p=${'$'}{p%%/*}
-                case "${'$'}p" in ''|*[!0-9]*) continue ;; esac
-                owner_pid="${'$'}p"
-                owner_uid=${'$'}(sed -n 's/^Uid:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "/proc/${'$'}p/status" 2>/dev/null | sed -n '1p')
-                owner_cmd=${'$'}(tr '\000' ' ' < "/proc/${'$'}p/cmdline" 2>/dev/null || true)
-                break
-            done
-            printf '%s|%s|%s|%s\n' "${'$'}inode" "${'$'}owner_pid" "${'$'}owner_uid" "${'$'}owner_cmd"
+            exit 1
         """.trimIndent()
 
         return try {
             val result = Shell.cmd(command).exec()
             if (!result.isSuccess) return null
-            val line = result.out.firstOrNull()?.trim().orEmpty()
-            val parts = line.split('|', limit = 4)
-            if (parts.isEmpty() || parts[0].isBlank()) null
-            else ListenerOwner(
-                inode = parts[0],
-                pid = parts.getOrNull(1)?.toIntOrNull(),
-                uid = parts.getOrNull(2)?.toIntOrNull(),
-                command = parts.getOrNull(3).orEmpty()
+            val parts = result.out.firstOrNull()?.trim().orEmpty().split('|', limit = 2)
+            val inode = parts.getOrNull(0)?.takeIf { it.isNotBlank() } ?: return null
+            ListenerSocket(
+                inode = inode,
+                uid = parts.getOrNull(1)?.toIntOrNull()
             )
         } catch (_: Exception) {
             null
         }
     }
 
-    private fun isOwnedStaleManagerCore(pid: Int, termuxUid: Int, currentPid: Int?): Boolean {
-        if (pid == currentPid) return false
+    private fun processOwnsSocket(pid: Int, inode: String): Boolean {
         val command = """
-            pid=$pid
-            [ -r "/proc/${'$'}pid/status" ] || exit 1
-            [ -r "/proc/${'$'}pid/cmdline" ] || exit 1
-            [ -r "/proc/${'$'}pid/environ" ] || exit 1
-            uid=${'$'}(sed -n 's/^Uid:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "/proc/${'$'}pid/status" | sed -n '1p')
-            [ "${'$'}uid" = $termuxUid ] || exit 2
-            cmd=${'$'}(tr '\000' ' ' < "/proc/${'$'}pid/cmdline" 2>/dev/null || true)
-            case "${'$'}cmd" in *pulseaudio*) : ;; *) exit 3 ;; esac
-            tr '\000' '\n' < "/proc/${'$'}pid/environ" 2>/dev/null | grep -Fxq ${q("HOME=$MANAGER_PULSE_HOME")} || exit 4
+            [ -d /proc/$pid/fd ] || exit 1
+            for fd in /proc/$pid/fd/*; do
+                [ -e "${'$'}fd" ] || continue
+                link=${'$'}(readlink "${'$'}fd" 2>/dev/null || true)
+                [ "${'$'}link" = ${q("socket:[$inode]")} ] && exit 0
+            done
+            exit 1
         """.trimIndent()
         return try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
-    }
-
-    private fun pidAlive(pid: Int): Boolean = try {
-        Shell.cmd("kill -0 $pid 2>/dev/null").exec().isSuccess
-    } catch (_: Exception) {
-        false
     }
 
     private fun q(value: String): String = "'" + value.replace("'", "'\\''") + "'"
