@@ -21,6 +21,23 @@ object SessionAccessManager {
         logger?.i("[CTX] Access method: ${accessMode.label}")
         logger?.i("[CTX] Session: ${session.label}")
         if (accessMode.requiresVnc) logger?.i("[CTX] VNC port: $vncPort")
+
+        val userPreparation = GraphicSessionUserManager.prepareForStart(
+            containerName = containerName,
+            logger = logger
+        ) ?: return false
+
+        // If a running Integrated X11 container is switching users, stop only
+        // its graphical session so the existing container and X11 server can be
+        // reused. The launcher will start again under the newly selected user.
+        if (
+            userPreparation.changed &&
+            accessMode != SessionAccessMode.VNC &&
+            ContainerManager.getContainerInfo(containerName)?.isRunning == true
+        ) {
+            logger?.i("[*] Graphical user changed; restarting only the managed desktop session")
+            X11SessionManager.stopContainerGraphicSession(containerName, logger)
+        }
         logger?.i("")
 
         // Prepare exactly one Manager-owned PulseAudio core. HOST and NAT share
