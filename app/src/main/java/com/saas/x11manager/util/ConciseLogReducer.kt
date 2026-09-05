@@ -206,8 +206,6 @@ internal class ConciseLogReducer {
 
         if (isRoutineDetail(body) || looksLikePackageManagerNoise(message)) return emptyList()
 
-        // Recovered/intermediate conditions are never retained. The caller emits
-        // one final success or failure after the retry/verification path finishes.
         if (body.startsWith("X11 transport socket setup service returned", ignoreCase = true) ||
             body.startsWith("Container X11 transport socket was not visible during the prerequisite check", ignoreCase = true) ||
             body.startsWith("Port 4713 could not be bound", ignoreCase = true) ||
@@ -227,11 +225,6 @@ internal class ConciseLogReducer {
         return listOf(level to formatSemanticMessage(message))
     }
 
-    /**
-     * Runtime logging is intentionally whitelist-based. Unknown informational or
-     * warning lines are diagnostic noise and must not silently become new UI logs.
-     * Hard errors are retained because they are actionable final outcomes.
-     */
     private fun isAllowedRuntimeEvent(message: String, body: String): Boolean {
         if (message.startsWith("[X11]") || message.startsWith("[SESSION]") ||
             message.startsWith("[USER]") || message.startsWith("[AUDIO]") ||
@@ -253,8 +246,7 @@ internal class ConciseLogReducer {
             body.startsWith("Manager audio core ready", ignoreCase = true) ||
             body.startsWith("Audio configuration disabled", ignoreCase = true) ||
             body.startsWith("Audio ready (", ignoreCase = true) ||
-            (body.startsWith("Monitor ", ignoreCase = true) && body.contains(" ready", ignoreCase = true)) ||
-            body.contains(" session active on Monitor ", ignoreCase = true) ||
+            body.contains(" session active on :0", ignoreCase = true) ||
             body.startsWith("Integrated X11 session started", ignoreCase = true) ||
             body.startsWith("Integrated X11 ready", ignoreCase = true) ||
             body.contains("VNC", ignoreCase = true)
@@ -271,7 +263,7 @@ internal class ConciseLogReducer {
     private fun isRoutineDetail(body: String): Boolean {
         val prefixes = listOf(
             "Saved access method:", "Saved VNC port:", "User policy:",
-            "User-aware graphical session launcher ready", "Assigned Monitor ",
+            "User-aware graphical session launcher ready",
             "Preparing container X11 config", "Reading existing container configuration",
             "Container config read", "Writing updated configuration atomically",
             "Atomic container config update complete", "Integrated X11 container config already ready",
@@ -288,8 +280,7 @@ internal class ConciseLogReducer {
             "Authenticated PulseAudio listener ready", "NAT audio transport verified from inside the container"
         )
         if (prefixes.any { body.startsWith(it, ignoreCase = true) }) return true
-        return body.startsWith("Monitor:", ignoreCase = true) ||
-            body.startsWith("X11 display:", ignoreCase = true) ||
+        return body.startsWith("X11 display:", ignoreCase = true) ||
             body.contains(" duration:", ignoreCase = true) ||
             body.contains(" exit code:", ignoreCase = true)
     }
@@ -391,7 +382,7 @@ internal class ConciseLogReducer {
             value.contains("user") || value.contains("account") -> "USER"
             value.contains("session") || value.contains("icewm") || value.contains("xfce") ||
                 value.contains("lxqt") || value.contains("openbox") || value.contains("desktop") -> "SESSION"
-            value.contains("x11") || value.contains("display") || value.contains("monitor") || value.contains("xkb") -> "X11"
+            value.contains("x11") || value.contains("display") || value.contains("xkb") -> "X11"
             value.contains("container") || value.contains("droidspaces") || value.contains("command channel") -> "CONTAINER"
             else -> "MANAGER"
         }
