@@ -25,8 +25,6 @@ object SessionAccessManager {
 
         // Prepare exactly one Manager-owned PulseAudio core. HOST and NAT share
         // this same AAudio/OpenSL ES daemon and private UNIX control socket.
-        // No Termux RUN_COMMAND bridge is needed: listener control happens later
-        // through the authenticated private UNIX socket.
         PulseAudioFixManager.prepareBeforeGraphicalStart(
             containerName = containerName,
             logger = logger
@@ -122,19 +120,18 @@ object SessionAccessManager {
         containerName: String,
         logger: ContainerLogger?
     ) {
-        // Keep the physically validated HOST finalizer unchanged. NAT currently
-        // uses the Manager's tracked-listener path. Before that path runs, test
-        // the base NAT listener with the exact environment used by the physically
-        // validated v3.2 HOST+NAT script so any load/probe failure is observable.
+        // HOST remains on the physically validated unified finalizer.
+        // NAT no longer invokes a second listener creator after the preflight:
+        // the APK has physically proven the authenticated 172.28.0.1:4713
+        // listener and now proceeds directly to the real container client proof.
         val mode = ContainerManager.getContainerInfo(containerName)
             ?.netMode
             ?.trim()
             ?.lowercase()
 
         if (mode == "nat") {
-            logger?.i("[CTX] NAT audio finalizer: tracked authenticated listener")
-            PulseAudioNatPreflight.ensureBaseListener(logger)
-            PulseAudioFixManager.finalizeAfterContainerReady(
+            logger?.i("[CTX] NAT audio finalizer: validated listener -> container client")
+            PulseAudioNatPreflight.finalizeAfterContainerReady(
                 containerName = containerName,
                 logger = logger
             )
