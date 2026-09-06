@@ -22,6 +22,9 @@ class FullscreenBackPolicyTest {
         val activity = source(
             "app/src/main/java/com/saas/x11manager/MainActivity.kt"
         )
+        val display = source(
+            "app/src/main/java/com/saas/x11manager/ui/screen/ManagedDisplayScreen.kt"
+        )
         val manifest = source("app/src/main/AndroidManifest.xml")
 
         assertTrue(activity.contains("override fun dispatchKeyEvent(event: KeyEvent)"))
@@ -32,6 +35,14 @@ class FullscreenBackPolicyTest {
         assertTrue(activity.contains("putBoolean(PREF_FULLSCREEN, false)"))
         assertTrue(activity.contains("publishLoriePreferenceChange(this, PREF_FULLSCREEN)"))
         assertTrue(manifest.contains("android:enableOnBackInvokedCallback=\"true\""))
+
+        // The fullscreen viewport must stay visually clean. ManagedDisplayScreen
+        // handles Back only outside fullscreen; MainActivity owns fullscreen Back
+        // and presents the existing confirmation dialog above the focused LorieView.
+        assertTrue(display.contains("BackHandler(enabled = !fullscreen)"))
+        assertFalse(display.contains("FullscreenDisplayControls("))
+        assertFalse(display.contains("Popup("))
+        assertFalse(display.contains("if (fullscreen) setFullscreen(false) else onClose()"))
 
         assertFalse(activity.contains("stopIntegratedServer"))
         assertFalse(activity.contains("stopX11Session"))
