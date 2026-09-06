@@ -35,12 +35,31 @@ jobs:
           chmod +x gradlew
           ./gradlew testReleaseUnitTest assembleRelease
 
+      - name: Generate APK checksums
+        if: ${{ success() }}
+        run: |
+          cd app/build/outputs/apk/release
+          sha256sum *.apk > SHA256SUMS.txt
+
+      - name: Upload installable APKs
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: x11-only-apk-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/release/output-metadata.json
+            app/build/outputs/apk/release/SHA256SUMS.txt
+
       - name: Upload diagnostics
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: x11-only-ci-${{ github.run_id }}
           if-no-files-found: warn
+          retention-days: 30
           path: |
             app/build/test-results/**/*.xml
             app/build/outputs/apk/release/output-metadata.json
