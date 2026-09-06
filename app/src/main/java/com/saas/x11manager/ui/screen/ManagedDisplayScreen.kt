@@ -12,7 +12,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
@@ -25,8 +24,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
 import com.saas.x11manager.util.Constants
 import com.saas.x11manager.util.ContainerInfo
 import com.saas.x11manager.util.X11ServerStatus
@@ -165,8 +162,10 @@ fun ManagedDisplayScreen(
         }
     }
 
-    BackHandler {
-        if (fullscreen) setFullscreen(false) else onClose()
+    // MainActivity owns Back while fullscreen so the focused Lorie/X11 surface
+    // cannot consume it and so the existing confirmation dialog is always used.
+    BackHandler(enabled = !fullscreen) {
+        onClose()
     }
 
     Surface(
@@ -247,20 +246,6 @@ fun ManagedDisplayScreen(
                         onExitDisplay = ::closeScreen
                     )
                 }
-            }
-
-            if (fullscreen) {
-                FullscreenDisplayControls(
-                    busy = busy,
-                    running = serverStatus == X11ServerStatus.Running,
-                    additionalKeysEnabled = additionalKeysEnabled,
-                    additionalKeysVisible = additionalKeysVisible,
-                    onToggleServer = ::toggleServer,
-                    onToggleAdditionalKeys = ::toggleAdditionalKeys,
-                    onConfiguration = { showConfiguration = true },
-                    onExitFullscreen = { setFullscreen(false) },
-                    onClose = ::closeScreen
-                )
             }
         }
     }
@@ -476,74 +461,6 @@ private fun DisplayErrorMessage(message: String) {
             color = MaterialTheme.colorScheme.onErrorContainer,
             style = MaterialTheme.typography.bodySmall
         )
-    }
-}
-
-@Composable
-private fun FullscreenDisplayControls(
-    busy: Boolean,
-    running: Boolean,
-    additionalKeysEnabled: Boolean,
-    additionalKeysVisible: Boolean,
-    onToggleServer: () -> Unit,
-    onToggleAdditionalKeys: () -> Unit,
-    onConfiguration: () -> Unit,
-    onExitFullscreen: () -> Unit,
-    onClose: () -> Unit
-) {
-    Popup(
-        alignment = Alignment.TopEnd,
-        properties = PopupProperties(focusable = false)
-    ) {
-        Surface(
-            modifier = Modifier.padding(8.dp),
-            shape = RoundedCornerShape(14.dp),
-            color = Color.Black.copy(alpha = 0.72f),
-            shadowElevation = 8.dp
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                DisplayControlButton(
-                    busy = busy,
-                    running = running,
-                    enabled = !busy,
-                    onClick = onToggleServer
-                )
-                if (additionalKeysEnabled) {
-                    IconButton(onClick = onToggleAdditionalKeys) {
-                        Icon(
-                            Icons.Default.Keyboard,
-                            contentDescription = "Additional key bar",
-                            tint = if (additionalKeysVisible) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                Color.White
-                            }
-                        )
-                    }
-                }
-                IconButton(onClick = onConfiguration) {
-                    Icon(
-                        Icons.Default.Settings,
-                        contentDescription = "X11 configuration",
-                        tint = Color.White
-                    )
-                }
-                IconButton(onClick = onExitFullscreen) {
-                    Icon(
-                        Icons.Default.FullscreenExit,
-                        contentDescription = "Exit fullscreen",
-                        tint = Color.White
-                    )
-                }
-                IconButton(onClick = onClose) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Close screen",
-                        tint = Color.White
-                    )
-                }
-            }
-        }
     }
 }
 
