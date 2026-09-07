@@ -94,9 +94,10 @@ object ContainerConfigManager {
     }
 
     /**
-     * Releases only Manager-owned X11 bind entries from a stopped container.
-     * This prevents a historical display-N assignment from accidentally seeing
-     * a monitor after the same display number is recycled for another container.
+     * Releases only Manager-owned X11 bind entries from a container that is
+     * confirmed STOPPED. This is deliberately fail-closed: RUNNING or UNKNOWN
+     * runtime state preserves the bind so an active mount namespace can never be
+     * invalidated by a stale UI snapshot or a racing cleanup request.
      */
     suspend fun clearManualX11Config(
         containerName: String,
@@ -111,8 +112,19 @@ object ContainerConfigManager {
             logger?.i("--- X11 Container Lease Release ---")
             logger?.i("[CTX] Container: $containerName")
             logger?.i("[CTX] Config: $configPath")
-            logger?.i("[*] Removing stopped-container Manager X11 bind...")
 
+            val (runtimeStatus, runtimePid) =
+                ContainerManager.getContainerRuntimeStatePublic(containerName)
+            logger?.i("[CTX] Runtime before lease release: $runtimeStatus")
+            logger?.i("[CTX] Runtime PID: ${runtimePid ?: "none"}")
+            if (runtimeStatus != ContainerStatus.STOPPED) {
+                logger?.w(
+                    "[!] Manager X11 bind retained because container runtime is not confirmed STOPPED"
+                )
+                return@withContext false
+            }
+
+            logger?.i("[*] Removing stopped-container Manager X11 bind...")
             val updated = buildConfigWithoutManagerX11(original)
             if (!writeConfigAtomically(configPath, updated)) {
                 logger?.e("[-] Failed to release Manager X11 bind from $containerName")
