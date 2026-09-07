@@ -61,12 +61,19 @@ class PulseAudioFixPolicyTest {
     fun sessionOrderingKeepsOneCoreBeforeGraphicsAndUnifiedTransportAfterReady() {
         val sessionAccess = source("app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt")
 
-        val prepareIndex = sessionAccess.indexOf("PulseAudioFixManager.prepareBeforeGraphicalStart")
+        // Start ordering is expressed through the helper call now. The helper owns
+        // PulseAudio setup, while X11/VNC starts only after that helper returns.
+        val prepareCallIndex = sessionAccess.indexOf("prepareAudioBeforeGraphicalStart(containerName, logger)")
         val x11Index = sessionAccess.indexOf("X11SessionManager.startX11Session")
+        val helperIndex = sessionAccess.indexOf("private suspend fun prepareAudioBeforeGraphicalStart")
+        val managerPrepareIndex = sessionAccess.indexOf("PulseAudioFixManager.prepareBeforeGraphicalStart", helperIndex)
         val finalizeIndex = sessionAccess.indexOf("PulseAudioUnifiedTransport.finalizeAfterContainerReady")
-        assertTrue(prepareIndex >= 0)
-        assertTrue(x11Index > prepareIndex)
-        assertTrue(finalizeIndex > x11Index)
+
+        assertTrue(prepareCallIndex >= 0)
+        assertTrue(x11Index > prepareCallIndex)
+        assertTrue(helperIndex >= 0)
+        assertTrue(managerPrepareIndex > helperIndex)
+        assertTrue(finalizeIndex >= 0)
         assertFalse(sessionAccess.contains("TermuxRunCommandPreflight"))
         assertFalse(sessionAccess.contains("PulseAudioRootAmTransport"))
         assertFalse(sessionAccess.contains("PulseAudioDataPathTransport.finalizeAfterContainerReady"))
