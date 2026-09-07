@@ -7,9 +7,9 @@ import org.junit.Test
 class UnixSocketTableParserTest {
 
     @Test
-    fun selectsExactX0InodeWhenOtherDisplaysExist() {
-        val x0 = Constants.X11_SOCK_FILE
-        val x5 = "${Constants.X11_SOCK_DIR}/X5"
+    fun selectsExactDisplaySocketInodeWhenOtherDisplaysExist() {
+        val x0 = X11DisplaySlot(0).socketFile
+        val x5 = X11DisplaySlot(5).socketFile
         val lines = listOf(
             "Num RefCount Protocol Flags Type St Inode Path",
             "000000001: 00000002 00000000 00000000 0001 01 11111 $x5",
@@ -21,10 +21,11 @@ class UnixSocketTableParserTest {
 
     @Test
     fun doesNotAcceptPathPrefixOrSuffixMatches() {
-        val x0 = Constants.X11_SOCK_FILE
+        val slot = X11DisplaySlot(0)
+        val x0 = slot.socketFile
         val lines = listOf(
             "000000001: 00000002 00000000 00000000 0001 01 11111 ${x0}0",
-            "000000002: 00000002 00000000 00000000 0001 01 22222 ${Constants.X11_SOCK_DIR}"
+            "000000002: 00000002 00000000 00000000 0001 01 22222 ${slot.socketDir}"
         )
 
         assertNull(UnixSocketTableParser.findInode(lines, x0))
@@ -32,7 +33,7 @@ class UnixSocketTableParserTest {
 
     @Test
     fun ignoresMalformedInodeAndUsesValidEntry() {
-        val x0 = Constants.X11_SOCK_FILE
+        val x0 = X11DisplaySlot(0).socketFile
         val lines = listOf(
             "000000001: 00000002 00000000 00000000 0001 01 not-an-inode $x0",
             "000000002: 00000002 00000000 00000000 0001 01 33333 $x0"
@@ -43,10 +44,12 @@ class UnixSocketTableParserTest {
 
     @Test
     fun missingSocketReturnsNull() {
+        val x0 = X11DisplaySlot(0).socketFile
+        val x5 = X11DisplaySlot(5).socketFile
         val lines = listOf(
-            "000000001: 00000002 00000000 00000000 0001 01 11111 ${Constants.X11_SOCK_DIR}/X5"
+            "000000001: 00000002 00000000 00000000 0001 01 11111 $x5"
         )
 
-        assertNull(UnixSocketTableParser.findInode(lines, Constants.X11_SOCK_FILE))
+        assertNull(UnixSocketTableParser.findInode(lines, x0))
     }
 }
