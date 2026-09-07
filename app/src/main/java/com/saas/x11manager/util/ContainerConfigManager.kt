@@ -5,19 +5,25 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Owns the minimum DroidSpaces container.config changes required by the
- * integrated SaaS X11 backend.
+ * Owns only the DroidSpaces container.config fields required by the integrated
+ * Manager X11 transport.
  *
- * Existing bind mounts are preserved, while any mount targeting
- * /usr/.X11-unix is replaced by the host socket directory for the active
- * Manager display slot.
+ * The display number is always explicit. Manager X11 binds are treated as a
+ * runtime lease: they can be attached before a container starts and removed as
+ * soon as a stopped container no longer owns a monitor. Unrelated bind mounts
+ * and unrelated configuration are preserved byte-for-byte at line granularity.
  */
 object ContainerConfigManager {
 
     private const val X11_CONTAINER_SOCKET_DIR = "/usr/.X11-unix"
+
     private val displaySocketDirPattern = Regex(
         "^${Regex.escape(Constants.INTEGRATED_X11_RUNTIME_DIR)}/display-(\\d+)/\\.X11-unix$"
     )
+    private val legacyContainerSocketDirPattern = Regex(
+        "^${Regex.escape(Constants.INTEGRATED_X11_RUNTIME_DIR)}/containers/[^/]+/\\.X11-unix$"
+    )
+    private val legacyRootSocketDir = "${Constants.INTEGRATED_X11_RUNTIME_DIR}/.X11-unix"
 
     private fun x11Bind(displaySlot: X11DisplaySlot): String =
         "${displaySlot.socketDir}:$X11_CONTAINER_SOCKET_DIR"
@@ -25,9 +31,9 @@ object ContainerConfigManager {
     suspend fun ensureManualX11Config(
         containerName: String,
         logger: ContainerLogger? = null,
-        displaySlot: X11DisplaySlot = X11DisplaySlot(0)
+        displaySlot: X11DisplaySlot
     ): Boolean = withContext(Dispatchers.IO) {
-        val configPath = "${Constants.CONTAINERS_DIR}/$containerName/${Constants.CONFIG_FILE}"
+        val configPath = configPath(containerName)
         val requiredBind = x11Bind(displaySlot)
 
         logger?.i("--- X11 Container Configuration ---")
@@ -42,33 +48,21 @@ object ContainerConfigManager {
 
         try {
             logger?.i("[*] Reading existing container configuration...")
-            val read = Shell.cmd("cat ${shellQuote(configPath)} 2>/dev/null").exec()
-            if (!read.isSuccess || read.out.isEmpty()) {
+            val original = readConfig(configPath) ?: run {
                 logger?.e("[-] Cannot read container config")
-                logger?.i("[CTX] Read exit code: ${read.code}")
                 return@withContext false
             }
-
-            val original = read.out.toList()
-            val existingBindMounts = original
-                .asSequence()
-                .map(String::trim)
-                .filter { it.isNotEmpty() && !it.startsWith("#") && it.contains('=') }
-                .firstOrNull { it.substringBefore('=').trim() == "bind_mounts" }
-                ?.substringAfter('=', "")
-                .orEmpty()
+            val existingBindMounts = bindMountsFromConfig(original)
             val existingSlot = displaySlotFromBindMounts(existingBindMounts)
 
             logger?.i("[+] Container config read (${original.size} lines)")
             logger?.i(
                 "[CTX] Existing Manager X11 bind: " +
-                    (existingSlot?.describe() ?: "none")
+                    (existingSlot?.describe() ?: if (hasManagerX11Bind(existingBindMounts)) "legacy" else "none")
             )
 
             val updated = buildManualX11Config(original, displaySlot)
-            val originalText = original.joinToString("\n") + "\n"
-            val updatedText = updated.joinToString("\n") + "\n"
-            if (updatedText == originalText) {
+            if (sameConfig(original, updated)) {
                 logger?.i("[CTX] Configuration change required: no")
                 logger?.i("[+] Integrated X11 container config already ready for ${displaySlot.describe()}")
                 return@withContext true
@@ -80,21 +74,9 @@ object ContainerConfigManager {
                     "[CTX] Rebinding Manager X11: ${existingSlot.displayName} -> ${displaySlot.displayName}"
                 )
             }
-
-            val tempPath = "$configPath.saas-x11.tmp.${System.nanoTime()}"
             logger?.i("[*] Writing updated configuration atomically...")
-            logger?.i("[CTX] Temporary config: $tempPath")
-            val write = Shell.cmd(
-                "printf '%s' ${shellQuote(updatedText)} > ${shellQuote(tempPath)} && " +
-                    "chmod 644 ${shellQuote(tempPath)} && " +
-                    "mv -f ${shellQuote(tempPath)} ${shellQuote(configPath)}"
-            ).exec()
-
-            if (!write.isSuccess) {
-                Shell.cmd("rm -f ${shellQuote(tempPath)} 2>/dev/null").exec()
+            if (!writeConfigAtomically(configPath, updated)) {
                 logger?.e("[-] Failed to update integrated X11 container config")
-                logger?.i("[CTX] Write exit code: ${write.code}")
-                logger?.i("[CTX] Temporary config cleanup requested")
                 return@withContext false
             }
 
@@ -111,9 +93,43 @@ object ContainerConfigManager {
         }
     }
 
+    /**
+     * Releases only Manager-owned X11 bind entries from a stopped container.
+     * This prevents a historical display-N assignment from accidentally seeing
+     * a monitor after the same display number is recycled for another container.
+     */
+    suspend fun clearManualX11Config(
+        containerName: String,
+        logger: ContainerLogger? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        val configPath = configPath(containerName)
+        try {
+            val original = readConfig(configPath) ?: return@withContext false
+            val existingBindMounts = bindMountsFromConfig(original)
+            if (!hasManagerX11Bind(existingBindMounts)) return@withContext true
+
+            logger?.i("--- X11 Container Lease Release ---")
+            logger?.i("[CTX] Container: $containerName")
+            logger?.i("[CTX] Config: $configPath")
+            logger?.i("[*] Removing stopped-container Manager X11 bind...")
+
+            val updated = buildConfigWithoutManagerX11(original)
+            if (!writeConfigAtomically(configPath, updated)) {
+                logger?.e("[-] Failed to release Manager X11 bind from $containerName")
+                return@withContext false
+            }
+
+            logger?.i("[+] Manager X11 bind released from $containerName")
+            true
+        } catch (e: Exception) {
+            logger?.e("[-] X11 lease release error for $containerName: ${e.message}")
+            false
+        }
+    }
+
     internal fun buildManualX11Config(
         original: List<String>,
-        displaySlot: X11DisplaySlot = X11DisplaySlot(0)
+        displaySlot: X11DisplaySlot
     ): List<String> {
         val updated = original.toMutableList()
         val requiredBind = x11Bind(displaySlot)
@@ -125,24 +141,21 @@ object ContainerConfigManager {
             val trimmed = raw.trim()
             if (trimmed.isEmpty() || trimmed.startsWith("#") || !trimmed.contains('=')) continue
 
-            val key = trimmed.substringBefore('=').trim()
-            when (key) {
+            when (trimmed.substringBefore('=').trim()) {
                 "enable_termux_x11" -> {
-                    // DroidSpaces' own Termux:X11 integration stays disabled: this
-                    // app provides and owns the X11 socket itself.
                     x11FlagFound = true
                     updated[index] = "enable_termux_x11=0"
                 }
                 "bind_mounts" -> {
                     bindMountsFound = true
-                    val value = trimmed.substringAfter('=', "")
-                    val entries = value.split(',')
+                    val entries = trimmed.substringAfter('=', "")
+                        .split(',')
                         .map { it.trim() }
                         .filter { it.isNotEmpty() }
                         .filterNot { bindDestination(it) == X11_CONTAINER_SOCKET_DIR }
                         .toMutableList()
 
-                    if (requiredBind !in entries) entries.add(requiredBind)
+                    entries.add(requiredBind)
                     updated[index] = "bind_mounts=${entries.distinct().joinToString(",")}"
                 }
             }
@@ -150,17 +163,34 @@ object ContainerConfigManager {
 
         if (!x11FlagFound) updated.add("enable_termux_x11=0")
         if (!bindMountsFound) updated.add("bind_mounts=$requiredBind")
+        return updated
+    }
 
+    internal fun buildConfigWithoutManagerX11(original: List<String>): List<String> {
+        val updated = original.toMutableList()
+        for (index in updated.indices) {
+            val trimmed = updated[index].trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#") || !trimmed.contains('=')) continue
+            if (trimmed.substringBefore('=').trim() != "bind_mounts") continue
+
+            val remaining = trimmed.substringAfter('=', "")
+                .split(',')
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .filterNot(::isManagerX11Bind)
+                .distinct()
+
+            updated[index] = "bind_mounts=${remaining.joinToString(",")}"
+        }
         return updated
     }
 
     /**
-     * Resolves a Manager display slot from the X11 bind currently stored in a
-     * container config. This is runtime lease discovery, not a reservation:
-     * callers should only treat it as occupied while the container is active.
+     * Resolves the dynamic display number from the current Manager bind. A bind
+     * is only an ownership lease while the corresponding container is RUNNING.
      */
-    internal fun displaySlotFromBindMounts(bindMounts: String): X11DisplaySlot? {
-        return bindMounts
+    internal fun displaySlotFromBindMounts(bindMounts: String): X11DisplaySlot? =
+        bindMounts
             .split(',')
             .asSequence()
             .map { it.trim() }
@@ -169,23 +199,75 @@ object ContainerConfigManager {
                 if (bindDestination(entry) != X11_CONTAINER_SOCKET_DIR) {
                     return@firstNotNullOfOrNull null
                 }
-
-                val source = entry.substringBefore(':').trim()
-                val displayNumber = displaySocketDirPattern
+                val source = bindSource(entry) ?: return@firstNotNullOfOrNull null
+                val number = displaySocketDirPattern
                     .matchEntire(source)
                     ?.groupValues
                     ?.getOrNull(1)
                     ?.toIntOrNull()
                     ?: return@firstNotNullOfOrNull null
-
-                X11DisplaySlot(displayNumber)
+                X11DisplaySlot(number)
             }
+
+    internal fun hasManagerX11Bind(bindMounts: String): Boolean =
+        bindMounts
+            .split(',')
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .any(::isManagerX11Bind)
+
+    private fun isManagerX11Bind(entry: String): Boolean {
+        if (bindDestination(entry) != X11_CONTAINER_SOCKET_DIR) return false
+        val source = bindSource(entry) ?: return false
+        return source == legacyRootSocketDir ||
+            displaySocketDirPattern.matches(source) ||
+            legacyContainerSocketDirPattern.matches(source)
+    }
+
+    private fun bindMountsFromConfig(lines: List<String>): String =
+        lines.asSequence()
+            .map(String::trim)
+            .filter { it.isNotEmpty() && !it.startsWith("#") && it.contains('=') }
+            .firstOrNull { it.substringBefore('=').trim() == "bind_mounts" }
+            ?.substringAfter('=', "")
+            .orEmpty()
+
+    private fun bindSource(entry: String): String? {
+        val separator = entry.indexOf(':')
+        if (separator <= 0) return null
+        return entry.substring(0, separator).trim().takeIf { it.isNotEmpty() }
     }
 
     private fun bindDestination(entry: String): String? {
         val separator = entry.indexOf(':')
         if (separator < 0 || separator == entry.lastIndex) return null
         return entry.substring(separator + 1).substringBefore(':').trim()
+    }
+
+    private fun configPath(containerName: String): String =
+        "${Constants.CONTAINERS_DIR}/$containerName/${Constants.CONFIG_FILE}"
+
+    private fun readConfig(configPath: String): List<String>? {
+        val read = Shell.cmd("cat ${shellQuote(configPath)} 2>/dev/null").exec()
+        return if (read.isSuccess && read.out.isNotEmpty()) read.out.toList() else null
+    }
+
+    private fun sameConfig(left: List<String>, right: List<String>): Boolean =
+        left.joinToString("\n") + "\n" == right.joinToString("\n") + "\n"
+
+    private fun writeConfigAtomically(configPath: String, lines: List<String>): Boolean {
+        val text = lines.joinToString("\n") + "\n"
+        val tempPath = "$configPath.saas-x11.tmp.${System.nanoTime()}"
+        val write = Shell.cmd(
+            "printf '%s' ${shellQuote(text)} > ${shellQuote(tempPath)} && " +
+                "chmod 644 ${shellQuote(tempPath)} && " +
+                "mv -f ${shellQuote(tempPath)} ${shellQuote(configPath)}"
+        ).exec()
+        if (!write.isSuccess) {
+            Shell.cmd("rm -f ${shellQuote(tempPath)} 2>/dev/null").exec()
+        }
+        return write.isSuccess
     }
 
     private fun shellQuote(value: String): String =
