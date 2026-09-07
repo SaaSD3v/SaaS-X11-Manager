@@ -24,6 +24,7 @@ internal object GraphicSessionRuntimeController {
         val expectedSocket = "/tmp/.X11-unix/X${displaySlot.number}"
         val requireWayland = if (requireWaylandSocket) "1" else "0"
         return "expected=${shellQuote(expectedSocket)}; display=${shellQuote(displaySlot.displayName)}; require_wayland=$requireWayland; " +
+            X11SessionCommands.probeFunction() +
             "{ " +
             "if command -v systemctl >/dev/null 2>&1 && " +
             "test -f /etc/systemd/system/x11-session.service; then " +
@@ -62,27 +63,24 @@ internal object GraphicSessionRuntimeController {
             "printf '%s\\n' '${INIT_MARKER}openrc'; " +
             "setup_exit=0; " +
             "rc-service x11-setup start >/dev/null 2>&1 || setup_exit=\$?; " +
+            "sh -c ${shellQuote(X11SessionCommands.socketSetup())} >/dev/null 2>&1 || setup_exit=\$?; " +
             "printf '%s\\n' \"${ACTION_MARKER}socket-setup-exit=\$setup_exit\"; " +
             "if test -S \"\$expected\"; then " +
             "printf '%s\\n' '${ACTION_MARKER}socket-visible'; " +
             "else printf '%s\\n' '${ACTION_MARKER}socket-not-visible'; fi; " +
-            "if ! command -v xset >/dev/null 2>&1; then " +
-            "printf '%s\\n' '${ACTION_MARKER}x11-client-tool-missing'; " +
-            "printf '%s\\n' '${DIAG_MARKER}xset is unavailable inside the container; the Manager cannot verify the X11 transport'; " +
-            "exit 127; fi; " +
+            "if command -v xset >/dev/null 2>&1 || command -v xdpyinfo >/dev/null 2>&1; then " +
             "x11_client_ready=0; attempt=0; " +
-            "while [ \"\$attempt\" -lt 10 ]; do " +
-            "if DISPLAY=\"\$display\" xset q >/dev/null 2>&1; then x11_client_ready=1; break; fi; " +
+            "while [ \"\$attempt\" -lt 5 ]; do " +
+            "if x11_probe >/dev/null 2>&1; then x11_client_ready=1; break; fi; " +
             "attempt=\$((attempt + 1)); sleep 1; done; " +
             "if [ \"\$x11_client_ready\" -eq 1 ]; then " +
             "printf '%s\\n' '${ACTION_MARKER}x11-client-ready'; " +
             "else " +
             "printf '%s\\n' '${ACTION_MARKER}x11-client-not-ready'; " +
-            "printf '%s\\n' \"${DIAG_MARKER}X11 socket exists but an X11 client handshake failed on \$display\"; " +
-            "printf '%s\\n' \"${DIAG_MARKER}expected socket: \$expected\"; " +
-            "probe_output=\$(DISPLAY=\"\$display\" xset q 2>&1 || true); " +
-            "[ -n \"\$probe_output\" ] && printf '%s\\n' \"${DIAG_MARKER}xset: \$probe_output\"; " +
-            "exit 1; fi; " +
+            "probe_output=\$(x11_probe 2>&1 || true); " +
+            "printf '%s\\n' \"${DIAG_MARKER}X11 handshake on \$display: \$probe_output\"; exit 1; fi; " +
+            "else printf '%s\\n' '${ACTION_MARKER}x11-client-tool-missing'; fi; " +
+            X11SessionCommands.recoverCrashedOpenRc() +
             "ready=0; " +
             "if rc-service x11-session status >/dev/null 2>&1; then " +
             "printf '%s\\n' '${ACTION_MARKER}already-active'; ready=1; " +
@@ -94,7 +92,8 @@ internal object GraphicSessionRuntimeController {
             "fi; " +
             "attempt=0; " +
             "while [ \"\$ready\" -eq 0 ] && [ \"\$attempt\" -lt 10 ]; do " +
-            "if rc-service x11-session status >/dev/null 2>&1; then ready=1; break; fi; " +
+            "if rc-service x11-session status >/dev/null 2>&1; then " +
+            "sleep 1; if rc-service x11-session status >/dev/null 2>&1; then ready=1; break; fi; fi; " +
             "attempt=\$((attempt + 1)); sleep 1; " +
             "done; " +
             "if [ \"\$ready\" -eq 1 ]; then " +
@@ -104,7 +103,8 @@ internal object GraphicSessionRuntimeController {
             "printf '%s\\n' \"${DIAG_MARKER}socket visible: \$(test -S \"\$expected\" && echo yes || echo no)\"; " +
             "status_text=\$(rc-service x11-session status 2>&1 || true); " +
             "printf '%s\\n' \"${DIAG_MARKER}service status: \$status_text\"; " +
-            "probe_output=\$(DISPLAY=\"\$display\" xset q 2>&1 || true); " +
+            "tail -n 24 /var/log/saas-x11-session.log 2>/dev/null || true; " +
+            "probe_output=\$(x11_probe 2>&1 || true); " +
             "[ -n \"\$probe_output\" ] && printf '%s\\n' \"${DIAG_MARKER}xset after session failure: \$probe_output\"; " +
             "false; fi; " +
             "else echo 'No Manager x11-session service is provisioned' >&2; exit 127; fi; " +
@@ -310,11 +310,13 @@ internal object GraphicSessionRuntimeController {
                 action == "x11-client-not-ready" ->
                     logger?.w("[!] X11 socket is visible, but a real X11 client cannot connect")
                 action == "x11-client-tool-missing" ->
-                    logger?.w("[!] xset is missing; X11 client readiness cannot be verified")
+                    logger?.w("[!] X11 probe tools are absent; checking the graphical service directly")
                 action == "wayland-visible" ->
                     logger?.i("[+] Wayland compositor socket is visible")
                 action == "wayland-not-visible" ->
                     logger?.w("[!] Wayland compositor socket did not appear")
+                action == "crashed-state-cleared" ->
+                    logger?.i("[+] Cleared crashed OpenRC state after confirming the old session PID is gone")
                 action == "already-active" ->
                     logger?.i("[+] Graphic session service was already active; preserving it")
                 action == "start-requested" ->

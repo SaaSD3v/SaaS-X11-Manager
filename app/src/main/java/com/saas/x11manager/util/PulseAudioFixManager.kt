@@ -210,6 +210,8 @@ object PulseAudioFixManager {
     }
 
     private fun wrapTermuxCommand(command: String): String = buildString {
+        append("export LC_ALL=C; ")
+        append("export PULSE_CLIENTCONFIG=").append(shellQuote("$HOST_PULSE_CONFIG/client.conf")).append("; ")
         append("export HOME=").append(shellQuote(TERMUX_HOME)).append("; ")
         append("export PREFIX=").append(shellQuote(TERMUX_PREFIX)).append("; ")
         append("export TMPDIR=").append(shellQuote("$TERMUX_PREFIX/tmp")).append("; ")
@@ -231,7 +233,7 @@ object PulseAudioFixManager {
     }
 
     private suspend fun ensureTermuxPackages(runtime: TermuxRuntime, logger: ContainerLogger?): Boolean {
-        if (runAsTermux(runtime, "command -v pulseaudio >/dev/null 2>&1 && command -v pactl >/dev/null 2>&1")) {
+        if (runAsTermux(runtime, "command -v pulseaudio >/dev/null 2>&1 && command -v pactl >/dev/null 2>&1 && command -v pacat >/dev/null 2>&1")) {
             return true
         }
         logger?.i("[*] Installing Termux PulseAudio...")
@@ -295,20 +297,20 @@ object PulseAudioFixManager {
         runAsTermuxOutput(
             runtime,
             "PULSE_SERVER=${shellQuote("unix:$HOST_CONTROL_SOCKET")} " +
-                "PULSE_COOKIE=${shellQuote(HOST_COOKIE)} pactl $arguments"
+                "PULSE_COOKIE=${shellQuote(HOST_COOKIE)} timeout 5 pactl $arguments"
         )
 
     private fun probeCoreAndroidSink(runtime: TermuxRuntime): String? {
         val command = """
             server=${shellQuote("unix:$HOST_CONTROL_SOCKET")}
-            PULSE_SERVER="${'$'}server" PULSE_COOKIE=${shellQuote(HOST_COOKIE)} pactl info >/dev/null 2>&1 || exit 30
-            sinks=${'$'}(PULSE_SERVER="${'$'}server" PULSE_COOKIE=${shellQuote(HOST_COOKIE)} pactl list short sinks 2>/dev/null) || exit 31
+            PULSE_SERVER="${'$'}server" PULSE_COOKIE=${shellQuote(HOST_COOKIE)} timeout 5 pactl info >/dev/null 2>&1 || exit 30
+            sinks=${'$'}(PULSE_SERVER="${'$'}server" PULSE_COOKIE=${shellQuote(HOST_COOKIE)} timeout 5 pactl list short sinks 2>/dev/null) || exit 31
             if printf '%s\n' "${'$'}sinks" | grep -q '[[:space:]]AAudio_sink[[:space:]]'; then sink=AAudio_sink
             elif printf '%s\n' "${'$'}sinks" | grep -q '[[:space:]]OpenSL_ES_sink[[:space:]]'; then sink=OpenSL_ES_sink
             else exit 32
             fi
-            PULSE_SERVER="${'$'}server" PULSE_COOKIE=${shellQuote(HOST_COOKIE)} pactl set-default-sink "${'$'}sink" >/dev/null 2>&1 || exit 33
-            PULSE_SERVER="${'$'}server" PULSE_COOKIE=${shellQuote(HOST_COOKIE)} pactl info 2>/dev/null | grep -Fq "Default Sink: ${'$'}sink" || exit 34
+            PULSE_SERVER="${'$'}server" PULSE_COOKIE=${shellQuote(HOST_COOKIE)} timeout 5 pactl set-default-sink "${'$'}sink" >/dev/null 2>&1 || exit 33
+            PULSE_SERVER="${'$'}server" PULSE_COOKIE=${shellQuote(HOST_COOKIE)} timeout 5 pactl info 2>/dev/null | grep -Fq "Default Sink: ${'$'}sink" || exit 34
             printf '%s\n' "${'$'}sink"
         """.trimIndent()
         return runAsTermuxOutput(runtime, command)
@@ -377,24 +379,30 @@ object PulseAudioFixManager {
         if (!stopped.isNullOrBlank()) logger?.i("[*] Migrating previous HOST-only Manager audio runtime (PID $stopped)")
     }
 
-    private fun stopOwnedHostPulse(runtime: TermuxRuntime) {
+    private fun stopOwnedHostPulse(runtime: TermuxRuntime): Boolean {
+        // Wait for the owned process to exit before removing/reusing its socket.
+        if (PulseAudioRuntimeSanitizer.stopOwnedManagerCore(runtime.uid)) return true
         val command = """
             pf=${shellQuote(HOST_PID_FILE)}
-            [ -f "${'$'}pf" ] || exit 0
-            pid=${'$'}(sed -n 's/^pid=//p' "${'$'}pf" 2>/dev/null | sed -n '1p')
-            case "${'$'}pid" in ''|*[!0-9]*) rm -f "${'$'}pf"; exit 0 ;; esac
-            if kill -0 "${'$'}pid" 2>/dev/null && [ -r "/proc/${'$'}pid/status" ] && [ -r "/proc/${'$'}pid/cmdline" ]; then
-                uid=${'$'}(sed -n 's/^Uid:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "/proc/${'$'}pid/status" | sed -n '1p')
-                cmd=${'$'}(tr '\000' ' ' < "/proc/${'$'}pid/cmdline" 2>/dev/null || true)
-                if [ "${'$'}uid" = ${runtime.uid} ]; then
-                    case "${'$'}cmd" in *pulseaudio*module-native-protocol-unix*socket=${HOST_CONTROL_SOCKET}*auth-cookie=${HOST_COOKIE}*) kill "${'$'}pid" 2>/dev/null || true ;; esac
-                fi
+            if [ ! -f "${'$'}pf" ]; then
+                [ ! -S ${shellQuote(HOST_CONTROL_SOCKET)} ]
+                exit ${'$'}?
             fi
-            rm -f "${'$'}pf" 2>/dev/null || true
-            rm -f ${shellQuote(HOST_CONTROL_SOCKET)} 2>/dev/null || true
+            pid=${'$'}(sed -n 's/^pid=//p' "${'$'}pf" | head -n 1)
+            [ -n "${'$'}pid" ] || pid=${'$'}(head -n 1 "${'$'}pf")
+            case "${'$'}pid" in ''|*[!0-9]*|0|1) exit 1 ;; esac
+            kill -0 "${'$'}pid" 2>/dev/null && exit 1
+            rm -f "${'$'}pf" ${shellQuote(HOST_CONTROL_SOCKET)}
         """.trimIndent()
-        try { Shell.cmd(command).exec() } catch (_: Exception) { }
+        return try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
     }
+
+    private fun probeCorePlayback(runtime: TermuxRuntime): Boolean = runAsTermux(
+        runtime,
+        PulseAudioClientConfig.playbackProbe(
+            "unix:$HOST_CONTROL_SOCKET", HOST_COOKIE, "$HOST_PULSE_CONFIG/client.conf"
+        )
+    )
 
     private fun startHostBackend(runtime: TermuxRuntime, module: String): Boolean {
         val preload = if (module == "module-sles-sink") samsungSlesPreload() else null
@@ -438,14 +446,21 @@ object PulseAudioFixManager {
         if (!prepareHostState(runtime)) return null
 
         probeCoreAndroidSink(runtime)?.let { sink ->
-            logger?.i("[+] Manager audio core already ready on private UNIX control socket")
-            return HostRuntime(sink)
+            if (probeCorePlayback(runtime)) {
+                logger?.i("[+] Manager audio core ready; finite PCM stream drained ($sink)")
+                return HostRuntime(sink)
+            }
+            logger?.w("[!] Audio control responds but playback did not drain; recovering the owned core")
         }
 
         stopExternalScriptCore(runtime, SCRIPT_HOSTNAT_DIR, "v3.2 HOST+NAT script", logger)
         stopExternalScriptCore(runtime, SCRIPT_NETLAB_DIR, "v3.1 NetLab script", logger)
         stopPreviousManagerTcpRuntime(runtime, logger)
-        stopOwnedHostPulse(runtime)
+        delay(300)
+        if (!stopOwnedHostPulse(runtime)) {
+            logger?.w("[!] Existing audio core ownership could not be confirmed; no second core was started")
+            return null
+        }
         stopDroidSpacesNativeHostPulse(runtime)
         delay(300)
 
@@ -454,16 +469,23 @@ object PulseAudioFixManager {
             logger?.i("[*] Starting manager-owned PulseAudio core with $module...")
             if (!startHostBackend(runtime, module)) continue
 
-            repeat(50) {
+            for (attempt in 0 until 50) {
                 val sink = probeCoreAndroidSink(runtime)
                 if (sink != null) {
-                    logger?.i("[+] Manager audio core ready using $module")
-                    return HostRuntime(sink)
+                    if (probeCorePlayback(runtime)) {
+                        logger?.i("[+] Manager audio core ready using $module; PCM playback verified")
+                        return HostRuntime(sink)
+                    }
+                    logger?.w("[!] $module accepts control commands but cannot drain playback")
+                    break
                 }
                 delay(200)
             }
 
-            stopOwnedHostPulse(runtime)
+            if (!stopOwnedHostPulse(runtime)) {
+                logger?.w("[!] Could not retire $module safely; no competing backend was started")
+                return null
+            }
             logger?.w("[!] $module did not produce a working Android audio core")
         }
 
@@ -653,7 +675,7 @@ object PulseAudioFixManager {
     private fun probeEndpointAndroidSink(runtime: TermuxRuntime, ip: String, port: Int): Boolean {
         val server = endpointServer(ip, port)
         val command = """
-            info=${'$'}(PULSE_SERVER=${shellQuote(server)} PULSE_COOKIE=${shellQuote(HOST_COOKIE)} pactl info 2>/dev/null) || exit 80
+            info=${'$'}(PULSE_SERVER=${shellQuote(server)} PULSE_COOKIE=${shellQuote(HOST_COOKIE)} timeout 5 pactl info 2>/dev/null) || exit 80
             printf '%s\n' "${'$'}info" | grep -Eq '^Default Sink: (AAudio_sink|OpenSL_ES_sink)$'
         """.trimIndent()
         return runAsTermux(runtime, command)
@@ -673,9 +695,9 @@ object PulseAudioFixManager {
             owner=${'$'}(sed -n 's/^owner=//p' "${'$'}sf" | sed -n '1p')
             case "${'$'}id" in ''|*[!0-9]*) rm -f "${'$'}sf"; exit 0 ;; esac
             [ "${'$'}owner" = ${shellQuote(MANAGED)} ] || { rm -f "${'$'}sf"; exit 0; }
-            modules=${'$'}(PULSE_SERVER=${shellQuote("unix:$HOST_CONTROL_SOCKET")} PULSE_COOKIE=${shellQuote(HOST_COOKIE)} pactl list short modules 2>/dev/null || true)
+            modules=${'$'}(PULSE_SERVER=${shellQuote("unix:$HOST_CONTROL_SOCKET")} PULSE_COOKIE=${shellQuote(HOST_COOKIE)} timeout 5 pactl list short modules 2>/dev/null || true)
             printf '%s\n' "${'$'}modules" | grep -Eq "^${'$'}id[[:space:]]+module-native-protocol-tcp[[:space:]].*listen=$ip([[:space:]]|${'$'}).*port=$port([[:space:]]|${'$'})" || { rm -f "${'$'}sf"; exit 0; }
-            PULSE_SERVER=${shellQuote("unix:$HOST_CONTROL_SOCKET")} PULSE_COOKIE=${shellQuote(HOST_COOKIE)} pactl unload-module "${'$'}id" >/dev/null 2>&1 || true
+            PULSE_SERVER=${shellQuote("unix:$HOST_CONTROL_SOCKET")} PULSE_COOKIE=${shellQuote(HOST_COOKIE)} timeout 5 pactl unload-module "${'$'}id" >/dev/null 2>&1 || true
             rm -f "${'$'}sf" 2>/dev/null || true
         """.trimIndent()
         runAsTermux(runtime, command)
@@ -747,7 +769,7 @@ object PulseAudioFixManager {
             [ -f "${'$'}client" ] || exit 73
             grep -Fq ${shellQuote("default-server = $server")} "${'$'}client" || exit 74
             grep -Fq 'cookie-file = /root/.config/pulse/saas-audio.cookie' "${'$'}client" || exit 75
-            info=${'$'}(PULSE_SERVER="${'$'}server" PULSE_COOKIE="${'$'}cookie" pactl info 2>/dev/null) || exit 76
+            info=${'$'}(PULSE_SERVER="${'$'}server" PULSE_COOKIE="${'$'}cookie" timeout 5 pactl info 2>/dev/null) || exit 76
             printf '%s\n' "${'$'}info" | grep -Fq "Server String: ${'$'}server" || exit 77
             printf '%s\n' "${'$'}info" | grep -Eq '^Default Sink: (AAudio_sink|OpenSL_ES_sink)$' || exit 78
         """.trimIndent()
@@ -879,7 +901,7 @@ object PulseAudioFixManager {
         EOF_ASOUND
         fi
 
-        info=${'$'}(PULSE_SERVER="${'$'}SERVER" PULSE_COOKIE="${'$'}cookie" pactl info 2>&1) || { printf '%s\n' "${'$'}info" >&2; exit 65; }
+        info=${'$'}(PULSE_SERVER="${'$'}SERVER" PULSE_COOKIE="${'$'}cookie" timeout 5 pactl info 2>&1) || { printf '%s\n' "${'$'}info" >&2; exit 65; }
         printf '%s\n' "${'$'}info" | grep -E '^(Server String|Server Version|Default Sink|Default Source):' || true
         printf '%s\n' "${'$'}info" | grep -Eq '^Default Sink: (AAudio_sink|OpenSL_ES_sink)$' || exit 66
         printf '%s\n' __SAAS_AUDIO_READY__
@@ -898,6 +920,7 @@ object PulseAudioFixManager {
             val openRc = "$root/etc/conf.d/x11-session"
 
             val command = buildString {
+                append(PulseAudioClientConfig.cleanup(root))
                 append(restoreManagedFileCommand(client, listOf(
                     "$client.saas-x11-manager.bak",
                     "$client.saas-hostnat.bak",

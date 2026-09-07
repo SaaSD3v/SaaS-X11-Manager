@@ -142,9 +142,7 @@ object PulseAudioUnifiedTransport {
             }
 
             val server = "tcp:$endpoint:$port"
-            val alreadyConfigured = verifyContainerClient(containerName, server)
-            val configured = alreadyConfigured ||
-                installContainerClient(containerName, server, cookieOctal, logger)
+            val configured = installContainerClient(containerName, server, cookieOctal, logger)
 
             if (!configured) {
                 logger?.w("[!] Container audio client configuration failed for $server")
@@ -169,7 +167,6 @@ object PulseAudioUnifiedTransport {
                 )
             }
 
-            if (alreadyConfigured) logger?.i("[+] Persistent container audio client already configured")
             if (port != BASE_PORT) logger?.i("[+] Selected audio port: $port")
             logger?.i("[+] Authenticated PulseAudio listener ready on $endpoint:$port")
             FixSettings.setPulseAudioApplied(context, containerName, true)
@@ -217,6 +214,8 @@ object PulseAudioUnifiedTransport {
     private fun execAsTermux(owner: TermuxOwner, command: String): DirectResult {
         val marker = "__SAAS_DIRECT_RC__"
         val wrapped = """
+            export LC_ALL=C
+            export PULSE_CLIENTCONFIG=${q("$STATE/pulse-home/.config/pulse/client.conf")}
             export HOME=${q(TERMUX_HOME)}
             export PREFIX=${q(TERMUX_PREFIX)}
             export TMPDIR=${q("$TERMUX_PREFIX/tmp")}
@@ -246,13 +245,13 @@ object PulseAudioUnifiedTransport {
         execAsTermux(
             owner,
             "PULSE_SERVER=${q("unix:$CONTROL")} " +
-                "PULSE_COOKIE=${q(COOKIE)} pactl $arguments"
+                "PULSE_COOKIE=${q(COOKIE)} timeout 5 pactl $arguments"
         )
 
     private suspend fun verifyCore(owner: TermuxOwner, logger: ContainerLogger?): String? {
         val info = unixPactl(owner, "info")
         if (info.exitCode != 0) {
-            logger?.w("[PA-CORE] pactl info exit=${info.exitCode}")
+            logger?.w("[PA-CORE] timeout 5 pactl info exit=${info.exitCode}")
             logLines(logger, "[PA-CORE][stdout]", info.stdout)
             logLines(logger, "[PA-CORE][stderr]", info.stderr)
             logCoreDiagnostics(owner, logger)
@@ -261,7 +260,7 @@ object PulseAudioUnifiedTransport {
 
         val sinks = unixPactl(owner, "list short sinks")
         if (sinks.exitCode != 0) {
-            logger?.w("[PA-CORE] pactl list short sinks exit=${sinks.exitCode}")
+            logger?.w("[PA-CORE] timeout 5 pactl list short sinks exit=${sinks.exitCode}")
             logLines(logger, "[PA-CORE][stderr]", sinks.stderr)
             return null
         }
@@ -654,7 +653,7 @@ object PulseAudioUnifiedTransport {
             command -v pactl >/dev/null 2>&1 || exit 70
             [ -f "${'$'}cookie" ] || exit 71
             [ "${'$'}(wc -c < "${'$'}cookie" 2>/dev/null | tr -d ' ')" = 256 ] || exit 72
-            info=${'$'}(PULSE_SERVER="${'$'}server" PULSE_COOKIE="${'$'}cookie" pactl info 2>/dev/null) || exit 73
+            info=${'$'}(PULSE_SERVER="${'$'}server" PULSE_COOKIE="${'$'}cookie" timeout 5 pactl info 2>/dev/null) || exit 73
             printf '%s\n' "${'$'}info" | grep -Fq "Server String: ${'$'}server" || exit 74
             printf '%s\n' "${'$'}info" | grep -Eq '^Default Sink: (AAudio_sink|OpenSL_ES_sink)$'
         """.trimIndent()
@@ -679,7 +678,7 @@ object PulseAudioUnifiedTransport {
             expected=${q(expectedSink)}
             command -v pactl >/dev/null 2>&1 || { echo 'pactl missing'; exit 80; }
             [ -f "${'$'}cookie" ] || { echo 'cookie missing'; exit 81; }
-            info=${'$'}(PULSE_SERVER="${'$'}server" PULSE_COOKIE="${'$'}cookie" pactl info 2>&1) || {
+            info=${'$'}(PULSE_SERVER="${'$'}server" PULSE_COOKIE="${'$'}cookie" timeout 5 pactl info 2>&1) || {
                 printf '%s\n' "${'$'}info"
                 exit 82
             }
@@ -696,7 +695,7 @@ object PulseAudioUnifiedTransport {
             result.err.filter { it.isNotBlank() }.takeLast(12)
                 .forEach { logger?.w("[CONTAINER] $it") }
             if (!result.isSuccess) {
-                logger?.w("[CONTAINER] pactl verification failed for $server")
+                logger?.w("[CONTAINER] timeout 5 pactl verification failed for $server")
             }
             result.isSuccess
         } catch (e: Exception) {
@@ -711,7 +710,35 @@ object PulseAudioUnifiedTransport {
         octal: String,
         logger: ContainerLogger?
     ): Boolean {
-        val payload = """
+        val payload = buildContainerPayload(server, octal)
+
+        val command =
+            "${Constants.DS_BINARY_PATH} --name=${q(containerName)} run /bin/sh -lc ${q(payload)}"
+
+        return try {
+            val result = Shell.cmd(command).exec()
+            result.out.forEach { line ->
+                when {
+                    line.trim() == "__APT__" ->
+                        logger?.i("[*] Installing missing Debian/Ubuntu audio clients...")
+                    line.trim() == "__APK__" ->
+                        logger?.i("[*] Installing missing Alpine audio clients...")
+                    line.startsWith("Server String:") ||
+                        line.startsWith("Server Version:") ||
+                        line.startsWith("Default Sink:") ||
+                        line.startsWith("Default Source:") -> logger?.i(line)
+                }
+            }
+            result.err.filter { it.isNotBlank() }.take(12)
+                .forEach { logger?.w("[CONTAINER] $it") }
+            result.isSuccess && result.out.any { it.trim() == "__READY__" }
+        } catch (e: Exception) {
+            logger?.w("[CONTAINER] ${e.message ?: e.javaClass.simpleName}")
+            false
+        }
+    }
+
+    internal fun buildContainerPayload(server: String, octal: String): String = """
             set -u
             SERVER=${q(server)}
             COOKIE_ESCAPED=${q(octal)}
@@ -781,7 +808,9 @@ $END
 EOF_ASOUND
             fi
 
-            info=${'$'}(PULSE_SERVER="${'$'}SERVER" PULSE_COOKIE="${'$'}cookie" pactl info 2>&1) || {
+            ${PulseAudioClientConfig.install(server)}
+
+            info=${'$'}(PULSE_SERVER="${'$'}SERVER" PULSE_COOKIE="${'$'}cookie" timeout 5 pactl info 2>&1) || {
                 printf '%s\n' "${'$'}info" >&2
                 exit 65
             }
@@ -792,32 +821,6 @@ EOF_ASOUND
                 grep -Eq '^Default Sink: (AAudio_sink|OpenSL_ES_sink)$' || exit 67
             echo __READY__
         """.trimIndent()
-
-        val command =
-            "${Constants.DS_BINARY_PATH} --name=${q(containerName)} run /bin/sh -lc ${q(payload)}"
-
-        return try {
-            val result = Shell.cmd(command).exec()
-            result.out.forEach { line ->
-                when {
-                    line.trim() == "__APT__" ->
-                        logger?.i("[*] Installing missing Debian/Ubuntu audio clients...")
-                    line.trim() == "__APK__" ->
-                        logger?.i("[*] Installing missing Alpine audio clients...")
-                    line.startsWith("Server String:") ||
-                        line.startsWith("Server Version:") ||
-                        line.startsWith("Default Sink:") ||
-                        line.startsWith("Default Source:") -> logger?.i(line)
-                }
-            }
-            result.err.filter { it.isNotBlank() }.take(12)
-                .forEach { logger?.w("[CONTAINER] $it") }
-            result.isSuccess && result.out.any { it.trim() == "__READY__" }
-        } catch (e: Exception) {
-            logger?.w("[CONTAINER] ${e.message ?: e.javaClass.simpleName}")
-            false
-        }
-    }
 
     private fun q(value: String): String =
         "'" + value.replace("'", "'\\''") + "'"

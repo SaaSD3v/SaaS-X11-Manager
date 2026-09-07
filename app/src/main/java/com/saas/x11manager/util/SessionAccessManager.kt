@@ -1,5 +1,8 @@
 package com.saas.x11manager.util
 
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
 /**
  * One entry point for starting the selected graphical session through the user's
  * preferred access method.
@@ -8,6 +11,7 @@ package com.saas.x11manager.util
  * display with x0vncserver. It never starts a second desktop/WM instance.
  */
 object SessionAccessManager {
+    private val startMutex = Mutex()
     suspend fun start(
         containerName: String,
         platform: ContainerPlatform?,
@@ -16,6 +20,18 @@ object SessionAccessManager {
         vncPort: Int,
         vncPassword: String? = null,
         logger: ContainerLogger? = null
+    ): Boolean = startMutex.withLock {
+        startLocked(containerName, platform, session, accessMode, vncPort, vncPassword, logger)
+    }
+
+    private suspend fun startLocked(
+        containerName: String,
+        platform: ContainerPlatform?,
+        session: GraphicSession,
+        accessMode: SessionAccessMode,
+        vncPort: Int,
+        vncPassword: String?,
+        logger: ContainerLogger?
     ): Boolean {
         logger?.i("--- Graphic Access Start ---")
         logger?.i("[CTX] Access method: ${accessMode.label}")
@@ -62,7 +78,8 @@ object SessionAccessManager {
             SessionAccessMode.INTEGRATED_X11 -> {
                 val slot = X11SessionManager.startX11Session(
                     containerName = containerName,
-                    logger = logger
+                    logger = logger,
+                    beforeGraphicSession = { finalizeAudioAfterContainerReady(containerName, logger) }
                 )
                 if (slot == null) {
                     logger?.e("[-] Integrated X11 access failed")
@@ -71,7 +88,6 @@ object SessionAccessManager {
                     logger?.e("[-] ${session.label} did not become active on ${slot.describe()}")
                     false
                 } else {
-                    finalizeAudioAfterContainerReady(containerName, logger)
                     logger?.i("[+] Integrated X11 ready on ${slot.describe()}")
                     true
                 }
@@ -84,10 +100,10 @@ object SessionAccessManager {
                     session = session,
                     port = vncPort,
                     password = vncPassword,
-                    logger = logger
+                    logger = logger,
+                    beforeGraphicSession = { finalizeAudioAfterContainerReady(containerName, logger) }
                 )
                 if (result.success) {
-                    finalizeAudioAfterContainerReady(containerName, logger)
                     VncConnectionGuide.logAfterSuccessfulStart(
                         containerName = containerName,
                         port = vncPort,
@@ -107,7 +123,8 @@ object SessionAccessManager {
             SessionAccessMode.BOTH -> {
                 val slot = X11SessionManager.startX11Session(
                     containerName = containerName,
-                    logger = logger
+                    logger = logger,
+                    beforeGraphicSession = { finalizeAudioAfterContainerReady(containerName, logger) }
                 )
                 if (slot == null) {
                     logger?.e("[-] Integrated X11 could not start; VNC mirror was not attempted")
@@ -119,7 +136,6 @@ object SessionAccessManager {
                     )
                     false
                 } else {
-                    finalizeAudioAfterContainerReady(containerName, logger)
                     logger?.i("")
                     val mirror = VncServerManager.startMirror(
                         containerName = containerName,

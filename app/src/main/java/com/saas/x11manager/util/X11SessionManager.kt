@@ -595,7 +595,8 @@ object X11SessionManager {
 
     suspend fun startX11Session(
         containerName: String,
-        logger: ContainerLogger? = null
+        logger: ContainerLogger? = null,
+        beforeGraphicSession: (suspend () -> Unit)? = null
     ): X11DisplaySlot? = withContext(Dispatchers.IO) {
         var serverLease: ServerLease? = null
         var containerStartAccepted = false
@@ -697,6 +698,7 @@ object X11SessionManager {
             }
 
             val graphicSessionReady = if (commandReady) {
+                beforeGraphicSession?.invoke()
                 logger?.i("[*] Synchronizing configured graphic session with ${displaySlot.displayName}...")
                 ensureContainerGraphicSession(containerName, displaySlot, logger)
             } else {

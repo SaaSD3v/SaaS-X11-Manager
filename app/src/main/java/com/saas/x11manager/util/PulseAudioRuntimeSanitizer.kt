@@ -53,6 +53,10 @@ internal object PulseAudioRuntimeSanitizer {
         }
 
         val uid = termuxUid() ?: return@withContext
+        if (!execBoolean(stateDirectoryCommand(uid))) {
+            logger?.w("[!] Could not prepare Termux-owned audio state")
+            return@withContext
+        }
 
         var competingCoreStopped = false
         if (stopOwnedCore(
@@ -81,7 +85,7 @@ internal object PulseAudioRuntimeSanitizer {
             if (managerCoreStopped) {
                 logger?.i("[*] Recreating the Manager audio core from the validated v3.2 baseline")
             }
-            writeGeneration()
+            writeGeneration(uid)
         }
 
         if (competingCoreStopped || managerCoreStopped) {
@@ -120,12 +124,31 @@ internal object PulseAudioRuntimeSanitizer {
         null
     }
 
-    private fun writeGeneration() {
+    internal fun stateDirectoryCommand(uid: Int): String = """
+        for dir in ${q("$TERMUX_HOME/.saas-x11-manager")} ${q(MANAGER_STATE)}; do
+            [ ! -L "${'$'}dir" ] || exit 1
+            mkdir -p "${'$'}dir" || exit 1
+            owner=${'$'}(stat -c '%u' "${'$'}dir") || exit 1
+            case "${'$'}owner" in 0|$uid) ;; *) exit 1 ;; esac
+            chown $uid:$uid "${'$'}dir" || exit 1
+            chmod 700 "${'$'}dir" || exit 1
+        done
+        # Earlier APKs wrote this marker as root before Termux created audio/.
+        # Repair just that owned marker; never recursively chown Termux's home.
+        if [ -e ${q(GENERATION_FILE)} ]; then
+            [ ! -L ${q(GENERATION_FILE)} ] || exit 1
+            chown $uid:$uid ${q(GENERATION_FILE)} || exit 1
+        fi
+    """.trimIndent()
+
+    private fun writeGeneration(uid: Int) {
         try {
+            val command =
+                "printf '%s\\n' ${q(RUNTIME_GENERATION)} > ${q("$GENERATION_FILE.tmp")} && " +
+                    "chmod 600 ${q("$GENERATION_FILE.tmp")} && " +
+                    "mv ${q("$GENERATION_FILE.tmp")} ${q(GENERATION_FILE)}"
             Shell.cmd(
-                "mkdir -p ${q(MANAGER_STATE)} && " +
-                    "printf '%s\\n' ${q(RUNTIME_GENERATION)} > ${q(GENERATION_FILE)} && " +
-                    "chmod 600 ${q(GENERATION_FILE)}"
+                "su $uid -c ${q(command)}"
             ).exec()
         } catch (_: Exception) {
             // Failure to persist the marker is safe: the next start simply attempts
@@ -133,7 +156,7 @@ internal object PulseAudioRuntimeSanitizer {
         }
     }
 
-    private fun stopOwnedManagerCore(uid: Int): Boolean {
+    internal fun stopOwnedManagerCore(uid: Int): Boolean {
         val command = ownedStopCommand(
             uid = uid,
             pidFile = MANAGER_PID,

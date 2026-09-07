@@ -41,7 +41,8 @@ object VncServerManager {
         session: GraphicSession,
         port: Int,
         password: String? = null,
-        logger: ContainerLogger? = null
+        logger: ContainerLogger? = null,
+        beforeGraphicSession: (suspend () -> Unit)? = null
     ): VncStartResult = withContext(Dispatchers.IO) {
         logger?.i("--- Starting External TigerVNC Session ---")
         logger?.i("")
@@ -122,6 +123,7 @@ object VncServerManager {
                 return@withContext VncStartResult(false, port, displayName)
             }
 
+            beforeGraphicSession?.invoke()
             val sessionLaunch =
                 "DISPLAY=${shellQuote(displayName)} " +
                     "nohup $SESSION_SCRIPT >$SESSION_LOG 2>&1 & " +
@@ -475,6 +477,7 @@ object VncServerManager {
             "export SHELL=/bin/sh\n" +
             waylandEnvironment +
             "export SAAS_GRAPHIC_PROTOCOL=$protocol\n" +
+            PulseAudioClientConfig.sessionEnvironment() +
             "exec ${session.startCommand}\n"
     }
 

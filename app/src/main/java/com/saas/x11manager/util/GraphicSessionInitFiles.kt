@@ -5,7 +5,9 @@ internal object GraphicSessionInitFiles {
 
     private fun dynamicDisplayEnvironment(): String =
         "X11_SOCKET=\n" +
-            "for candidate in /tmp/.X11-unix/X*; do\n" +
+            "X11_SOURCE=/usr/.X11-unix\n" +
+            "[ -d \"\$X11_SOURCE\" ] || X11_SOURCE=/tmp/.X11-unix\n" +
+            "for candidate in \"\$X11_SOURCE\"/X*; do\n" +
             "    [ -S \"\$candidate\" ] || continue\n" +
             "    if [ -n \"\$X11_SOCKET\" ]; then\n" +
             "        echo \"Multiple X11 sockets are mounted; refusing ambiguous display selection\" >&2\n" +
@@ -57,6 +59,7 @@ internal object GraphicSessionInitFiles {
             "export SAAS_GRAPHIC_PROTOCOL=$sessionType\n" +
             "export XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
             "mkdir -p \"\$XDG_RUNTIME_DIR\" && chmod 700 \"\$XDG_RUNTIME_DIR\"\n" +
+            PulseAudioClientConfig.sessionEnvironment() +
             launch
     }
 
@@ -155,6 +158,7 @@ internal object GraphicSessionInitFiles {
             selectedUserEnvironment(shell) +
             protocolEnvironment +
             "export SAAS_GRAPHIC_PROTOCOL=$sessionType\n" +
+            PulseAudioClientConfig.sessionEnvironment() +
             launch
     }
 
@@ -166,18 +170,7 @@ internal object GraphicSessionInitFiles {
             "}\n\n" +
             "start() {\n" +
             "    ebegin \"Setting up Manager X11 transport socket\"\n" +
-            "    if [ ! -d /usr/.X11-unix ]; then\n" +
-            "        eerror \"X11 source socket directory /usr/.X11-unix is missing\"\n" +
-            "        eend 1\n" +
-            "        return 1\n" +
-            "    fi\n" +
-            "    mkdir -p /tmp/.X11-unix /tmp/runtime-root || { eend 1; return 1; }\n" +
-            "    chmod 700 /tmp/runtime-root || { eend 1; return 1; }\n" +
-            "    if mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n" +
-            "        eend 0\n" +
-            "        return 0\n" +
-            "    fi\n" +
-            "    mount --bind /usr/.X11-unix /tmp/.X11-unix\n" +
+            "    (\n" + X11SessionCommands.socketSetup() + "\n    )\n" +
             "    rc=\$?\n" +
             "    eend \$rc\n" +
             "    return \$rc\n" +
@@ -204,7 +197,9 @@ internal object GraphicSessionInitFiles {
             "command=\"/usr/local/bin/x11-session.sh\"\n" +
             "command_background=\"yes\"\n" +
             "pidfile=\"/run/x11-session.pid\"\n" +
-            "stopgroup=\"yes\"\n\n" +
+            "stopgroup=\"yes\"\n" +
+            "output_log=\"/var/log/saas-x11-session.log\"\n" +
+            "error_log=\"/var/log/saas-x11-session.log\"\n\n" +
             "depend() {\n" +
             "    need x11-setup\n" +
             "}\n"

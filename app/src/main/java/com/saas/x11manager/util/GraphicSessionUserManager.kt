@@ -212,8 +212,23 @@ object GraphicSessionUserManager {
             GraphicSessionInitFiles.sessionScript(session, shell)
         }
 
+        val openRcFiles = if (info.initSystem == InitSystem.OPENRC) mapOf(
+            "/etc/init.d/x11-setup" to GraphicSessionInitFiles.openRcSetupService(),
+            "/etc/init.d/x11-session" to GraphicSessionInitFiles.openRcSessionService(session)
+        ) else emptyMap()
+        fun refreshServices(root: String): String = buildString {
+            for ((path, content) in openRcFiles) {
+                append("mkdir -p ${shellQuote("$root/etc/init.d")} ${shellQuote("$root/var/log")} && ")
+                append("printf '%s' ${shellQuote(content)} > ${shellQuote("$root$path.tmp")} && ")
+                append("chmod 755 ${shellQuote("$root$path.tmp")} && ")
+                append("mv ${shellQuote("$root$path.tmp")} ${shellQuote("$root$path")} && ")
+            }
+            append("true")
+        }
+
         return if (info.isRunning) {
             val command =
+                refreshServices("") + " && " +
                 "mkdir -p /usr/local/bin && " +
                     "printf '%s' ${shellQuote(script)} > $SESSION_LAUNCHER && " +
                     "chmod 755 $SESSION_LAUNCHER"
@@ -226,7 +241,8 @@ object GraphicSessionUserManager {
                 val directory = shellQuote("$root/usr/local/bin")
                 val launcher = shellQuote("$root$SESSION_LAUNCHER")
                 Shell.cmd(
-                    "mkdir -p $directory && " +
+                    refreshServices(root) + " && " +
+                        "mkdir -p $directory && " +
                         "printf '%s' ${shellQuote(script)} > $launcher && " +
                         "chmod 755 $launcher"
                 ).exec().isSuccess

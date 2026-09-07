@@ -10,7 +10,7 @@ class GraphicSessionInitFilesTest {
     fun openboxSessionScriptDiscoversMountedDisplayAndExecutesOnlyOpenbox() {
         val script = GraphicSessionInitFiles.sessionScript(GraphicSession.OPENBOX, "/bin/sh")
 
-        assertTrue(script.contains("for candidate in /tmp/.X11-unix/X*"))
+        assertTrue(script.contains("for candidate in \"\$X11_SOURCE\"/X*"))
         assertTrue(script.contains("export DISPLAY=:\$X11_DISPLAY_NUMBER"))
         assertFalse(script.contains("export DISPLAY=:0"))
         assertTrue(script.contains("exec openbox-session"))
@@ -23,7 +23,7 @@ class GraphicSessionInitFilesTest {
         val script = GraphicSessionInitFiles.rootSessionScript(GraphicSession.ICEWM, "/bin/sh")
 
         assertTrue(script.startsWith("#!/bin/sh\n"))
-        assertTrue(script.contains("for candidate in /tmp/.X11-unix/X*"))
+        assertTrue(script.contains("for candidate in \"\$X11_SOURCE\"/X*"))
         assertTrue(script.contains("export DISPLAY=:\$X11_DISPLAY_NUMBER"))
         assertTrue(script.contains("export HOME=/root"))
         assertTrue(script.contains("export USER=root"))

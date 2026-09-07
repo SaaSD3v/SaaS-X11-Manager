@@ -12,10 +12,10 @@ class OpenRcGraphicSessionRuntimePolicyTest {
 
         assertTrue(command.contains("display=':1'"))
         assertTrue(command.contains("command -v xset"))
-        assertTrue(command.contains("DISPLAY=\"\$display\" xset q"))
+        assertTrue(command.contains("DISPLAY=\"\$display\" timeout 2 xset q"))
         assertTrue(command.contains("__SAAS_X11_ACTION__=x11-client-ready"))
         assertTrue(command.contains("__SAAS_X11_ACTION__=x11-client-not-ready"))
-        assertTrue(command.indexOf("DISPLAY=\"\$display\" xset q") < command.indexOf("rc-service x11-session start"))
+        assertTrue(command.indexOf("DISPLAY=\"\$display\" timeout 2 xset q") < command.indexOf("rc-service x11-session start"))
     }
 
     @Test
@@ -29,11 +29,13 @@ class OpenRcGraphicSessionRuntimePolicyTest {
     }
 
     @Test
-    fun runtimeNoLongerMutatesOpenRcStateBasedOnAnUnprovenCrashTheory() {
+    fun runtimeResetsOnlyConfirmedCrashedStateWithoutDeletingServiceFiles() {
         val command = GraphicSessionRuntimeController.buildStartCommand(X11DisplaySlot(1))
         val stop = GraphicSessionRuntimeController.buildStopCommand()
 
-        assertFalse(command.contains("rc-service x11-session zap"))
+        assertTrue(command.contains("rc-service x11-session zap"))
+        assertTrue(command.contains("session_status\" -eq 32"))
+        assertTrue(command.contains("kill -0"))
         assertFalse(command.contains("rm -f /etc/runlevels/default/x11-session"))
         assertFalse(command.contains("rm -f /run/x11-session.pid"))
         assertFalse(stop.contains("rc-service x11-session zap"))
