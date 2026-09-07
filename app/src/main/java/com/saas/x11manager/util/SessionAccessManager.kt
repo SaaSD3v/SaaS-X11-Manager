@@ -63,6 +63,23 @@ object SessionAccessManager {
         }
         logger?.i("")
 
+        // A stopped VNC container receives its normal Manager X11 bind before
+        // DroidSpaces starts it. No X11 process/socket is created here: the lease
+        // only makes a Stopped Monitor N visible and toggleable later from Screen.
+        if (accessMode == SessionAccessMode.VNC) {
+            val reservation = VncX11MonitorReservation.reserveBeforeVncStart(
+                containerName = containerName,
+                logger = logger
+            )
+            if (reservation.isFailure) {
+                logger?.e(
+                    "[-] Could not reserve the container's X11 monitor: " +
+                        (reservation.exceptionOrNull()?.message ?: "unknown error")
+                )
+                return false
+            }
+        }
+
         PulseAudioRuntimeSanitizer.prepare(
             containerName = containerName,
             logger = logger
