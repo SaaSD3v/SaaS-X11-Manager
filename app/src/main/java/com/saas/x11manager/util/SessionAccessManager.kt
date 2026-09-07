@@ -77,6 +77,14 @@ object SessionAccessManager {
                 return false
             }
             vncReservedSlot = reservation.getOrNull()
+
+            // VNC is a clean standalone start mode. If this container already had
+            // Integrated X11 running, stop only that monitor/session while keeping
+            // its lease. The user can turn it back on from Screen afterwards and
+            // run VNC + Integrated X11 independently.
+            if (!ensureIntegratedMonitorStoppedForVnc(containerName, vncReservedSlot, logger)) {
+                return false
+            }
         }
 
         return when (accessMode) {
@@ -139,6 +147,28 @@ object SessionAccessManager {
                 }
             }
         }
+    }
+
+    private suspend fun ensureIntegratedMonitorStoppedForVnc(
+        containerName: String,
+        displaySlot: X11DisplaySlot?,
+        logger: ContainerLogger?
+    ): Boolean {
+        if (displaySlot == null) return true
+        if (X11SessionManager.getServerStatus(displaySlot) != X11ServerStatus.Running) {
+            logger?.i("[X11] ✓ ${displaySlot.describe()} is reserved and already stopped")
+            return true
+        }
+
+        logger?.i("[X11] Switching to standalone VNC; stopping active ${displaySlot.describe()}")
+        X11SessionManager.stopContainerGraphicSession(containerName, logger)
+        val stopped = X11SessionManager.stopIntegratedServer(displaySlot, logger)
+        if (!stopped) {
+            logger?.e("[X11] ✗ Could not stop ${displaySlot.describe()} before VNC start")
+            return false
+        }
+        logger?.i("[X11] ✓ ${displaySlot.describe()} is stopped and remains reserved")
+        return true
     }
 
     private suspend fun prepareAudioBeforeGraphicalStart(
