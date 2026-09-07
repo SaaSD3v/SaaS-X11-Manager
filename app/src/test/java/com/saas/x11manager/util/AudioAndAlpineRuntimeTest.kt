@@ -4,15 +4,38 @@ import org.junit.Assert.*
 import org.junit.Assume.assumeNoException
 import org.junit.Test
 import java.io.File
+import java.lang.reflect.InvocationTargetException
+import java.net.ProtocolFamily
+import java.net.SocketAddress
 import java.net.StandardProtocolFamily
 import java.net.SocketException
-import java.net.UnixDomainSocketAddress
 import java.nio.channels.ServerSocketChannel
 import java.nio.file.Files
+import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 
 /** Execute the shipped shell templates; Android commands are never run here. */
 class AudioAndAlpineRuntimeTest {
+    // Android's compile-time stubs omit the JDK UNIX socket API. The unit tests
+    // run on JDK 17, so reach that API reflectively without changing app APIs.
+    private fun unixListener(path: File): ServerSocketChannel {
+        val channel = try {
+            ServerSocketChannel::class.java.getMethod("open", ProtocolFamily::class.java)
+                .invoke(null, StandardProtocolFamily.UNIX) as ServerSocketChannel
+        } catch (e: InvocationTargetException) {
+            throw e.targetException
+        }
+        try {
+            val address = Class.forName("java.net.UnixDomainSocketAddress")
+                .getMethod("of", Path::class.java).invoke(null, path.toPath()) as SocketAddress
+            channel.bind(address)
+            return channel
+        } catch (e: Throwable) {
+            channel.close()
+            throw e
+        }
+    }
+
     private class Fixture : AutoCloseable {
         val root = Files.createTempDirectory("saas-runtime-").toFile()
         val bin = File(root, "bin").apply { mkdirs() }
@@ -113,21 +136,18 @@ class AudioAndAlpineRuntimeTest {
         }
     }
 
-    @Test fun fixedDisplayIgnoresOtherSocketsVisibleInTmp() {
+    @Test fun isolatedMonitorWinsOverOtherSocketsVisibleInTmp() {
         for (number in listOf(0)) Fixture().use { f ->
             val source = File(f.root, "usr/.X11-unix").apply { mkdirs() }
             val target = File(f.root, "tmp/.X11-unix").apply { mkdirs() }
             val first = try {
-                ServerSocketChannel.open(StandardProtocolFamily.UNIX)
+                unixListener(File(source, "X$number"))
             } catch (e: SocketException) {
                 if (!e.message.orEmpty().contains("Operation not permitted")) throw e
                 assumeNoException("This runtime forbids AF_UNIX sockets; CI runs this fixture", e)
                 return
             }
-            val other = ServerSocketChannel.open(StandardProtocolFamily.UNIX)
-            first.use { a -> other.use { b ->
-                a.bind(UnixDomainSocketAddress.of(File(source, "X$number").toPath()))
-                b.bind(UnixDomainSocketAddress.of(File(target, "X99").toPath()))
+            first.use { unixListener(File(target, "X99")).use {
                 f.command("icewm-session", "printf 'DESKTOP_DISPLAY=%s\\n' \"\$DISPLAY\"")
                 val result = f.run(f.mapped(GraphicSessionInitFiles.rootSessionScript(GraphicSession.ICEWM, "/bin/sh")))
                 assertEquals(result.second, 0, result.first)
@@ -147,8 +167,8 @@ class AudioAndAlpineRuntimeTest {
             events.delete()
             assertEquals(0, f.run(script, mapOf("TEST_STATUS" to "3")).first)
             assertFalse(events.exists())
-            f.file("run/x11-session.pid", "${ProcessHandle.current().pid()}\n")
-            assertEquals(0, f.run(script, mapOf("TEST_STATUS" to "32")).first)
+            val livePid = "printf '%s\\n' \"\$\$\" > '${f.root}/run/x11-session.pid'\n"
+            assertEquals(0, f.run(livePid + script, mapOf("TEST_STATUS" to "32")).first)
             assertFalse("Never clear state for a live PID", events.exists())
         }
     }
