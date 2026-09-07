@@ -49,9 +49,8 @@ fun ManagedDisplayScreen(
     viewModel: HomeViewModel,
     onClose: () -> Unit
 ) {
-    val globalServerStatus by viewModel.x11ServerStatus.collectAsState()
-    val globalServerPid by viewModel.x11ServerPid.collectAsState()
     val containers by viewModel.containers.collectAsState()
+    val runtimeMonitors by viewModel.monitors.collectAsState()
     val context = LocalContext.current
     val activity = remember(context) { context.findManagedDisplayActivity() }
     val scope = rememberCoroutineScope()
@@ -95,9 +94,13 @@ fun ManagedDisplayScreen(
             .apply()
     }
 
-    suspend fun refreshMonitors() {
-        val live = X11SessionManager.getMonitors()
-        val liveByNumber = live.associateBy { it.slot.number }
+    /**
+     * Compose-only projection of the already-published runtime snapshot. The old
+     * implementation called X11SessionManager.getMonitors() here, causing the
+     * Screen to compete with HomeViewModel for the same libsu shell.
+     */
+    fun refreshMonitors() {
+        val liveByNumber = runtimeMonitors.associateBy { it.slot.number }
 
         // A raw monitor manually created by the user stops being a persistent
         // placeholder as soon as a running container adopts it. From then on its
@@ -172,30 +175,72 @@ fun ManagedDisplayScreen(
         persistManualDisplayNumbers(manualDisplayNumbers + slot.number)
         connected = false
         selectedDisplayNumber = slot.number
-        scope.launch { refreshMonitors() }
-    }
-
-    fun deleteMonitor(monitor: X11MonitorInfo) {
-        if (
-            busyDisplayNumber != null ||
-            monitor.status == X11ServerStatus.Running ||
-            monitor.containerName != null
-        ) return
-
-        persistManualDisplayNumbers(manualDisplayNumbers - monitor.slot.number)
-        if (selectedDisplayNumber == monitor.slot.number) {
-            connected = false
-            selectedDisplayNumber = monitors
-                .asSequence()
-                .map { it.slot.number }
-                .filter { it != monitor.slot.number }
-                .minOrNull()
-        }
-        scope.launch { refreshMonitors() }
+        refreshMonitors()
     }
 
     fun operationLogger(): ViewModelLogger = ViewModelLogger { level, line ->
         scope.launch { monitorLogs.add(level to line) }
+    }
+
+    fun deleteMonitor(monitor: X11MonitorInfo) {
+        if (busyDisplayNumber != null) return
+
+        selectMonitor(monitor.slot)
+        monitorLogs.clear()
+        monitorLogTitle = "Deleting ${monitor.slot.describe()}"
+        showMonitorLogs = true
+        val logger = operationLogger()
+
+        scope.launch {
+            busyDisplayNumber = monitor.slot.number
+            message = null
+            try {
+                logger.i("--- Deleting X11 monitor ---")
+                logger.i("[*] Monitor: ${monitor.monitorNumber}")
+                logger.i("[*] Display: ${monitor.displayName}")
+                logger.i("[*] Runtime: ${monitor.slot.runtimeDir}")
+                logger.i("[*] Socket: ${monitor.slot.socketFile}")
+                logger.i("")
+
+                if (monitor.containerName != null) {
+                    message = "${monitor.slot.describe()} is reserved by ${monitor.containerName}"
+                    logger.w("[!] Monitor is reserved by running container '${monitor.containerName}'")
+                    logger.w("[!] Stop the container or stop its monitor before deleting the slot")
+                    return@launch
+                }
+                if (monitor.status == X11ServerStatus.Running) {
+                    message = "${monitor.slot.describe()} is still running"
+                    logger.w("[!] Stop the monitor before deleting it")
+                    return@launch
+                }
+
+                // A delete is an authoritative release, not just a UI preference
+                // change. Reuse the verified server-stop cleanup so stale sockets,
+                // lock files and the complete unowned runtime directory disappear.
+                val released = X11SessionManager.stopIntegratedServer(monitor.slot, logger)
+                if (!released) {
+                    message = "${monitor.slot.describe()} could not be fully deleted"
+                    logger.e("[-] Monitor delete failed because runtime cleanup was not confirmed")
+                    return@launch
+                }
+
+                persistManualDisplayNumbers(manualDisplayNumbers - monitor.slot.number)
+                if (selectedDisplayNumber == monitor.slot.number) {
+                    connected = false
+                    selectedDisplayNumber = monitors
+                        .asSequence()
+                        .map { it.slot.number }
+                        .filter { it != monitor.slot.number }
+                        .minOrNull()
+                }
+                refreshMonitors()
+                logger.i("[+] ${monitor.slot.describe()} runtime fully released")
+                logger.i("[+] Monitor removed from the monitor list")
+                viewModel.refreshRuntimeState()
+            } finally {
+                busyDisplayNumber = null
+            }
+        }
     }
 
     fun toggleMonitor(monitor: X11MonitorInfo) {
@@ -301,8 +346,9 @@ fun ManagedDisplayScreen(
                     }
                 }
             } finally {
+                // Publish one shared runtime snapshot. The Screen no longer starts
+                // a second X11 discovery pass of its own.
                 viewModel.refreshRuntimeState()
-                refreshMonitors()
                 busyDisplayNumber = null
             }
         }
@@ -319,10 +365,11 @@ fun ManagedDisplayScreen(
             .apply()
         publishLoriePreferenceChange(context, PREF_ADDITIONAL_KEYS_VISIBLE)
         publishLoriePreferenceChange(context, PREF_FULLSCREEN)
+        viewModel.refreshRuntimeState()
         refreshMonitors()
     }
 
-    LaunchedEffect(globalServerStatus, globalServerPid, containers) {
+    LaunchedEffect(runtimeMonitors, manualDisplayNumbers) {
         refreshMonitors()
     }
 

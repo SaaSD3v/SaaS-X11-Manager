@@ -32,6 +32,8 @@ data class X11MonitorInfo(
  *   artifact but preserves the empty bind anchor so it can be restarted without
  *   restarting the container.
  * - stopped-container X11 binds are reconciled away before a display number is reused.
+ * - monitor observation is read-only; destructive reconciliation is restricted to
+ *   explicit lifecycle/start-stop paths.
  */
 object X11SessionManager {
 
@@ -60,24 +62,17 @@ object X11SessionManager {
         .filter { it > 0 }
         .distinct()
 
+    /**
+     * app_process keeps /proc/PID/comm as "main" on some Android releases even
+     * though --nice-name is correctly visible to pidof/ps. A whole-/proc fallback
+     * was both incorrect on those devices and extremely expensive. Runtime slots
+     * are discovered from their own display-N directories, while a known slot's
+     * process is resolved directly through pidof.
+     */
     private fun getProcessPids(processName: String): List<Int> {
         return try {
-            val pidof = Shell.cmd("pidof ${shellQuote(processName)} 2>/dev/null").exec()
-            val pidofPids = parsePids(pidof.out)
-            if (pidofPids.isNotEmpty()) return pidofPids
-
-            val target = shellQuote(processName)
-            val proc = Shell.cmd(
-                "target=$target; " +
-                    "for comm in /proc/[0-9]*/comm; do " +
-                    "[ -r \"\$comm\" ] || continue; " +
-                    "IFS= read -r name < \"\$comm\" || continue; " +
-                    "[ \"\$name\" = \"\$target\" ] || continue; " +
-                    "pid=\${comm#/proc/}; pid=\${pid%/comm}; " +
-                    "printf '%s\\n' \"\$pid\"; " +
-                    "done"
-            ).exec()
-            parsePids(proc.out)
+            val result = Shell.cmd("pidof ${shellQuote(processName)} 2>/dev/null").exec()
+            parsePids(result.out)
         } catch (_: Exception) {
             emptyList()
         }
@@ -85,30 +80,6 @@ object X11SessionManager {
 
     private fun getLiveServerPids(displaySlot: X11DisplaySlot): List<Int> =
         getProcessPids(displaySlot.processName).distinct()
-
-    private fun discoverProcessSlots(): List<X11DisplaySlot> {
-        return try {
-            val prefix = Constants.INTEGRATED_X11_PROCESS_PREFIX
-            val result = Shell.cmd(
-                "for comm in /proc/[0-9]*/comm; do " +
-                    "[ -r \"\$comm\" ] || continue; " +
-                    "IFS= read -r name < \"\$comm\" || continue; " +
-                    "case \"\$name\" in ${prefix}[0-9]*) " +
-                    "number=\${name#${prefix}}; " +
-                    "case \"\$number\" in ''|*[!0-9]*) continue;; esac; " +
-                    "printf '%s\\n' \"\$number\";; esac; done"
-            ).exec()
-            if (!result.isSuccess) return emptyList()
-            result.out
-                .mapNotNull { it.trim().toIntOrNull() }
-                .filter { it >= 0 }
-                .distinct()
-                .sorted()
-                .map(::X11DisplaySlot)
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
 
     private fun socketTableLines(): List<String> {
         return try {
@@ -133,6 +104,11 @@ object X11SessionManager {
 
     private fun hasLiveSocket(displaySlot: X11DisplaySlot): Boolean =
         hasSocketFile(displaySlot) && hasKernelSocket(displaySlot.socketFile)
+
+    private fun hasLiveSocket(
+        displaySlot: X11DisplaySlot,
+        socketTable: List<String>
+    ): Boolean = hasSocketFile(displaySlot) && hasKernelSocket(displaySlot.socketFile, socketTable)
 
     private fun prepareRuntimeDirectory(displaySlot: X11DisplaySlot): Boolean {
         return try {
@@ -292,6 +268,11 @@ object X11SessionManager {
         logger?.i("[CTX] Container owner: ${containerName ?: "none (raw monitor)"}")
     }
 
+    /**
+     * The runtime directory is the authoritative discovery anchor for current
+     * Manager servers. This avoids scanning every /proc/PID/cmdline/environ on
+     * every Compose refresh, which is prohibitively slow on some Android kernels.
+     */
     private fun discoverRuntimeSlots(): List<X11DisplaySlot> {
         val base = shellQuote(Constants.INTEGRATED_X11_RUNTIME_DIR)
         return try {
@@ -316,25 +297,18 @@ object X11SessionManager {
         }
     }
 
-    private fun hasProcessTmpDirPrefix(prefix: String): Boolean {
-        val needle = shellQuote("TMPDIR=$prefix")
-        return try {
-            Shell.cmd(
-                "for env in /proc/[0-9]*/environ; do " +
-                    "[ -r \"\$env\" ] || continue; " +
-                    "tr '\\0' '\\n' < \"\$env\" 2>/dev/null | " +
-                    "grep -F $needle >/dev/null 2>&1 && exit 0; done; exit 1"
-            ).exec().isSuccess
-        } catch (_: Exception) {
-            false
-        }
-    }
-
     /** Removes only runtime layouts no longer produced by the current code. */
     private suspend fun cleanupLegacyRuntime(logger: ContainerLogger? = null) {
         val base = Constants.INTEGRATED_X11_RUNTIME_DIR
         val legacyRootProcessAlive = getProcessPids("saas-x11").isNotEmpty()
-        val legacyContainerRuntimeAlive = hasProcessTmpDirPrefix("$base/containers/")
+
+        // Old container-scoped layouts can be detected directly from the kernel
+        // UNIX socket table. Do not walk every process environment looking for
+        // TMPDIR: that single scan measured >10s on real hardware.
+        val socketTable = socketTableLines()
+        val legacyContainerSocketAlive = socketTable.any { line ->
+            line.contains("$base/containers/")
+        }
 
         if (!legacyRootProcessAlive) {
             Shell.cmd(
@@ -342,7 +316,7 @@ object X11SessionManager {
                     "${shellQuote(base)}/.X*-lock 2>/dev/null"
             ).exec()
         }
-        if (!legacyContainerRuntimeAlive) {
+        if (!legacyContainerSocketAlive) {
             Shell.cmd(
                 "rm -rf ${shellQuote("$base/containers")} " +
                     "${shellQuote("$base/.saas-primary")} " +
@@ -350,7 +324,7 @@ object X11SessionManager {
             ).exec()
         }
 
-        if (logger != null && (!legacyRootProcessAlive || !legacyContainerRuntimeAlive)) {
+        if (logger != null && (!legacyRootProcessAlive || !legacyContainerSocketAlive)) {
             logger.i("[+] Legacy X11 runtime cleanup checked")
         }
     }
@@ -370,6 +344,9 @@ object X11SessionManager {
      * Reconciles persistent container config with real runtime state.
      * It intentionally never kills a healthy unowned monitor: this is how a
      * monitor survives an external DroidSpaces/CLI container stop.
+     *
+     * IMPORTANT: this is maintenance, not observation. UI refreshes must call
+     * getMonitors(), which is deliberately read-only.
      */
     private suspend fun reconcileRuntime(
         containers: List<ContainerInfo>,
@@ -397,8 +374,8 @@ object X11SessionManager {
         val slotNumbers = buildSet {
             addAll(assignments.keys)
             addAll(discoverRuntimeSlots().map { it.number })
-            addAll(discoverProcessSlots().map { it.number })
         }
+        val socketTable = socketTableLines()
 
         var staleSlots = 0
         for (number in slotNumbers.sorted()) {
@@ -406,7 +383,7 @@ object X11SessionManager {
             sanitizeUnexpectedArtifacts(slot)
 
             val pids = getLiveServerPids(slot)
-            val liveSocket = hasLiveSocket(slot)
+            val liveSocket = hasLiveSocket(slot, socketTable)
             val preserveAnchor = number in assignments
 
             if (pids.isNotEmpty() && !liveSocket) {
@@ -469,11 +446,12 @@ object X11SessionManager {
         }
 
         val assignments = runningAssignments(containers)
-        val reusableActive = discoverProcessSlots()
+        val socketTable = socketTableLines()
+        val reusableActive = discoverRuntimeSlots()
             .filter { slot ->
                 slot.number !in assignments &&
                     getLiveServerPids(slot).isNotEmpty() &&
-                    hasLiveSocket(slot)
+                    hasLiveSocket(slot, socketTable)
             }
             .map { it.number }
 
@@ -492,9 +470,17 @@ object X11SessionManager {
             "com.termux.x11.CmdEntryPoint ${displaySlot.displayName} " +
             ">${shellQuote(displaySlot.logFile)} 2>&1 & echo ${'$'}!"
 
-    private fun serverInfo(displaySlot: X11DisplaySlot, containerName: String? = null): X11MonitorInfo {
+    private fun serverInfo(
+        displaySlot: X11DisplaySlot,
+        containerName: String? = null,
+        socketTable: List<String>? = null
+    ): X11MonitorInfo {
         val live = getLiveServerPids(displaySlot)
-        val running = live.isNotEmpty() && hasLiveSocket(displaySlot)
+        val running = live.isNotEmpty() && if (socketTable == null) {
+            hasLiveSocket(displaySlot)
+        } else {
+            hasLiveSocket(displaySlot, socketTable)
+        }
         return X11MonitorInfo(
             slot = displaySlot,
             status = if (running) X11ServerStatus.Running else X11ServerStatus.Stopped,
@@ -506,19 +492,29 @@ object X11SessionManager {
     suspend fun getMonitors(): List<X11MonitorInfo> =
         getMonitors(ContainerManager.listContainers())
 
+    /**
+     * Read-only monitor observation for Compose/runtime snapshots. Never mutate
+     * config, kill a server or remove a runtime merely because a UI refresh saw
+     * a transient state.
+     */
     suspend fun getMonitors(containers: List<ContainerInfo>): List<X11MonitorInfo> =
         withContext(Dispatchers.IO) {
-            reconcileRuntime(containers)
             val assignments = runningAssignments(containers)
             val slotNumbers = buildSet {
                 addAll(assignments.keys)
                 addAll(discoverRuntimeSlots().map { it.number })
-                addAll(discoverProcessSlots().map { it.number })
             }
+            val socketTable = socketTableLines()
 
             slotNumbers
                 .sorted()
-                .map { number -> serverInfo(X11DisplaySlot(number), assignments[number]) }
+                .map { number ->
+                    serverInfo(
+                        displaySlot = X11DisplaySlot(number),
+                        containerName = assignments[number],
+                        socketTable = socketTable
+                    )
+                }
                 .filter { it.containerName != null || it.status == X11ServerStatus.Running }
         }
 
@@ -1019,7 +1015,6 @@ object X11SessionManager {
 
             val slots = buildSet {
                 addAll(discoverRuntimeSlots().map { it.number })
-                addAll(discoverProcessSlots().map { it.number })
                 containers.forEach { container ->
                     ContainerConfigManager.displaySlotFromBindMounts(container.bindMounts)
                         ?.let { add(it.number) }

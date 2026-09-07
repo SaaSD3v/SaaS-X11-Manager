@@ -9,16 +9,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.saas.x11manager.X11Application
 import com.saas.x11manager.util.*
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class HomeViewModel : ViewModel() {
@@ -80,49 +81,52 @@ class HomeViewModel : ViewModel() {
     private var runtimeRefreshJob: Job? = null
     private var refreshGeneration = 0L
     private var runtimeStateGeneration = 0L
+    private val runtimeSnapshotMutex = Mutex()
 
     init {
         refresh()
     }
 
+    /**
+     * Full refresh is intentionally serialized. libsu exposes one shared privileged
+     * shell and blocking Shell.exec() calls are not cancelled when a coroutine Job
+     * is cancelled. The old async/cancel/relaunch strategy could therefore leave
+     * several real shell tasks queued behind one another while Compose believed the
+     * previous refresh had been cancelled.
+     */
     fun refresh() {
+        if (refreshJob?.isActive == true) return
+
         val generation = ++refreshGeneration
-        runtimeRefreshJob?.cancel()
-        val runtimeGenerationAtStart = ++runtimeStateGeneration
-        refreshJob?.cancel()
-        diagnosticsJob?.cancel()
+        val runtimeGenerationAtStart = runtimeStateGeneration
 
         refreshJob = viewModelScope.launch {
             if (!initialized) _isLoading.value = true
 
             try {
-                val operational = coroutineScope {
-                    val rootDef = async(Dispatchers.IO) {
-                        RootChecker.checkRootAccess()
-                    }
-                    val dsDef = async(Dispatchers.IO) {
-                        DroidspacesChecker.checkBackend()
-                    }
-                    val runtimeDef = async(Dispatchers.IO) {
-                        readRuntimeSnapshot()
-                    }
-
-                    OperationalRefreshSnapshot(
-                        rootStatus = rootDef.await(),
-                        droidspacesAvailable = dsDef.await(),
-                        runtime = runtimeDef.await()
-                    )
+                val rootStatus = withContext(Dispatchers.IO) {
+                    RootChecker.checkRootAccess()
+                }
+                val droidspacesAvailable = if (rootStatus == RootStatus.Granted) {
+                    withContext(Dispatchers.IO) { DroidspacesChecker.checkBackend() }
+                } else {
+                    false
+                }
+                val runtime = if (rootStatus == RootStatus.Granted && droidspacesAvailable) {
+                    readRuntimeSnapshot()
+                } else {
+                    RuntimeRefreshSnapshot(emptyList(), emptyList())
                 }
 
                 if (generation != refreshGeneration) return@launch
 
-                _rootStatus.value = operational.rootStatus
-                if (operational.rootStatus != RootStatus.Granted) {
+                _rootStatus.value = rootStatus
+                if (rootStatus != RootStatus.Granted) {
                     _rootProvider.value = ""
                 }
 
-                _dsStatus.value = operational.droidspacesAvailable
-                if (!operational.droidspacesAvailable) {
+                _dsStatus.value = droidspacesAvailable
+                if (!droidspacesAvailable) {
                     _dsRequirements.value = null
                 }
 
@@ -130,15 +134,15 @@ class HomeViewModel : ViewModel() {
                     runtimeGenerationAtStart == runtimeStateGeneration &&
                     runningOperationContainer == null
                 ) {
-                    applyRuntimeSnapshot(operational.runtime)
+                    applyRuntimeSnapshot(runtime)
                 }
 
                 initialized = true
                 _isLoading.value = false
                 refreshDiagnostics(
                     generation = generation,
-                    rootStatus = operational.rootStatus,
-                    droidspacesAvailable = operational.droidspacesAvailable
+                    rootStatus = rootStatus,
+                    droidspacesAvailable = droidspacesAvailable
                 )
             } catch (e: CancellationException) {
                 throw e
@@ -152,49 +156,40 @@ class HomeViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Diagnostics are low-value for interactive runtime control, so they run as
+     * one sequential background chain rather than competing async Shell tasks.
+     */
     private fun refreshDiagnostics(
         generation: Long,
         rootStatus: RootStatus,
         droidspacesAvailable: Boolean
     ) {
-        diagnosticsJob?.cancel()
+        if (diagnosticsJob?.isActive == true) return
+
         diagnosticsJob = viewModelScope.launch {
             try {
-                val diagnostics = coroutineScope {
-                    val providerDef = async(Dispatchers.IO) {
-                        if (rootStatus == RootStatus.Granted) {
-                            RootChecker.getRootProvider()
-                        } else {
-                            ""
-                        }
-                    }
-                    val requirementsDef = async(Dispatchers.IO) {
-                        if (droidspacesAvailable) {
-                            DroidspacesChecker.checkRequirements()
-                        } else {
-                            null
-                        }
-                    }
-                    val systemDef = async(Dispatchers.IO) {
-                        readDeviceSnapshot()
-                    }
-
-                    DiagnosticSnapshot(
-                        rootProvider = providerDef.await(),
-                        droidspacesRequirements = requirementsDef.await(),
-                        system = systemDef.await()
-                    )
+                val rootProvider = if (rootStatus == RootStatus.Granted) {
+                    withContext(Dispatchers.IO) { RootChecker.getRootProvider() }
+                } else {
+                    ""
                 }
+                val droidspacesRequirements = if (droidspacesAvailable) {
+                    withContext(Dispatchers.IO) { DroidspacesChecker.checkRequirements() }
+                } else {
+                    null
+                }
+                val system = readDeviceSnapshot()
 
                 if (generation != refreshGeneration) return@launch
 
-                _rootProvider.value = diagnostics.rootProvider
-                _dsRequirements.value = diagnostics.droidspacesRequirements
-                _kernelVersion.value = diagnostics.system.kernel
-                _arch.value = diagnostics.system.arch
-                _androidVersion.value = diagnostics.system.androidVersion
-                _androidSdk.value = diagnostics.system.androidSdk
-                _deviceName.value = diagnostics.system.deviceName
+                _rootProvider.value = rootProvider
+                _dsRequirements.value = droidspacesRequirements
+                _kernelVersion.value = system.kernel
+                _arch.value = system.arch
+                _androidVersion.value = system.androidVersion
+                _androidSdk.value = system.androidSdk
+                _deviceName.value = system.deviceName
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -203,11 +198,15 @@ class HomeViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Coalesce runtime refresh requests instead of cancelling a blocking libsu
+     * command and immediately queueing another one behind it.
+     */
     fun refreshRuntimeState() {
         if (!initialized || runningOperationContainer != null) return
+        if (runtimeRefreshJob?.isActive == true) return
 
         val generation = ++runtimeStateGeneration
-        runtimeRefreshJob?.cancel()
         runtimeRefreshJob = viewModelScope.launch {
             try {
                 val snapshot = readRuntimeSnapshot()
@@ -227,8 +226,11 @@ class HomeViewModel : ViewModel() {
     }
 
     private suspend fun refreshRuntimeAfterOperation() {
+        // A pre-operation refresh may still own the shared shell. Let that one
+        // finish instead of cancelling it (Shell.exec itself is not cancellable),
+        // then publish one authoritative post-operation snapshot.
+        runtimeRefreshJob?.join()
         val generation = ++runtimeStateGeneration
-        runtimeRefreshJob?.cancel()
 
         try {
             val snapshot = readRuntimeSnapshot()
@@ -250,10 +252,12 @@ class HomeViewModel : ViewModel() {
         _x11ServerPid.value = running?.pid
     }
 
-    private suspend fun readRuntimeSnapshot(): RuntimeRefreshSnapshot = withContext(Dispatchers.IO) {
-        val containers = ContainerManager.listContainers()
-        val monitors = X11SessionManager.getMonitors(containers)
-        RuntimeRefreshSnapshot(containers = containers, monitors = monitors)
+    private suspend fun readRuntimeSnapshot(): RuntimeRefreshSnapshot = runtimeSnapshotMutex.withLock {
+        withContext(Dispatchers.IO) {
+            val containers = ContainerManager.listContainers()
+            val monitors = X11SessionManager.getMonitors(containers)
+            RuntimeRefreshSnapshot(containers = containers, monitors = monitors)
+        }
     }
 
     private fun updateContainerState(name: String, status: ContainerStatus, pid: Int? = null) {
@@ -265,8 +269,10 @@ class HomeViewModel : ViewModel() {
     private fun tryBeginOperation(containerName: String): Boolean {
         if (runningOperationContainer != null) return false
 
+        // Invalidate any snapshot that started before the user operation. Do not
+        // cancel its blocking shell work: cancellation was the source of queued
+        // zombie refresh tasks on real devices.
         runtimeStateGeneration++
-        runtimeRefreshJob?.cancel()
         runningOperationContainer = containerName
         return true
     }
@@ -285,6 +291,10 @@ class HomeViewModel : ViewModel() {
             val logger = ViewModelLogger { level, message -> appendLog(logs, level, message) }
 
             try {
+                // Never start a user operation behind a cancelled-but-still-running
+                // refresh. With the new fast snapshot this wait is normally tiny.
+                runtimeRefreshJob?.join()
+
                 val profile = withContext(Dispatchers.IO) {
                     ContainerSettingsManager.readSnapshot(
                         containerName = container.name,
@@ -348,9 +358,16 @@ class HomeViewModel : ViewModel() {
             val logger = ViewModelLogger { level, message -> appendLog(logs, level, message) }
 
             try {
-                // VNC is an external process inside the container. Clear only
-                // Manager-owned VNC PIDs/state before the container disappears.
-                VncServerManager.stopManagedVnc(container.name, logger)
+                runtimeRefreshJob?.join()
+
+                // Do not touch or mention VNC for an X11-only container. The old
+                // unconditional cleanup both emitted a false VNC success line and
+                // paid the VNC stop delay even when VNC had never been selected.
+                val accessMode = VncSettings.getAccessMode(X11Application.instance, container.name)
+                if (accessMode.requiresVnc) {
+                    VncServerManager.stopManagedVnc(container.name, logger)
+                }
+
                 val stopped = X11SessionManager.stopX11Session(container.name, logger)
                 if (stopped) {
                     updateContainerState(container.name, ContainerStatus.STOPPED, null)
@@ -371,9 +388,14 @@ class HomeViewModel : ViewModel() {
         viewModelScope.launch {
             val logger = ViewModelLogger { _, _ -> }
             try {
+                runtimeRefreshJob?.join()
+
                 val currentContainers = ContainerManager.listContainers()
                 currentContainers.filter { it.isRunning }.forEach { container ->
-                    VncServerManager.stopManagedVnc(container.name, logger)
+                    val accessMode = VncSettings.getAccessMode(X11Application.instance, container.name)
+                    if (accessMode.requiresVnc) {
+                        VncServerManager.stopManagedVnc(container.name, logger)
+                    }
                 }
                 X11SessionManager.stopAll(logger)
                 _containers.value = _containers.value.map {
@@ -472,18 +494,6 @@ class HomeViewModel : ViewModel() {
         val androidSdk: String,
         val arch: String,
         val kernel: String
-    )
-
-    private data class OperationalRefreshSnapshot(
-        val rootStatus: RootStatus,
-        val droidspacesAvailable: Boolean,
-        val runtime: RuntimeRefreshSnapshot
-    )
-
-    private data class DiagnosticSnapshot(
-        val rootProvider: String,
-        val droidspacesRequirements: DroidspacesRequirementsResult?,
-        val system: DeviceSnapshot
     )
 
     private data class RuntimeRefreshSnapshot(
