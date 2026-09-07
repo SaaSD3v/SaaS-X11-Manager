@@ -131,4 +131,66 @@ class ContainerConfigManagerTest {
 
         assertEquals(null, slot)
     }
+
+    @Test
+    fun releaseRemovesOnlyCurrentManagerBind() {
+        val slot = X11DisplaySlot(2)
+        val original = listOf(
+            "name=demo",
+            "enable_termux_x11=0",
+            "bind_mounts=/host/data:/mnt/data,${slot.socketDir}:/usr/.X11-unix,/host/cache:/cache"
+        )
+
+        val released = ContainerConfigManager.buildConfigWithoutManagerX11(original)
+        val bindLine = released.single { it.startsWith("bind_mounts=") }
+
+        assertFalse(bindLine.contains(slot.socketDir))
+        assertTrue(bindLine.contains("/host/data:/mnt/data"))
+        assertTrue(bindLine.contains("/host/cache:/cache"))
+        assertEquals("enable_termux_x11=0", released[1])
+    }
+
+    @Test
+    fun releaseRecognizesLegacyManagerLayoutsWithoutRemovingUserSocket() {
+        val base = Constants.INTEGRATED_X11_RUNTIME_DIR
+        val original = listOf(
+            "bind_mounts=$base/.X11-unix:/usr/.X11-unix," +
+                "$base/containers/64656269616e/.X11-unix:/usr/.X11-unix," +
+                "/user/custom-x:/usr/.X11-unix,/host/data:/mnt/data"
+        )
+
+        val released = ContainerConfigManager.buildConfigWithoutManagerX11(original)
+        val bindLine = released.single()
+
+        assertFalse(bindLine.contains("$base/.X11-unix:/usr/.X11-unix"))
+        assertFalse(bindLine.contains("$base/containers/64656269616e/.X11-unix"))
+        assertTrue(bindLine.contains("/user/custom-x:/usr/.X11-unix"))
+        assertTrue(bindLine.contains("/host/data:/mnt/data"))
+    }
+
+    @Test
+    fun managerBindDetectionCoversCurrentAndLegacyLayouts() {
+        val base = Constants.INTEGRATED_X11_RUNTIME_DIR
+
+        assertTrue(
+            ContainerConfigManager.hasManagerX11Bind(
+                "${X11DisplaySlot(3).socketDir}:/usr/.X11-unix"
+            )
+        )
+        assertTrue(
+            ContainerConfigManager.hasManagerX11Bind(
+                "$base/.X11-unix:/usr/.X11-unix"
+            )
+        )
+        assertTrue(
+            ContainerConfigManager.hasManagerX11Bind(
+                "$base/containers/616c70696e65/.X11-unix:/usr/.X11-unix"
+            )
+        )
+        assertFalse(
+            ContainerConfigManager.hasManagerX11Bind(
+                "/user/custom-x:/usr/.X11-unix"
+            )
+        )
+    }
 }
