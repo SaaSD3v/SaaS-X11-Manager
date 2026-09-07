@@ -47,7 +47,7 @@ class IntegratedX11CleanupPolicyTest {
     }
 
     @Test
-    fun monitorUiDoesNotKeepA permanentPrimaryX0Slot() {
+    fun monitorUiDoesNotKeepAPermanentPrimaryX0Slot() {
         val display = source(
             "app/src/main/java/com/saas/x11manager/ui/screen/ManagedDisplayScreen.kt"
         )
