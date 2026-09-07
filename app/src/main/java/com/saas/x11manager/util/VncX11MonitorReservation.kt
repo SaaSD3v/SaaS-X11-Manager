@@ -21,9 +21,9 @@ object VncX11MonitorReservation {
         logger: ContainerLogger? = null
     ): Result<X11DisplaySlot?> = withContext(Dispatchers.IO) {
         try {
-            logger?.i("--- Reserving Integrated X11 Monitor ---")
-            logger?.i("[CTX] Container: $containerName")
-            logger?.i("[CTX] Policy: reserve monitor only; do not start X11")
+            logger?.i("[X11] Reserving a stopped monitor for VNC container")
+            logger?.i("[CONTAINER] • Container: $containerName")
+            logger?.i("[X11] • Policy: reserve only; Integrated X11 remains off")
 
             // This is a real lifecycle operation, so maintenance is appropriate
             // here (unlike observation from the UI).
@@ -38,14 +38,14 @@ object VncX11MonitorReservation {
             val existing = ContainerConfigManager.displaySlotFromBindMounts(target.bindMounts)
             if (target.isRunning) {
                 if (existing != null) {
-                    logger?.i("[+] Existing ${existing.describe()} lease retained for running VNC container")
+                    logger?.i("[X11] ✓ Existing ${existing.describe()} reservation retained")
                     return@withContext Result.success(existing)
                 }
 
                 // Rewriting container.config cannot retroactively add a bind to a
                 // running mount namespace. Do not silently restart user workload.
-                logger?.w("[!] Container is already running without a Manager X11 monitor lease")
-                logger?.w("[!] VNC can start, but stop/restart the container before expecting a toggleable X11 monitor")
+                logger?.w("[X11] ! Container is already running without a Manager X11 monitor lease")
+                logger?.w("[X11] ! VNC will continue; stop/restart the container to add a toggleable X11 monitor")
                 return@withContext Result.success(null)
             }
 
@@ -59,9 +59,8 @@ object VncX11MonitorReservation {
                 .toSet()
             val slot = X11DisplayAllocator.firstFree(occupied)
 
-            logger?.i("[CTX] Lowest free monitor: ${slot.monitorNumber}")
-            logger?.i("[CTX] Display: ${slot.displayName}")
-            logger?.i("[CTX] Runtime anchor: ${slot.runtimeDir}")
+            logger?.i("[X11] • Reserved monitor: ${slot.monitorNumber}")
+            logger?.i("[X11] • Display: ${slot.displayName}")
 
             // Before recycling N, remove an old alias from any stopped container.
             for (other in containers) {
@@ -96,11 +95,11 @@ object VncX11MonitorReservation {
                 )
             }
 
-            logger?.i("[+] ${slot.describe()} reserved for $containerName")
-            logger?.i("[+] Integrated X11 remains stopped until the monitor is started from Screen")
+            logger?.i("[X11] ✓ ${slot.describe()} reserved for $containerName")
+            logger?.i("[X11] ✓ Monitor is visible but stopped; start it from Screen when needed")
             Result.success(slot)
         } catch (e: Exception) {
-            logger?.e("[-] X11 monitor reservation failed: ${e.message}")
+            logger?.e("[X11] ✗ Monitor reservation failed: ${e.message}")
             Result.failure(e)
         }
     }
