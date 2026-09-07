@@ -63,9 +63,7 @@ object SessionAccessManager {
         }
         logger?.i("")
 
-        // A stopped VNC container receives its normal Manager X11 bind before
-        // DroidSpaces starts it. No X11 process/socket is created here: the lease
-        // only makes a Stopped Monitor N visible and toggleable later from Screen.
+        var vncReservedSlot: X11DisplaySlot? = null
         if (accessMode == SessionAccessMode.VNC) {
             val reservation = VncX11MonitorReservation.reserveBeforeVncStart(
                 containerName = containerName,
@@ -78,19 +76,12 @@ object SessionAccessManager {
                 )
                 return false
             }
+            vncReservedSlot = reservation.getOrNull()
         }
-
-        PulseAudioRuntimeSanitizer.prepare(
-            containerName = containerName,
-            logger = logger
-        )
-        PulseAudioFixManager.prepareBeforeGraphicalStart(
-            containerName = containerName,
-            logger = logger
-        )
 
         return when (accessMode) {
             SessionAccessMode.INTEGRATED_X11, SessionAccessMode.BOTH -> {
+                prepareAudioBeforeGraphicalStart(containerName, logger)
                 val slot = X11SessionManager.startX11Session(
                     containerName = containerName,
                     logger = logger,
@@ -109,32 +100,59 @@ object SessionAccessManager {
             }
 
             SessionAccessMode.VNC -> {
-                val result = VncServerManager.startStandalone(
-                    containerName = containerName,
-                    platform = platform,
-                    session = session,
-                    port = vncPort,
-                    password = vncPassword,
-                    logger = logger,
-                    beforeGraphicSession = { finalizeAudioAfterContainerReady(containerName, logger) }
-                )
-                if (result.success) {
-                    VncConnectionGuide.logAfterSuccessfulStart(
+                var vncStarted = false
+                try {
+                    prepareAudioBeforeGraphicalStart(containerName, logger)
+                    val result = VncServerManager.startStandalone(
                         containerName = containerName,
+                        platform = platform,
+                        session = session,
                         port = vncPort,
                         password = vncPassword,
-                        logger = logger
-                    )
-                } else {
-                    VncConnectionGuide.logAdbForwardRestartRecovery(
-                        port = vncPort,
                         logger = logger,
-                        onlyIfTroubleshooting = true
+                        beforeGraphicSession = { finalizeAudioAfterContainerReady(containerName, logger) }
                     )
+                    vncStarted = result.success
+                    if (result.success) {
+                        VncConnectionGuide.logAfterSuccessfulStart(
+                            containerName = containerName,
+                            port = vncPort,
+                            password = vncPassword,
+                            logger = logger
+                        )
+                    } else {
+                        VncConnectionGuide.logAdbForwardRestartRecovery(
+                            port = vncPort,
+                            logger = logger,
+                            onlyIfTroubleshooting = true
+                        )
+                    }
+                    result.success
+                } finally {
+                    if (!vncStarted) {
+                        VncX11MonitorReservation.rollbackAfterFailedVncStart(
+                            containerName = containerName,
+                            displaySlot = vncReservedSlot,
+                            logger = logger
+                        )
+                    }
                 }
-                result.success
             }
         }
+    }
+
+    private suspend fun prepareAudioBeforeGraphicalStart(
+        containerName: String,
+        logger: ContainerLogger?
+    ) {
+        PulseAudioRuntimeSanitizer.prepare(
+            containerName = containerName,
+            logger = logger
+        )
+        PulseAudioFixManager.prepareBeforeGraphicalStart(
+            containerName = containerName,
+            logger = logger
+        )
     }
 
     private suspend fun confirmManagedDesktop(
