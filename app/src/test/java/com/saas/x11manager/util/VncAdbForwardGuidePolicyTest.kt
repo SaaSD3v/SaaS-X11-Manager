@@ -29,11 +29,14 @@ class VncAdbForwardGuidePolicyTest {
     }
 
     @Test
-    fun failedVncStartsAlsoPrintRecoveryOrdering() {
+    fun failedVncStartPrintsRecoveryAndThenRollsBackOnlyItsMonitorReservation() {
         val access = source("app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt")
-        val calls = Regex("VncConnectionGuide\\.logAdbForwardRestartRecovery").findAll(access).count()
 
-        assertTrue(calls >= 2)
+        val recoveryIndex = access.indexOf("VncConnectionGuide.logAdbForwardRestartRecovery")
+        val rollbackIndex = access.indexOf("VncX11MonitorReservation.rollbackAfterFailedVncStart")
+
+        assertTrue(recoveryIndex >= 0)
         assertTrue(access.contains("onlyIfTroubleshooting = true"))
+        assertTrue(rollbackIndex > recoveryIndex)
     }
 }
