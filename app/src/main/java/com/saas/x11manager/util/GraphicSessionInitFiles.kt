@@ -126,25 +126,22 @@ internal object GraphicSessionInitFiles {
             "export USER=\$SESSION_USER\n" +
             "export LOGNAME=\$SESSION_USER\n" +
             "export SHELL=\$SESSION_SHELL\n" +
-            // Keep the established runtime path so existing Wayland/X11 health checks
-            // remain compatible; ownership follows the selected graphical user.
             "export XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
             "mkdir -p \"\$XDG_RUNTIME_DIR\" || exit 1\n" +
             "chown \"\$SESSION_UID:\$SESSION_GID\" \"\$XDG_RUNTIME_DIR\" || exit 1\n" +
             "chmod 700 \"\$XDG_RUNTIME_DIR\" || exit 1\n"
 
-    fun sessionScript(session: GraphicSession, shell: String): String {
-        val sessionType = if (session.protocol == GraphicProtocol.WAYLAND) "wayland" else "x11"
-        val protocolEnvironment = if (session.protocol == GraphicProtocol.WAYLAND) {
+    private fun selectedUserProtocolEnvironment(session: GraphicSession): String =
+        if (session.protocol == GraphicProtocol.WAYLAND) {
             "export XDG_SESSION_TYPE=wayland\n" +
                 "export SAAS_WAYLAND_SOCKET=wayland-0\n" +
-                // Do not export WAYLAND_DISPLAY here: the selected compositor is the
-                // Wayland server, not a client of another Wayland compositor.
                 "unset WAYLAND_DISPLAY\n"
         } else {
             "export XDG_SESSION_TYPE=x11\n"
         }
-        val launch = if (session == GraphicSession.NONE) {
+
+    private fun selectedUserLaunch(session: GraphicSession): String =
+        if (session == GraphicSession.NONE) {
             "exit 0\n"
         } else {
             "if [ \"\$SESSION_UID\" = 0 ]; then\n" +
@@ -153,13 +150,35 @@ internal object GraphicSessionInitFiles {
                 "exec su -p -s \"\$SESSION_SHELL\" \"\$SESSION_USER\" -c 'exec ${session.startCommand}'\n"
         }
 
+    fun sessionScript(session: GraphicSession, shell: String): String {
+        val sessionType = if (session.protocol == GraphicProtocol.WAYLAND) "wayland" else "x11"
         return "#!$shell\n" +
             dynamicDisplayEnvironment() +
             selectedUserEnvironment(shell) +
-            protocolEnvironment +
+            selectedUserProtocolEnvironment(session) +
             "export SAAS_GRAPHIC_PROTOCOL=$sessionType\n" +
             PulseAudioClientConfig.sessionEnvironment() +
-            launch
+            selectedUserLaunch(session)
+    }
+
+    /**
+     * User-aware launcher for TigerVNC's private Xvnc display.
+     *
+     * DISPLAY is deliberately not discovered or overwritten here. Xvnc chooses
+     * its virtual display first and VncServerManager exports that exact DISPLAY
+     * before invoking this launcher. The Linux user/home/runtime policy is shared
+     * with Integrated X11 so VNC and X11 behave identically for non-root users.
+     */
+    fun vncSessionScript(session: GraphicSession, shell: String = "/bin/sh"): String {
+        val sessionType = if (session.protocol == GraphicProtocol.WAYLAND) "wayland" else "x11"
+        return "#!$shell\n" +
+            "if [ -z \"\${DISPLAY:-}\" ]; then echo \"VNC DISPLAY is not set\" >&2; exit 1; fi\n" +
+            "export SAAS_HOST_DISPLAY=\$DISPLAY\n" +
+            selectedUserEnvironment(shell) +
+            selectedUserProtocolEnvironment(session) +
+            "export SAAS_GRAPHIC_PROTOCOL=$sessionType\n" +
+            PulseAudioClientConfig.sessionEnvironment() +
+            selectedUserLaunch(session)
     }
 
     fun openRcSetupService(): String =
@@ -244,10 +263,6 @@ internal object GraphicSessionInitFiles {
             "Restart=on-failure\n" +
             "RestartSec=3\n\n" +
             "[Install]\n" +
-            // DroidSpaces containers commonly reach multi-user.target without
-            // transitioning through graphical.target. The runtime controller can
-            // still start this service on demand, but installing it in multi-user
-            // makes automatic startup match the container's real boot target.
             "WantedBy=multi-user.target\n"
     }
 }
