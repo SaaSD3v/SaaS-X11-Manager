@@ -5,7 +5,7 @@ package com.saas.x11manager.util
  *
  * Slot numbers are zero based at the X11 protocol level (`:0`, `:1`, ...),
  * while the UI presents them as human-friendly monitor numbers (1, 2, ...).
- * A slot is runtime state, not a permanent property of a container.
+ * A slot is a recyclable runtime resource, never a permanent container ID.
  */
 data class X11DisplaySlot(val number: Int) {
     init {
@@ -19,7 +19,7 @@ data class X11DisplaySlot(val number: Int) {
         get() = ":$number"
 
     val processName: String
-        get() = "saas-x11-$number"
+        get() = "${Constants.INTEGRATED_X11_PROCESS_PREFIX}$number"
 
     val runtimeDir: String
         get() = "${Constants.INTEGRATED_X11_RUNTIME_DIR}/display-$number"
@@ -42,9 +42,9 @@ data class X11DisplaySlot(val number: Int) {
 /**
  * Stateless slot-selection policy.
  *
- * Active sessions keep their current slot. Once a slot is released, the next
- * graphical session receives the lowest available display number instead of
- * being sent back to a historical/per-container monitor assignment.
+ * A released display number is immediately reusable. The allocator has no
+ * historical/per-container preference and therefore never creates gaps when a
+ * lower monitor number is available.
  */
 object X11DisplayAllocator {
     fun firstFree(occupiedDisplayNumbers: Collection<Int>): X11DisplaySlot {
