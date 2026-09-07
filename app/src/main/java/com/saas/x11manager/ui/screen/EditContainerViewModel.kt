@@ -12,6 +12,7 @@ import com.saas.x11manager.util.AdditionalGraphicSessionInstaller
 import com.saas.x11manager.util.ContainerCapabilities
 import com.saas.x11manager.util.ContainerCapabilitiesDetector
 import com.saas.x11manager.util.ContainerManager
+import com.saas.x11manager.util.ContainerPlatform
 import com.saas.x11manager.util.ContainerSettingsManager
 import com.saas.x11manager.util.ContainerStatus
 import com.saas.x11manager.util.GraphicProtocol
@@ -21,7 +22,6 @@ import com.saas.x11manager.util.GraphicSessionInstaller
 import com.saas.x11manager.util.GraphicSessionRegistry
 import com.saas.x11manager.util.GraphicSessionWizard
 import com.saas.x11manager.util.InitSystem
-import com.saas.x11manager.util.SessionAccessManager
 import com.saas.x11manager.util.SessionAccessMode
 import com.saas.x11manager.util.ViewModelLogger
 import com.saas.x11manager.util.VncSettings
@@ -33,12 +33,16 @@ import java.io.File
 
 enum class ConfigurationWizardStage {
     HIDDEN,
-    DISTRIBUTION_SELECTION,
+    DETECTED_SUMMARY,
     RUNNING_WARNING,
-    INIT_SELECTION,
     PROTOCOL_SELECTION,
     CATALOG_SELECTION,
     SESSION_SELECTION,
+
+    // Kept only so old source/tests do not crash while the wizard model migrates.
+    // Current UI never enters these stages.
+    DISTRIBUTION_SELECTION,
+    INIT_SELECTION,
     ACCESS_SELECTION
 }
 
@@ -56,12 +60,9 @@ class EditContainerViewModel : ViewModel() {
 
     private val installedSessions = mutableStateMapOf<GraphicSession, Boolean>()
 
-    val openboxInstalled: Boolean
-        get() = isSessionInstalled(GraphicSession.OPENBOX)
-    val icewmInstalled: Boolean
-        get() = isSessionInstalled(GraphicSession.ICEWM)
-    val jwmInstalled: Boolean
-        get() = isSessionInstalled(GraphicSession.JWM)
+    val openboxInstalled: Boolean get() = isSessionInstalled(GraphicSession.OPENBOX)
+    val icewmInstalled: Boolean get() = isSessionInstalled(GraphicSession.ICEWM)
+    val jwmInstalled: Boolean get() = isSessionInstalled(GraphicSession.JWM)
 
     var logs by mutableStateOf<List<Pair<Int, String>>>(emptyList())
     val installLogs = mutableStateListOf<Pair<Int, String>>()
@@ -90,32 +91,22 @@ class EditContainerViewModel : ViewModel() {
         private set
     var pendingWizardSession by mutableStateOf<GraphicSession?>(null)
         private set
-    var pendingAccessMode by mutableStateOf(SessionAccessMode.INTEGRATED_X11)
-        private set
-    var pendingVncPort by mutableStateOf(VncSettings.DEFAULT_PORT)
-        private set
-    private var pendingVncPassword: String? = null
     var isPreparingWizard by mutableStateOf(false)
         private set
     var wizardError by mutableStateOf<String?>(null)
         private set
     var wizardStarted by mutableStateOf(false)
         private set
+
+    // Compatibility-only properties. Access is no longer configured here.
+    val pendingAccessMode: SessionAccessMode get() = SessionAccessMode.INTEGRATED_X11
+    val pendingVncPort: Int get() = VncSettings.DEFAULT_PORT
+    val startActionLabel: String get() = "Start"
     var canStartGraphicSessionFromInstall by mutableStateOf(false)
         private set
     var quickStartCompleted by mutableStateOf(false)
         private set
-
-    val startActionLabel: String
-        get() = when (pendingAccessMode) {
-            SessionAccessMode.INTEGRATED_X11 -> "Start X11"
-            SessionAccessMode.VNC -> "Start VNC"
-            SessionAccessMode.BOTH -> "Start Both"
-        }
-
-    // Kept while older UI/tests migrate to the protocol-neutral name.
-    val canStartX11FromInstall: Boolean
-        get() = canStartGraphicSessionFromInstall
+    val canStartX11FromInstall: Boolean get() = canStartGraphicSessionFromInstall
 
     private var loaded = false
     private var containerName = ""
@@ -136,8 +127,10 @@ class EditContainerViewModel : ViewModel() {
             status = info.status
             initSystem = info.initSystem
 
+            // getContainerInfo() already resolves the init system through the same
+            // ContainerSettingsManager cache. Do not force a second rootfs read.
             val sessionState = withContext(Dispatchers.IO) {
-                val snapshot = ContainerSettingsManager.readSnapshot(containerName, forceRefresh = true)
+                val snapshot = ContainerSettingsManager.readSnapshot(containerName)
                 val installed = GraphicSessionRegistry.installableSessions.associateWith { session ->
                     snapshot.isGraphicSessionInstalled(session)
                 }
@@ -166,9 +159,6 @@ class EditContainerViewModel : ViewModel() {
             }
             pendingWizardCatalogMode = GraphicSessionCatalogMode.STABLE
             pendingWizardSession = null
-            pendingAccessMode = SessionAccessMode.INTEGRATED_X11
-            pendingVncPort = VncSettings.DEFAULT_PORT
-            pendingVncPassword = null
             canStartGraphicSessionFromInstall = false
             quickStartCompleted = false
         }
@@ -186,12 +176,15 @@ class EditContainerViewModel : ViewModel() {
         }
         pendingWizardCatalogMode = GraphicSessionCatalogMode.STABLE
         pendingWizardSession = null
-        pendingVncPassword = null
         isPreparingWizard = true
 
         viewModelScope.launch {
             try {
-                val detected = ContainerCapabilitiesDetector.detect(containerName)
+                // Reopening the wizard in the same editor reuses immutable distro,
+                // architecture and init-capability facts. This avoids restarting a
+                // stopped container solely to rediscover facts we just measured.
+                val detected = containerCapabilities
+                    ?: ContainerCapabilitiesDetector.detect(containerName)
                 if (detected == null || detected.platform == null) {
                     wizardError = "Could not detect a supported package manager (apk or apt/dpkg) in this container."
                     wizardStage = ConfigurationWizardStage.HIDDEN
@@ -204,12 +197,8 @@ class EditContainerViewModel : ViewModel() {
                 }
 
                 containerCapabilities = detected
-                pendingWizardInitSystem = if (detected.supports(initSystem)) {
-                    initSystem
-                } else {
-                    detected.availableInitSystems.first()
-                }
-                wizardStage = ConfigurationWizardStage.DISTRIBUTION_SELECTION
+                pendingWizardInitSystem = resolveAutomaticInitSystem(detected)
+                wizardStage = ConfigurationWizardStage.DETECTED_SUMMARY
             } catch (e: Exception) {
                 Log.e("EditContainerViewModel", "capability detection failed", e)
                 wizardError = e.message ?: "Could not detect container capabilities."
@@ -220,27 +209,48 @@ class EditContainerViewModel : ViewModel() {
         }
     }
 
+    private fun resolveAutomaticInitSystem(capabilities: ContainerCapabilities): InitSystem {
+        if (capabilities.supports(initSystem)) return initSystem
+        if (capabilities.availableInitSystems.size == 1) {
+            return capabilities.availableInitSystems.first()
+        }
+        return when (capabilities.platform) {
+            ContainerPlatform.ALPINE -> if (capabilities.supports(InitSystem.OPENRC)) {
+                InitSystem.OPENRC
+            } else {
+                capabilities.availableInitSystems.sortedBy { it.name }.first()
+            }
+            ContainerPlatform.UBUNTU -> if (capabilities.supports(InitSystem.SYSTEMD)) {
+                InitSystem.SYSTEMD
+            } else {
+                capabilities.availableInitSystems.sortedBy { it.name }.first()
+            }
+            null -> capabilities.availableInitSystems.sortedBy { it.name }.first()
+        }
+    }
+
     fun dismissConfigurationWizard() {
         if (isPreparingWizard || isInstallingSession) return
         wizardStage = ConfigurationWizardStage.HIDDEN
         wizardStarted = false
         pendingWizardSession = null
-        pendingVncPassword = null
     }
 
-    fun confirmDetectedDistribution() {
+    fun confirmDetectedSummary() {
         if (isPreparingWizard || isInstallingSession) return
         wizardStage = if (status == ContainerStatus.RUNNING) {
             ConfigurationWizardStage.RUNNING_WARNING
         } else {
-            ConfigurationWizardStage.INIT_SELECTION
+            ConfigurationWizardStage.PROTOCOL_SELECTION
         }
     }
+
+    fun confirmDetectedDistribution() = confirmDetectedSummary()
 
     fun confirmRunningContainerRestart() {
         if (isPreparingWizard || isInstallingSession) return
         if (status != ContainerStatus.RUNNING) {
-            wizardStage = ConfigurationWizardStage.INIT_SELECTION
+            wizardStage = ConfigurationWizardStage.PROTOCOL_SELECTION
             return
         }
 
@@ -252,7 +262,7 @@ class EditContainerViewModel : ViewModel() {
                 val (runtimeStatus, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
                 if (stopped || runtimeStatus == ContainerStatus.STOPPED) {
                     status = ContainerStatus.STOPPED
-                    wizardStage = ConfigurationWizardStage.INIT_SELECTION
+                    wizardStage = ConfigurationWizardStage.PROTOCOL_SELECTION
                 } else {
                     wizardStage = ConfigurationWizardStage.HIDDEN
                     wizardStarted = false
@@ -272,14 +282,10 @@ class EditContainerViewModel : ViewModel() {
         InitSystem.entries.filter { system -> containerCapabilities?.supports(system) == true }
 
     fun selectWizardInitSystem(system: InitSystem) {
-        if (isPreparingWizard || isInstallingSession) return
-        val capabilities = containerCapabilities
-        if (capabilities == null || !capabilities.supports(system)) {
-            wizardError = "${system.name.lowercase()} is not available in this container."
-            return
+        if (containerCapabilities?.supports(system) == true) {
+            pendingWizardInitSystem = system
+            wizardStage = ConfigurationWizardStage.PROTOCOL_SELECTION
         }
-        pendingWizardInitSystem = system
-        wizardStage = ConfigurationWizardStage.PROTOCOL_SELECTION
     }
 
     fun selectWizardProtocol(protocol: GraphicProtocol) {
@@ -294,14 +300,16 @@ class EditContainerViewModel : ViewModel() {
         wizardStage = ConfigurationWizardStage.SESSION_SELECTION
     }
 
-    fun selectWizardSession(session: GraphicSession) {
-        if (isPreparingWizard || isInstallingSession) return
+    fun selectWizardSession(session: GraphicSession): Boolean {
+        if (isPreparingWizard || isInstallingSession) return false
         if (session !in wizardSessions()) {
             wizardError = "${session.label} is not available for the current wizard selection."
-            return
+            return false
         }
         pendingWizardSession = session
-        wizardStage = ConfigurationWizardStage.ACCESS_SELECTION
+        wizardStage = ConfigurationWizardStage.HIDDEN
+        wizardStarted = false
+        return true
     }
 
     fun confirmWizardAccess(
@@ -309,41 +317,17 @@ class EditContainerViewModel : ViewModel() {
         port: Int,
         password: String?
     ): Boolean {
-        if (isPreparingWizard || isInstallingSession) return false
-        if (pendingWizardSession == null) {
-            wizardError = "No graphic session is selected."
-            return false
-        }
-        if (!VncSettings.isValidPort(port)) {
-            wizardError = "Invalid VNC port: $port"
-            return false
-        }
-        if (mode.requiresVnc) {
-            if (password == null || !VncSettings.isValidPassword(password)) {
-                wizardError =
-                    "VNC password must contain ${VncSettings.MIN_PASSWORD_LENGTH}-${VncSettings.MAX_PASSWORD_LENGTH} characters."
-                return false
-            }
-            pendingVncPassword = password
-        } else {
-            pendingVncPassword = null
-        }
-        pendingAccessMode = mode
-        pendingVncPort = port
-        wizardStage = ConfigurationWizardStage.HIDDEN
-        wizardStarted = false
-        return true
+        wizardError = "Access method is chosen when you press Start on Home."
+        return false
     }
 
-    fun backToWizardDistributionSelection() {
+    fun backToWizardDetectedSummary() {
         if (isPreparingWizard || isInstallingSession) return
-        wizardStage = ConfigurationWizardStage.DISTRIBUTION_SELECTION
+        wizardStage = ConfigurationWizardStage.DETECTED_SUMMARY
     }
 
-    fun backToWizardInitSelection() {
-        if (isPreparingWizard || isInstallingSession) return
-        wizardStage = ConfigurationWizardStage.INIT_SELECTION
-    }
+    fun backToWizardDistributionSelection() = backToWizardDetectedSummary()
+    fun backToWizardInitSelection() = backToWizardDetectedSummary()
 
     fun backToWizardProtocolSelection() {
         if (isPreparingWizard || isInstallingSession) return
@@ -359,6 +343,7 @@ class EditContainerViewModel : ViewModel() {
         if (isPreparingWizard || isInstallingSession) return
         pendingWizardSession = null
         wizardStage = ConfigurationWizardStage.SESSION_SELECTION
+        wizardStarted = true
     }
 
     fun wizardSessions(): List<GraphicSession> =
@@ -388,13 +373,7 @@ class EditContainerViewModel : ViewModel() {
             wizardError = "${selectedInit.name.lowercase()} is not available in this container."
             return
         }
-        if (
-            session !in GraphicSessionWizard.sessionsFor(
-                capabilities,
-                pendingWizardCatalogMode,
-                pendingWizardProtocol
-            )
-        ) {
+        if (session !in GraphicSessionWizard.sessionsFor(capabilities, pendingWizardCatalogMode, pendingWizardProtocol)) {
             wizardError = "${session.label} is not available for ${capabilities.distributionDisplayName} " +
                 "(${capabilities.architectureDisplayName}) and ${pendingWizardProtocol.label}."
             return
@@ -409,8 +388,7 @@ class EditContainerViewModel : ViewModel() {
         initSystem = system
     }
 
-    fun isSessionInstalled(session: GraphicSession): Boolean =
-        installedSessions[session] == true
+    fun isSessionInstalled(session: GraphicSession): Boolean = installedSessions[session] == true
 
     fun toggleSessionSelection(session: GraphicSession) {
         if (!isSessionInstalled(session) || isInstallingSession || isSaving) return
@@ -423,20 +401,14 @@ class EditContainerViewModel : ViewModel() {
         }
     }
 
-    fun installSession(session: GraphicSession) {
-        installSessionWithInit(session, initSystem)
-    }
+    fun installSession(session: GraphicSession) = installSessionWithInit(session, initSystem)
 
     private fun installSessionWithInit(session: GraphicSession, selectedInitSystem: InitSystem) {
         if (isInstallingSession || isSaving) return
         if (session !in GraphicSessionRegistry.installableSessions) return
 
         val cd = cacheDir ?: run {
-            showOperationSetupError(
-                "Installing ${session.label}",
-                "cacheDir not set",
-                session
-            )
+            showOperationSetupError("Installing ${session.label}", "cacheDir not set", session)
             return
         }
 
@@ -447,38 +419,15 @@ class EditContainerViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val installed = when {
-                    session.protocol == GraphicProtocol.WAYLAND -> {
-                        WaylandGraphicSessionInstaller.install(
-                            containerName = containerName,
-                            platform = detectedPlatform,
-                            session = session,
-                            initSystem = selectedInitSystem,
-                            cacheDir = cd,
-                            logger = logger
-                        )
-                    }
-
-                    usesLegacyInstaller(session) -> {
-                        GraphicSessionInstaller.install(
-                            containerName = containerName,
-                            platform = detectedPlatform,
-                            session = session,
-                            initSystem = selectedInitSystem,
-                            cacheDir = cd,
-                            logger = logger
-                        )
-                    }
-
-                    else -> {
-                        AdditionalGraphicSessionInstaller.install(
-                            containerName = containerName,
-                            platform = detectedPlatform,
-                            session = session,
-                            initSystem = selectedInitSystem,
-                            cacheDir = cd,
-                            logger = logger
-                        )
-                    }
+                    session.protocol == GraphicProtocol.WAYLAND -> WaylandGraphicSessionInstaller.install(
+                        containerName, detectedPlatform, session, selectedInitSystem, cd, logger
+                    )
+                    usesLegacyInstaller(session) -> GraphicSessionInstaller.install(
+                        containerName, detectedPlatform, session, selectedInitSystem, cd, logger
+                    )
+                    else -> AdditionalGraphicSessionInstaller.install(
+                        containerName, detectedPlatform, session, selectedInitSystem, cd, logger
+                    )
                 }
 
                 if (installed) {
@@ -489,10 +438,7 @@ class EditContainerViewModel : ViewModel() {
 
                     val markerSaved = withContext(Dispatchers.IO) {
                         ContainerSettingsManager.setGraphicSessionInstalled(
-                            containerName = containerName,
-                            graphicSession = session,
-                            installed = true,
-                            cacheDir = cd
+                            containerName, session, true, cd
                         )
                     }
                     if (!markerSaved) {
@@ -500,8 +446,7 @@ class EditContainerViewModel : ViewModel() {
                     }
 
                     logger.i("")
-                    val (statusBeforeFinalStop, _) =
-                        ContainerManager.getContainerRuntimeStatePublic(containerName)
+                    val (statusBeforeFinalStop, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
                     val stopAccepted = if (statusBeforeFinalStop == ContainerStatus.STOPPED) {
                         logger.i("[+] Container already stopped after installation")
                         true
@@ -517,24 +462,14 @@ class EditContainerViewModel : ViewModel() {
                         logger.w("[!] ${session.label} was installed, but the container could not be confirmed stopped")
                     }
 
-                    val protocolLabel = session.protocol.label
                     logger.i("")
                     logger.i("[+] ${session.label} installation completed successfully")
-                    logger.i("[+] Protocol: $protocolLabel")
-                    logger.i("[+] Access method: ${pendingAccessMode.label}")
-                    if (pendingAccessMode.requiresVnc) {
-                        logger.i("[+] VNC port: $pendingVncPort")
-                        logger.i("[+] TigerVNC will be checked and installed only if needed when starting")
-                    }
-                    if (session.protocol == GraphicProtocol.WAYLAND && pendingAccessMode.usesIntegratedX11) {
-                        logger.i("[+] Host transport: Integrated X11")
-                    }
-                    if (pendingAccessMode.usesIntegratedX11) {
-                        logger.i("[+] Monitor: assigned dynamically on next start (lowest available)")
-                    }
-                    logger.i("[+] Use $startActionLabel below to launch this container now")
-                    installResult = "OK: ${session.label} installed · ${pendingAccessMode.label}"
-                    canStartGraphicSessionFromInstall = true
+                    logger.i("[+] Protocol: ${session.protocol.label}")
+                    logger.i("[+] Init system: ${selectedInitSystem.name.lowercase()}")
+                    logger.i("[+] Runtime access is selected from Home when Start is pressed")
+                    logger.i("[+] Integrated X11 and standalone VNC are available as independent start modes")
+                    installResult = "OK: ${session.label} installed"
+                    canStartGraphicSessionFromInstall = false
                     quickStartCompleted = false
                 } else {
                     installResult = "Error: ${session.label} installation failed"
@@ -550,56 +485,13 @@ class EditContainerViewModel : ViewModel() {
         }
     }
 
+    /** Runtime Start now lives exclusively on Home: Linux user -> X11/VNC. */
     fun quickStartGraphicSession() {
-        if (isInstallingSession || !canStartGraphicSessionFromInstall) return
-        startConfiguredAccess()
+        installResult = "Ready. Return Home and press Start."
+        canStartGraphicSessionFromInstall = false
     }
 
-    fun startConfiguredAccess() {
-        if (isInstallingSession || isSaving || graphicSession == GraphicSession.NONE) return
-
-        installLogs.add(Log.INFO to "")
-        installLogs.add(Log.INFO to "--- $startActionLabel ---")
-        sessionOperationTitle = "$startActionLabel: ${graphicSession.label}"
-        showInstallTerminal = true
-        isInstallingSession = true
-        quickStartCompleted = false
-        val logger = operationLogger()
-        val passwordForAttempt = pendingVncPassword
-
-        viewModelScope.launch {
-            try {
-                val started = SessionAccessManager.start(
-                    containerName = containerName,
-                    platform = containerCapabilities?.platform,
-                    session = graphicSession,
-                    accessMode = pendingAccessMode,
-                    vncPort = pendingVncPort,
-                    vncPassword = passwordForAttempt,
-                    logger = logger
-                )
-                val (runtimeStatus, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
-                status = runtimeStatus
-                if (started && runtimeStatus == ContainerStatus.RUNNING) {
-                    installResult = "OK: ${graphicSession.label} started · ${pendingAccessMode.label}"
-                    canStartGraphicSessionFromInstall = false
-                    quickStartCompleted = true
-                    // After the first successful VNC setup TigerVNC owns only the
-                    // encrypted passwd file inside the container; drop plaintext.
-                    if (pendingAccessMode.requiresVnc) pendingVncPassword = null
-                } else {
-                    installResult = "Error: ${pendingAccessMode.label} start failed"
-                    canStartGraphicSessionFromInstall = true
-                }
-            } catch (e: Exception) {
-                logOperationException(e, "${pendingAccessMode.label} start failed")
-                canStartGraphicSessionFromInstall = true
-            } finally {
-                isInstallingSession = false
-            }
-        }
-    }
-
+    fun startConfiguredAccess() = quickStartGraphicSession()
     fun quickStartX11() = quickStartGraphicSession()
 
     fun verifySession(session: GraphicSession) {
@@ -614,47 +506,22 @@ class EditContainerViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val verified = when {
-                    session.protocol == GraphicProtocol.WAYLAND -> {
-                        WaylandGraphicSessionInstaller.verify(
-                            containerName = containerName,
-                            platform = detectedPlatform,
-                            session = session,
-                            initSystem = selectedInitSystem,
-                            logger = logger
-                        )
-                    }
-
-                    usesLegacyInstaller(session) -> {
-                        GraphicSessionInstaller.verify(
-                            containerName = containerName,
-                            platform = detectedPlatform,
-                            session = session,
-                            initSystem = selectedInitSystem,
-                            logger = logger
-                        )
-                    }
-
-                    else -> {
-                        AdditionalGraphicSessionInstaller.verify(
-                            containerName = containerName,
-                            platform = detectedPlatform,
-                            session = session,
-                            initSystem = selectedInitSystem,
-                            logger = logger
-                        )
-                    }
+                    session.protocol == GraphicProtocol.WAYLAND -> WaylandGraphicSessionInstaller.verify(
+                        containerName, detectedPlatform, session, selectedInitSystem, logger
+                    )
+                    usesLegacyInstaller(session) -> GraphicSessionInstaller.verify(
+                        containerName, detectedPlatform, session, selectedInitSystem, logger
+                    )
+                    else -> AdditionalGraphicSessionInstaller.verify(
+                        containerName, detectedPlatform, session, selectedInitSystem, logger
+                    )
                 }
 
                 if (verified) {
                     installedSessions[session] = true
                     cacheDir?.let { cd ->
                         withContext(Dispatchers.IO) {
-                            ContainerSettingsManager.setGraphicSessionInstalled(
-                                containerName,
-                                session,
-                                true,
-                                cd
-                            )
+                            ContainerSettingsManager.setGraphicSessionInstalled(containerName, session, true, cd)
                         }
                     }
                     installResult = "OK: ${session.label} verified"
@@ -671,9 +538,7 @@ class EditContainerViewModel : ViewModel() {
     }
 
     private fun usesLegacyInstaller(session: GraphicSession): Boolean =
-        session == GraphicSession.OPENBOX ||
-            session == GraphicSession.ICEWM ||
-            session == GraphicSession.JWM
+        session == GraphicSession.OPENBOX || session == GraphicSession.ICEWM || session == GraphicSession.JWM
 
     fun toggleOpenboxSelection() = toggleSessionSelection(GraphicSession.OPENBOX)
     fun toggleIcewmSelection() = toggleSessionSelection(GraphicSession.ICEWM)
@@ -700,11 +565,7 @@ class EditContainerViewModel : ViewModel() {
         installLogs.add(level to message)
     }
 
-    private fun showOperationSetupError(
-        title: String,
-        message: String,
-        session: GraphicSession
-    ) {
+    private fun showOperationSetupError(title: String, message: String, session: GraphicSession) {
         installLogs.clear()
         installLogs.add(Log.ERROR to "[-] FAIL")
         installLogs.add(Log.ERROR to "[-] $message")
@@ -752,11 +613,7 @@ class EditContainerViewModel : ViewModel() {
                 logs = logs + (Log.INFO to "[*] Saving configuration...")
                 val previousSession = savedGraphicSession
                 val sessionSaved = withContext(Dispatchers.IO) {
-                    ContainerSettingsManager.setGraphicSession(
-                        containerName = containerName,
-                        graphicSession = graphicSession,
-                        cacheDir = cd
-                    )
+                    ContainerSettingsManager.setGraphicSession(containerName, graphicSession, cd)
                 }
 
                 if (!sessionSaved) {
@@ -765,12 +622,7 @@ class EditContainerViewModel : ViewModel() {
                     return@launch
                 }
 
-                val initOk = ContainerManager.updateInitSystem(
-                    name = containerName,
-                    target = initSystem,
-                    cacheDir = cd
-                )
-
+                val initOk = ContainerManager.updateInitSystem(containerName, initSystem, cd)
                 if (initOk) {
                     savedGraphicSession = graphicSession
                     logs = logs + (Log.INFO to "[+] Init System and Graphic Session saved")
@@ -782,11 +634,7 @@ class EditContainerViewModel : ViewModel() {
                     }
                 } else {
                     withContext(Dispatchers.IO) {
-                        ContainerSettingsManager.setGraphicSession(
-                            containerName = containerName,
-                            graphicSession = previousSession,
-                            cacheDir = cd
-                        )
+                        ContainerSettingsManager.setGraphicSession(containerName, previousSession, cd)
                     }
                     graphicSession = previousSession
                     logs = logs + (Log.ERROR to "[-] Failed to apply Init System / Graphic Session")
