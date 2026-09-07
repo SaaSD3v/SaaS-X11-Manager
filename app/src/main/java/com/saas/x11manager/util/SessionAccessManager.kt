@@ -4,14 +4,15 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * One entry point for starting the selected graphical session through the user's
- * preferred access method.
+ * One entry point for starting the selected graphical session.
  *
- * BOTH deliberately starts Integrated X11 first and then publishes that exact
- * display with x0vncserver. It never starts a second desktop/WM instance.
+ * Current runtime policy exposes exactly two independent transports: Integrated
+ * X11 and standalone VNC. The old BOTH value is accepted only as a persisted
+ * compatibility input and is normalized to Integrated X11 before anything runs.
  */
 object SessionAccessManager {
     private val startMutex = Mutex()
+
     suspend fun start(
         containerName: String,
         platform: ContainerPlatform?,
@@ -21,7 +22,15 @@ object SessionAccessManager {
         vncPassword: String? = null,
         logger: ContainerLogger? = null
     ): Boolean = startMutex.withLock {
-        startLocked(containerName, platform, session, accessMode, vncPort, vncPassword, logger)
+        startLocked(
+            containerName = containerName,
+            platform = platform,
+            session = session,
+            accessMode = RuntimeAccessPolicy.normalize(accessMode),
+            vncPort = vncPort,
+            vncPassword = vncPassword,
+            logger = logger
+        )
     }
 
     private suspend fun startLocked(
@@ -44,9 +53,6 @@ object SessionAccessManager {
             logger = logger
         ) ?: return false
 
-        // If a running Integrated X11 container is switching users, stop only
-        // its graphical session so the existing container and X11 server can be
-        // reused. The launcher will start again under the newly selected user.
         if (
             userPreparation.changed &&
             accessMode != SessionAccessMode.VNC &&
@@ -57,25 +63,17 @@ object SessionAccessManager {
         }
         logger?.i("")
 
-        // The physical v3.2 shell baseline owns exactly one Android-audio core.
-        // Before accepting a long-lived Manager control socket, retire only
-        // positively-owned competing/stale cores and force one clean generation
-        // refresh when the runtime contract changes. No container/X11/VNC
-        // lifecycle action is performed here.
         PulseAudioRuntimeSanitizer.prepare(
             containerName = containerName,
             logger = logger
         )
-
-        // Prepare exactly one Manager-owned PulseAudio core. HOST and NAT share
-        // this same AAudio/OpenSL ES daemon and private UNIX control socket.
         PulseAudioFixManager.prepareBeforeGraphicalStart(
             containerName = containerName,
             logger = logger
         )
 
         return when (accessMode) {
-            SessionAccessMode.INTEGRATED_X11 -> {
+            SessionAccessMode.INTEGRATED_X11, SessionAccessMode.BOTH -> {
                 val slot = X11SessionManager.startX11Session(
                     containerName = containerName,
                     logger = logger,
@@ -119,62 +117,9 @@ object SessionAccessManager {
                 }
                 result.success
             }
-
-            SessionAccessMode.BOTH -> {
-                val slot = X11SessionManager.startX11Session(
-                    containerName = containerName,
-                    logger = logger,
-                    beforeGraphicSession = { finalizeAudioAfterContainerReady(containerName, logger) }
-                )
-                if (slot == null) {
-                    logger?.e("[-] Integrated X11 could not start; VNC mirror was not attempted")
-                    false
-                } else if (!confirmManagedDesktop(containerName, session, slot)) {
-                    logger?.e(
-                        "[-] ${session.label} did not become active on ${slot.describe()}; " +
-                            "VNC mirror was not attempted"
-                    )
-                    false
-                } else {
-                    logger?.i("")
-                    val mirror = VncServerManager.startMirror(
-                        containerName = containerName,
-                        platform = platform,
-                        session = session,
-                        integratedDisplayName = slot.displayName,
-                        port = vncPort,
-                        password = vncPassword,
-                        logger = logger
-                    )
-                    if (!mirror.success) {
-                        logger?.w("[!] VNC mirror failed, but Integrated X11 remains available on ${slot.describe()}")
-                        VncConnectionGuide.logAdbForwardRestartRecovery(
-                            port = vncPort,
-                            logger = logger,
-                            onlyIfTroubleshooting = true
-                        )
-                        false
-                    } else {
-                        logger?.i("[+] Integrated X11 and VNC are sharing the same ${slot.describe()} session")
-                        VncConnectionGuide.logAfterSuccessfulStart(
-                            containerName = containerName,
-                            port = vncPort,
-                            password = vncPassword,
-                            logger = logger
-                        )
-                        true
-                    }
-                }
-            }
         }
     }
 
-    /**
-     * startX11Session historically returns the allocated display even when the
-     * init service has not stabilized yet. Re-check the managed desktop silently
-     * before declaring success. Besides removing false-positive "X11 ready" states,
-     * this gives OpenRC one clean second chance after the container has fully booted.
-     */
     private suspend fun confirmManagedDesktop(
         containerName: String,
         session: GraphicSession,
@@ -192,10 +137,6 @@ object SessionAccessManager {
         containerName: String,
         logger: ContainerLogger?
     ) {
-        // Both active transports are physically validated on real hardware.
-        // HOST keeps the established unified path. NAT keeps the v3.2 script-parity
-        // path that was validated end-to-end from the running container through
-        // the authenticated TCP listener to the Android AAudio/OpenSL ES sink.
         val mode = ContainerManager.getContainerInfo(containerName)
             ?.netMode
             ?.trim()
