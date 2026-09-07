@@ -177,4 +177,27 @@ class ConciseLogReducerTest {
         assertTrue(output.contains("[X11] Deleting monitor"))
         assertTrue(output.contains("[X11] ! Stop the monitor before deleting it"))
     }
+
+    @Test
+    fun droidSpacesBannerStateNeverSuppressesFollowingManagerLogs() {
+        val reducer = ConciseLogReducer()
+
+        val aggregated = reducer.reduce(
+            Log.INFO,
+            "Welcome to Droidspaces v6.5.0 !\nContainer: alpine (RUNNING)\nUse 'su -c \"droidspaces show\"' for status"
+        )
+        assertTrue(aggregated.isEmpty())
+
+        val afterAggregated = reducer.reduce(Log.INFO, "--- Integrated X11 Server Stop ---")
+            .map { it.second }
+        assertTrue(afterAggregated.contains("[X11] Stopping monitor server"))
+
+        reducer.reduce(Log.INFO, "Welcome to Droidspaces v6.5.0 !")
+        reducer.reduce(Log.INFO, "Container: alpine (RUNNING)")
+        reducer.reduce(Log.INFO, "Use 'su -c \"droidspaces show\"' for status")
+        val afterStreamed = reducer.reduce(Log.INFO, "--- Stopping X11 monitor ---")
+            .map { it.second }
+
+        assertTrue(afterStreamed.contains("[X11] Stop requested for monitor"))
+    }
 }

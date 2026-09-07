@@ -155,26 +155,55 @@ internal class ConciseLogReducer {
     }
 
     private fun reduceRuntime(level: Int, message: String): List<Pair<Int, String>> {
-        if (looksLikeDroidSpacesBlock(message)) return emptyList()
+        // An aggregated DroidSpaces banner/result is one opaque raw command block.
+        // Discard it as a whole; caller-owned lifecycle checkpoints are logged next.
+        if (looksLikeDroidSpacesBlock(message)) {
+            insideDroidSpacesBlock = false
+            return emptyList()
+        }
 
         if (message.contains('\n')) {
-            return message.lineSequence()
+            val entries = message.lineSequence()
                 .map(String::trim)
                 .filter { it.isNotEmpty() }
                 .flatMap { reduceRuntime(level, it).asSequence() }
                 .toList()
+
+            // A multi-line Shell result is self-contained. Never let a banner flag
+            // created inside that one result suppress unrelated Manager logs later.
+            insideDroidSpacesBlock = false
+            return entries
         }
 
         if (message.startsWith("Welcome to Droidspaces", ignoreCase = true)) {
             insideDroidSpacesBlock = true
             return emptyList()
         }
+
         if (insideDroidSpacesBlock) {
-            if (message.startsWith("[*] Confirming container runtime", ignoreCase = true) ||
-                message.startsWith("[+] Container runtime active", ignoreCase = true)) {
-                insideDroidSpacesBlock = false
-            } else {
-                return emptyList()
+            val bannerBody = removeLegacyMarker(message)
+            val endOfBanner = bannerBody.startsWith("Use 'su -c \"droidspaces", ignoreCase = true)
+            val managerBoundary = message.startsWith("---") ||
+                message.startsWith("[CTX]") ||
+                startsWithSemanticComponent(message)
+
+            when {
+                endOfBanner -> {
+                    insideDroidSpacesBlock = false
+                    return emptyList()
+                }
+
+                message.startsWith("[*] Confirming container runtime", ignoreCase = true) ||
+                    message.startsWith("[+] Container runtime active", ignoreCase = true) -> {
+                    insideDroidSpacesBlock = false
+                }
+
+                managerBoundary -> {
+                    insideDroidSpacesBlock = false
+                    // Continue reducing this first Manager-owned line normally.
+                }
+
+                else -> return emptyList()
             }
         }
 
@@ -401,10 +430,7 @@ internal class ConciseLogReducer {
      * informational output is diagnostic noise; hard errors and tagged events stay.
      */
     private fun isAllowedRuntimeEvent(message: String, body: String): Boolean {
-        if (message.startsWith("[X11]") || message.startsWith("[SESSION]") ||
-            message.startsWith("[USER]") || message.startsWith("[AUDIO]") ||
-            message.startsWith("[VNC]") || message.startsWith("[CONTAINER]") ||
-            message.startsWith("[MANAGER]")) return true
+        if (startsWithSemanticComponent(message)) return true
 
         if (message.startsWith("[-]") || message.startsWith("Error:", ignoreCase = true)) return true
 
@@ -421,6 +447,12 @@ internal class ConciseLogReducer {
             body.startsWith("Integrated X11 ready", ignoreCase = true) ||
             body.contains("VNC", ignoreCase = true)
     }
+
+    private fun startsWithSemanticComponent(message: String): Boolean =
+        message.startsWith("[X11]") || message.startsWith("[SESSION]") ||
+            message.startsWith("[USER]") || message.startsWith("[AUDIO]") ||
+            message.startsWith("[VNC]") || message.startsWith("[CONTAINER]") ||
+            message.startsWith("[INSTALL]") || message.startsWith("[MANAGER]")
 
     private fun sectionSummary(message: String): String? = when (message) {
         "--- Graphic Access Start ---" -> "[SESSION] Starting graphical access"
@@ -537,10 +569,7 @@ internal class ConciseLogReducer {
     }
 
     private fun formatSemanticMessage(message: String): String {
-        if (message.startsWith("[X11]") || message.startsWith("[SESSION]") ||
-            message.startsWith("[USER]") || message.startsWith("[AUDIO]") ||
-            message.startsWith("[VNC]") || message.startsWith("[CONTAINER]") ||
-            message.startsWith("[INSTALL]") || message.startsWith("[MANAGER]")) return message
+        if (startsWithSemanticComponent(message)) return message
 
         val marker = when {
             message.startsWith("[+]") -> "✓"
