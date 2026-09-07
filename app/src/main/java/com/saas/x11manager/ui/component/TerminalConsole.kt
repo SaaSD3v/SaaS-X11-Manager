@@ -7,15 +7,19 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.ui.theme.JetBrainsMono
@@ -96,6 +100,9 @@ fun TerminalConsole(
         }
     }
 
+    // ViewModelLogger flushes a whole burst in one main-loop turn. Compose then
+    // observes one final size for that frame, so this effect auto-scrolls once per
+    // visible burst instead of once for every underlying shell line.
     LaunchedEffect(displayLogs.size, userScrolledUp) {
         if (displayLogs.isEmpty() || userScrolledUp) return@LaunchedEffect
         isAutoScrolling = true
@@ -124,61 +131,119 @@ fun TerminalConsole(
         ProvideTextStyle(
             MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMono)
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 12.dp, vertical = 16.dp)
-            ) {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+            Column(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 16.dp)
                 ) {
-                    items(
-                        count = displayLogs.size,
-                        key = { index -> index }
-                    ) { index ->
-                        val (level, message) = displayLogs[index]
-                        val annotatedText = remember(
-                            level,
-                            message,
-                            defaultTextColor,
-                            errorColor,
-                            warnColor
+                    if (displayLogs.isEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 28.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
                         ) {
-                            val processedMessage = message.replace(
-                                Regex(Regex.escape(Constants.DS_BINARY_PATH)),
-                                "droidspaces"
-                            )
-                            val displayMessage = processedMessage.ifEmpty { "\u00A0" }
-                            if (displayMessage.contains("\u001B[")) {
-                                val defaultColor = when (level) {
-                                    Log.ERROR -> errorColor
-                                    Log.WARN -> warnColor
-                                    else -> defaultTextColor
-                                }
-                                AnsiColorParser.parseAnsi(displayMessage, defaultColor)
+                            if (isProcessing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(Modifier.height(14.dp))
+                                Text(
+                                    text = "Waiting for operation output…",
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontFamily = JetBrainsMono,
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.82f)
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    text = "Lifecycle events will appear here as soon as they are emitted.",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMono),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.68f)
+                                )
                             } else {
-                                androidx.compose.ui.text.AnnotatedString(
-                                    text = displayMessage,
-                                    spanStyle = androidx.compose.ui.text.SpanStyle(
-                                        color = when (level) {
+                                Text(
+                                    text = "No logs recorded yet",
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontFamily = JetBrainsMono,
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    text = "Run a start, stop, monitor or maintenance action to create a lifecycle log.",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMono),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.58f)
+                                )
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxHeight(),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(
+                                count = displayLogs.size,
+                                key = { index -> index }
+                            ) { index ->
+                                val (level, message) = displayLogs[index]
+                                val annotatedText = remember(
+                                    level,
+                                    message,
+                                    defaultTextColor,
+                                    errorColor,
+                                    warnColor
+                                ) {
+                                    val processedMessage = message.replace(
+                                        Regex(Regex.escape(Constants.DS_BINARY_PATH)),
+                                        "droidspaces"
+                                    )
+                                    val displayMessage = processedMessage.ifEmpty { "\u00A0" }
+                                    if (displayMessage.contains("\u001B[")) {
+                                        val defaultColor = when (level) {
                                             Log.ERROR -> errorColor
                                             Log.WARN -> warnColor
                                             else -> defaultTextColor
                                         }
-                                    )
+                                        AnsiColorParser.parseAnsi(displayMessage, defaultColor)
+                                    } else {
+                                        androidx.compose.ui.text.AnnotatedString(
+                                            text = displayMessage,
+                                            spanStyle = androidx.compose.ui.text.SpanStyle(
+                                                color = when (level) {
+                                                    Log.ERROR -> errorColor
+                                                    Log.WARN -> warnColor
+                                                    else -> defaultTextColor
+                                                }
+                                            )
+                                        )
+                                    }
+                                }
+
+                                Text(
+                                    text = annotatedText,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMono),
+                                    softWrap = true,
+                                    modifier = Modifier.fillMaxWidth().heightIn(min = 16.dp)
                                 )
                             }
                         }
-
-                        Text(
-                            text = annotatedText,
-                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMono),
-                            softWrap = true,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 16.dp)
-                        )
                     }
+                }
+
+                if (isProcessing) {
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                    )
                 }
             }
         }

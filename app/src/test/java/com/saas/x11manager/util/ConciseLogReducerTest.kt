@@ -107,4 +107,74 @@ class ConciseLogReducerTest {
         assertFalse(output.any { it.contains("configured graphic session is not active") })
         assertTrue(output.contains("[SESSION] ✗ IceWM did not become active on Monitor 2 (:1)"))
     }
+
+    @Test
+    fun monitorStopKeepsImmediateProgressOwnershipAndCleanupVerification() {
+        val reducer = ConciseLogReducer()
+        val output = buildList {
+            addAll(reducer.reduce(Log.INFO, "--- Stopping X11 monitor ---"))
+            addAll(reducer.reduce(Log.INFO, "--- Graphic Session Stop ---"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Container: alpine"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Container lifecycle: remains RUNNING"))
+            addAll(reducer.reduce(Log.INFO, "[*] Stopping IceWM graphic session only..."))
+            addAll(reducer.reduce(Log.INFO, "[+] Graphic session stopped; container remains running"))
+            addAll(reducer.reduce(Log.INFO, "--- Integrated X11 Server Stop ---"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Monitor: 1"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Display: :0"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Live PIDs before stop: 4242"))
+            addAll(reducer.reduce(Log.INFO, "[*] Sending SIGKILL to server PIDs: 4242"))
+            addAll(reducer.reduce(Log.INFO, "[*] Removing all monitor runtime artifacts while preserving the running-container bind anchor..."))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Live PIDs after stop: none"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Socket after stop: absent"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Runtime policy: empty bind anchor retained"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Stop duration: 83ms"))
+            addAll(reducer.reduce(Log.INFO, "[+] Monitor 1 (:0) inactive"))
+            addAll(reducer.reduce(Log.INFO, "[+] X11 runtime cleanup verified"))
+            addAll(reducer.reduce(Log.INFO, "[+] Container 'alpine' was left running"))
+            addAll(reducer.reduce(Log.INFO, "[+] Empty monitor bind anchor retained for the running container"))
+        }.map { it.second }
+
+        assertTrue(output.first() == "[X11] Stop requested for monitor")
+        assertTrue(output.contains("[SESSION] Stopping graphical session"))
+        assertTrue(output.contains("[CONTAINER] • Container: alpine"))
+        assertTrue(output.contains("[CONTAINER] • Lifecycle: remains RUNNING"))
+        assertTrue(output.contains("[SESSION] Stopping IceWM graphic session only"))
+        assertTrue(output.contains("[SESSION] ✓ Graphic session stopped; container remains running"))
+        assertTrue(output.contains("[X11] Stopping monitor server"))
+        assertTrue(output.contains("[X11] • Monitor: 1"))
+        assertTrue(output.contains("[X11] • Display: :0"))
+        assertTrue(output.contains("[X11] • Server PID(s): 4242"))
+        assertTrue(output.contains("[X11] Terminating X11 server process"))
+        assertTrue(output.contains("[X11] Removing monitor runtime; container bind stays reserved"))
+        assertTrue(output.contains("[X11] ✓ Server process stopped"))
+        assertTrue(output.contains("[X11] ✓ Socket removed"))
+        assertTrue(output.contains("[X11] • Cleanup: empty bind anchor retained"))
+        assertTrue(output.contains("[X11] • Stop time: 83ms"))
+        assertTrue(output.contains("[X11] ✓ Monitor 1 (:0) inactive"))
+        assertTrue(output.contains("[X11] ✓ Runtime cleanup verified"))
+        assertTrue(output.contains("[CONTAINER] ✓ Container 'alpine' was left running"))
+        assertTrue(output.contains("[X11] ✓ Empty bind anchor retained for running container"))
+    }
+
+    @Test
+    fun containerStopAndMonitorDeleteCannotCollapseToBlankLogs() {
+        val reducer = ConciseLogReducer()
+        val output = buildList {
+            addAll(reducer.reduce(Log.INFO, "--- Stopping Container X11 Session ---"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Container: alpine"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Assigned display before stop: :0"))
+            addAll(reducer.reduce(Log.INFO, "[+] Container stop confirmed"))
+            addAll(reducer.reduce(Log.INFO, "[+] Released Monitor 1 (:0)"))
+            addAll(reducer.reduce(Log.INFO, "--- Deleting X11 monitor ---"))
+            addAll(reducer.reduce(Log.WARN, "[!] Stop the monitor before deleting it"))
+        }.map { it.second }
+
+        assertTrue(output.contains("[CONTAINER] Stopping container and releasing X11"))
+        assertTrue(output.contains("[CONTAINER] • Container: alpine"))
+        assertTrue(output.contains("[X11] • Assigned display: :0"))
+        assertTrue(output.contains("[CONTAINER] ✓ Container stopped"))
+        assertTrue(output.contains("[X11] ✓ Released Monitor 1 (:0)"))
+        assertTrue(output.contains("[X11] Deleting monitor"))
+        assertTrue(output.contains("[X11] ! Stop the monitor before deleting it"))
+    }
 }

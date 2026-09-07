@@ -3,11 +3,12 @@ package com.saas.x11manager.util
 import android.util.Log
 
 /**
- * Reduces the legacy diagnostic stream to the small semantic log shown to users.
+ * Reduces the legacy diagnostic stream to a concise lifecycle log for users.
  *
- * This runs before ViewModel storage, so raw package-manager output, generated
- * scripts, [CTX] diagnostics, PulseAudio probes and the DroidSpaces banner never
- * accumulate in Compose state. There is intentionally no secondary/details log.
+ * Raw package-manager output, generated scripts, DroidSpaces banners, deep [CTX]
+ * diagnostics and PulseAudio probe chatter are discarded before they reach Compose.
+ * Important start/stop/delete ownership transitions are deliberately retained so a
+ * blocking operation never looks idle or blank while real work is happening.
  */
 internal class ConciseLogReducer {
     private var installMode = false
@@ -177,18 +178,7 @@ internal class ConciseLogReducer {
             }
         }
 
-        if (message.startsWith("[CTX]")) {
-            val entry = when {
-                message.startsWith("[CTX] Access method:") ->
-                    level to "[SESSION] • Access: ${message.substringAfter(':').trim()}"
-                message.startsWith("[CTX] Session:") ->
-                    level to "[SESSION] • Desktop: ${message.substringAfter(':').trim()}"
-                message.startsWith("[CTX] Graphic user:") ->
-                    level to "[USER] • Desktop user: ${message.substringAfter(':').trim()}"
-                else -> null
-            }
-            return listOfNotNull(entry)
-        }
+        contextSummary(level, message)?.let { return listOf(it) }
 
         if (message.startsWith("[PA-")) return emptyList()
         sectionSummary(message)?.let { return listOf(level to it) }
@@ -203,8 +193,6 @@ internal class ConciseLogReducer {
             insideDroidSpacesBlock = false
             return listOf(level to "[CONTAINER] ✓ Container started")
         }
-
-        if (isRoutineDetail(body) || looksLikePackageManagerNoise(message)) return emptyList()
 
         // Recovered/intermediate conditions are never retained. The caller emits
         // one final success or failure after the retry/verification path finishes.
@@ -221,16 +209,196 @@ internal class ConciseLogReducer {
             return emptyList()
         }
 
-        if (looksLikeDroidSpacesLine(body)) return emptyList()
+        // Noise must be rejected before the generic lifecycle-warning fallback.
+        if (looksLikePackageManagerNoise(message) || looksLikeDroidSpacesLine(body)) return emptyList()
+
+        runtimeLifecycleSummary(level, message, body)?.let { return listOf(it) }
+
+        if (isRoutineDetail(body)) return emptyList()
         if (!isAllowedRuntimeEvent(message, body)) return emptyList()
 
         return listOf(level to formatSemanticMessage(message))
     }
 
+    /** Selected [CTX] values become compact, stable lifecycle facts. */
+    private fun contextSummary(level: Int, message: String): Pair<Int, String>? {
+        if (!message.startsWith("[CTX]")) return null
+        val value = message.substringAfter(':', missingDelimiterValue = "").trim()
+
+        return when {
+            message.startsWith("[CTX] Access method:") ->
+                level to "[SESSION] • Access: $value"
+
+            message.startsWith("[CTX] Session:") ->
+                level to "[SESSION] • Desktop: $value"
+
+            message.startsWith("[CTX] Graphic user:") ->
+                level to "[USER] • Desktop user: $value"
+
+            message.startsWith("[CTX] Container:") ->
+                level to "[CONTAINER] • Container: $value"
+
+            message.startsWith("[CTX] Monitor:") ->
+                level to "[X11] • Monitor: $value"
+
+            message.startsWith("[CTX] Display:") || message.startsWith("[CTX] Host display:") ->
+                level to "[X11] • Display: $value"
+
+            message.startsWith("[CTX] Assigned display before stop:") ->
+                level to "[X11] • Assigned display: $value"
+
+            message.startsWith("[CTX] Container owner:") ->
+                level to "[X11] • Owner: $value"
+
+            message.startsWith("[CTX] Container lifecycle:") ->
+                level to "[CONTAINER] • Lifecycle: $value"
+
+            message.startsWith("[CTX] Live PIDs before stop:") ->
+                level to "[X11] • Server PID(s): $value"
+
+            message.startsWith("[CTX] Socket file before stop:") ->
+                level to "[X11] • Socket before stop: $value"
+
+            message.startsWith("[CTX] Live PIDs after stop:") -> {
+                if (value.equals("none", ignoreCase = true)) {
+                    level to "[X11] ✓ Server process stopped"
+                } else {
+                    Log.WARN to "[X11] ! Server process still present: $value"
+                }
+            }
+
+            message.startsWith("[CTX] Socket after stop:") -> {
+                if (value.equals("absent", ignoreCase = true)) {
+                    level to "[X11] ✓ Socket removed"
+                } else {
+                    Log.WARN to "[X11] ! Socket still present: $value"
+                }
+            }
+
+            message.startsWith("[CTX] Runtime policy:") ->
+                level to "[X11] • Cleanup: $value"
+
+            message.startsWith("[CTX] Stop duration:") ->
+                level to "[X11] • Stop time: $value"
+
+            message.startsWith("[CTX] Server readiness:") ->
+                level to "[X11] • Server ready in: $value"
+
+            message.startsWith("[CTX] Total session start duration:") ->
+                level to "[SESSION] • Start time: $value"
+
+            else -> null
+        }
+    }
+
     /**
-     * Runtime logging is intentionally whitelist-based. Unknown informational or
-     * warning lines are diagnostic noise and must not silently become new UI logs.
-     * Hard errors are retained because they are actionable final outcomes.
+     * Converts useful pre/post checkpoints that used to be discarded by the
+     * whitelist into stable component-tagged lines. This is intentionally small:
+     * it exposes ownership, progress and verification, not shell implementation.
+     */
+    private fun runtimeLifecycleSummary(
+        level: Int,
+        message: String,
+        body: String
+    ): Pair<Int, String>? {
+        return when {
+            body.startsWith("Preparing container X11 config", ignoreCase = true) ->
+                level to "[X11] Preparing container socket mapping"
+
+            body.startsWith("Container X11 configuration confirmed", ignoreCase = true) ->
+                level to "[X11] ✓ Container socket mapping ready"
+
+            body.startsWith("Launching integrated X11 app_process", ignoreCase = true) ->
+                level to "[X11] Launching embedded X11 server"
+
+            body.startsWith("Waiting up to ", ignoreCase = true) &&
+                body.contains("X11 process and socket", ignoreCase = true) ->
+                level to "[X11] Waiting for X11 process and socket"
+
+            body.startsWith("Confirming container runtime", ignoreCase = true) ->
+                level to "[CONTAINER] Confirming runtime state"
+
+            body.startsWith("Waiting for container command readiness", ignoreCase = true) ->
+                level to "[CONTAINER] Waiting for command channel"
+
+            body.startsWith("Container command channel ready", ignoreCase = true) ->
+                level to "[CONTAINER] ✓ Command channel ready"
+
+            body.startsWith("Synchronizing configured graphic session", ignoreCase = true) ->
+                level to "[SESSION] Starting configured graphical session"
+
+            body.startsWith("Expected container X11 transport socket is visible", ignoreCase = true) ->
+                level to "[X11] ✓ Container X11 socket visible"
+
+            body.startsWith("Container completed a real X11 client handshake", ignoreCase = true) ->
+                level to "[X11] ✓ X11 client handshake confirmed"
+
+            body.startsWith("Graphic session service confirmed active", ignoreCase = true) ->
+                level to "[SESSION] ✓ Graphic service active"
+
+            body.startsWith("Stopping ", ignoreCase = true) &&
+                body.contains("graphic session only", ignoreCase = true) ->
+                level to "[SESSION] ${body.removeSuffix("...")}"
+
+            body.startsWith("Graphic session stopped; container remains running", ignoreCase = true) ->
+                level to "[SESSION] ✓ Graphic session stopped; container remains running"
+
+            body.startsWith("No managed graphic session process needs to be stopped", ignoreCase = true) ->
+                level to "[SESSION] ✓ No managed graphical process was running"
+
+            body.startsWith("Sending SIGKILL to server PIDs", ignoreCase = true) ->
+                level to "[X11] Terminating X11 server process"
+
+            body.startsWith("Removing all monitor runtime artifacts", ignoreCase = true) ->
+                level to "[X11] Removing monitor runtime; container bind stays reserved"
+
+            body.startsWith("Removing complete monitor runtime directory", ignoreCase = true) ->
+                level to "[X11] Removing monitor runtime directory"
+
+            body.startsWith("Container stop confirmed", ignoreCase = true) ->
+                level to "[CONTAINER] ✓ Container stopped"
+
+            body.startsWith("Released Monitor ", ignoreCase = true) ->
+                level to "[X11] ✓ $body"
+
+            body.startsWith("X11 runtime cleanup verified", ignoreCase = true) ->
+                level to "[X11] ✓ Runtime cleanup verified"
+
+            body.startsWith("Monitor ", ignoreCase = true) &&
+                body.endsWith(" inactive", ignoreCase = true) ->
+                level to "[X11] ✓ $body"
+
+            body.startsWith("Container '", ignoreCase = true) &&
+                body.contains("was left running", ignoreCase = true) ->
+                level to "[CONTAINER] ✓ $body"
+
+            body.startsWith("Empty monitor bind anchor retained", ignoreCase = true) ->
+                level to "[X11] ✓ Empty bind anchor retained for running container"
+
+            body.contains("runtime fully released", ignoreCase = true) ->
+                level to "[X11] ✓ $body"
+
+            body.startsWith("Monitor removed from the monitor list", ignoreCase = true) ->
+                level to "[X11] ✓ Monitor removed from list"
+
+            body.startsWith("Timed-out X11 runtime cleaned", ignoreCase = true) ->
+                level to "[X11] ✓ Timed-out runtime cleaned"
+
+            body.startsWith("Rolled back Monitor ", ignoreCase = true) ->
+                level to "[X11] ✓ $body"
+
+            // Lifecycle warnings are valuable after transient/recovered cases and
+            // DroidSpaces/package-manager noise have already been removed above.
+            message.startsWith("[!]") ->
+                Log.WARN to formatSemanticMessage(message)
+
+            else -> null
+        }
+    }
+
+    /**
+     * Runtime logging remains whitelist-based for ordinary raw lines. Unknown
+     * informational output is diagnostic noise; hard errors and tagged events stay.
      */
     private fun isAllowedRuntimeEvent(message: String, body: String): Boolean {
         if (message.startsWith("[X11]") || message.startsWith("[SESSION]") ||
@@ -239,12 +407,6 @@ internal class ConciseLogReducer {
             message.startsWith("[MANAGER]")) return true
 
         if (message.startsWith("[-]") || message.startsWith("Error:", ignoreCase = true)) return true
-
-        if (message.startsWith("[!]")) {
-            return body.contains("audio client configuration failed", ignoreCase = true) ||
-                body.contains("listener loaded successfully but the container client could not be configured", ignoreCase = true) ||
-                body.contains("VNC mirror failed", ignoreCase = true)
-        }
 
         if (!message.startsWith("[+]")) return false
 
@@ -264,7 +426,19 @@ internal class ConciseLogReducer {
         "--- Graphic Access Start ---" -> "[SESSION] Starting graphical access"
         "--- Audio Configuration ---" -> "[AUDIO] Preparing Android audio"
         "--- Starting Integrated X11 Session ---" -> "[X11] Starting Integrated X11"
+        "--- Integrated X11 Server Start ---" -> "[X11] Starting monitor server"
+        "--- Graphic Session Synchronization ---" -> "[SESSION] Synchronizing graphical session"
         "--- Graphic Session Stop ---" -> "[SESSION] Stopping graphical session"
+        "--- Stopping X11 monitor ---" -> "[X11] Stop requested for monitor"
+        "--- Integrated X11 Server Stop ---" -> "[X11] Stopping monitor server"
+        "--- Stopping Container X11 Session ---" -> "[CONTAINER] Stopping container and releasing X11"
+        "--- Deleting X11 monitor ---" -> "[X11] Deleting monitor"
+        "--- Integrated X11 Server Rollback ---" -> "[X11] Rolling back monitor server"
+        "--- X11 Runtime Reconciliation ---" -> "[X11] Checking runtime ownership"
+        "--- Stopping All ---" -> "[MANAGER] Stopping all managed sessions"
+        "--- Starting X11 monitor ---" -> "[X11] Start requested for monitor"
+        "--- Starting External TigerVNC Session ---" -> "[VNC] Starting standalone VNC"
+        "--- Starting TigerVNC Mirror ---" -> "[VNC] Starting X11 VNC mirror"
         else -> null
     }
 
