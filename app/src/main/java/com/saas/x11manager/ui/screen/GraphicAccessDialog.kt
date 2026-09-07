@@ -19,7 +19,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,11 +29,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.saas.x11manager.util.GraphicSessionUserManager
-import com.saas.x11manager.util.GraphicSessionUserSelection
+import com.saas.x11manager.util.RuntimeAccessPolicy
 import com.saas.x11manager.util.SessionAccessMode
 import com.saas.x11manager.util.VncSettings
 
+/** Second step of runtime Start: Linux user was already selected before this dialog. */
 @Composable
 internal fun GraphicAccessDialog(
     containerName: String,
@@ -44,22 +43,13 @@ internal fun GraphicAccessDialog(
     onBack: () -> Unit,
     onConfirm: (SessionAccessMode, String?) -> Unit
 ) {
-    var selectedMode by remember(containerName, initialMode) { mutableStateOf(initialMode) }
+    var selectedMode by remember(containerName, initialMode) {
+        mutableStateOf(RuntimeAccessPolicy.normalize(initialMode))
+    }
     var password by remember(containerName) { mutableStateOf("") }
-    var userSelection by remember(containerName) {
-        mutableStateOf(GraphicSessionUserSelection.ROOT)
-    }
 
-    LaunchedEffect(containerName) {
-        GraphicSessionUserManager.currentSelection(containerName)?.let { saved ->
-            userSelection = saved
-        }
-    }
-
-    val passwordRequired = selectedMode.requiresVnc
+    val passwordRequired = selectedMode == SessionAccessMode.VNC
     val passwordValid = !passwordRequired || VncSettings.isValidPassword(password)
-    val userSelectionRequired = selectedMode != SessionAccessMode.VNC
-    val userSelectionValid = !userSelectionRequired || isValidGraphicUserSelection(userSelection)
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -77,13 +67,10 @@ internal fun GraphicAccessDialog(
             )
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Text(
-                    "Choose access method",
-                    style = MaterialTheme.typography.titleLarge
-                )
+                Text("Choose access method", style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "$containerName · final access configuration",
+                    "$containerName · choose how to start this session",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -91,51 +78,17 @@ internal fun GraphicAccessDialog(
 
                 AccessChoice(
                     title = "Integrated X11",
-                    subtitle = "Use the Manager's embedded X11 screen only.",
+                    subtitle = "Start the Manager X11 monitor and graphical session now.",
                     selected = selectedMode == SessionAccessMode.INTEGRATED_X11,
                     onClick = { selectedMode = SessionAccessMode.INTEGRATED_X11 }
                 )
                 Spacer(Modifier.height(10.dp))
                 AccessChoice(
                     title = "VNC",
-                    subtitle = "Start an external TigerVNC virtual display for the selected session.",
+                    subtitle = "Start a standalone TigerVNC virtual display. Integrated X11 stays off.",
                     selected = selectedMode == SessionAccessMode.VNC,
                     onClick = { selectedMode = SessionAccessMode.VNC }
                 )
-                Spacer(Modifier.height(10.dp))
-                AccessChoice(
-                    title = "Both",
-                    subtitle = "Start Integrated X11 and share that exact same screen through TigerVNC.",
-                    selected = selectedMode == SessionAccessMode.BOTH,
-                    onClick = { selectedMode = SessionAccessMode.BOTH }
-                )
-
-                Spacer(Modifier.height(16.dp))
-                if (userSelectionRequired) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(
-                            1.dp,
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                        )
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            GraphicSessionUserPicker(
-                                containerName = containerName,
-                                selection = userSelection,
-                                onSelectionChange = { userSelection = it }
-                            )
-                        }
-                    }
-                } else {
-                    Text(
-                        "Standalone VNC keeps its own root-owned virtual-display runtime. Your saved Linux desktop user is preserved for Integrated X11 and Both.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
 
                 if (passwordRequired) {
                     Spacer(Modifier.height(16.dp))
@@ -154,7 +107,7 @@ internal fun GraphicAccessDialog(
                         ) {
                             Text("TigerVNC", style = MaterialTheme.typography.titleSmall)
                             Text(
-                                "Port: $port · Change it from General settings on the container card.",
+                                "Port: $port · The selected Linux user will own the desktop session.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -172,7 +125,7 @@ internal fun GraphicAccessDialog(
                                 supportingText = {
                                     Text(
                                         "${VncSettings.MIN_PASSWORD_LENGTH}-${VncSettings.MAX_PASSWORD_LENGTH} characters. " +
-                                            "It is converted to TigerVNC's password file and is not stored in Android preferences."
+                                            "The plaintext exists only for this Start operation."
                                     )
                                 },
                                 visualTransformation = PasswordVisualTransformation(),
@@ -195,23 +148,14 @@ internal fun GraphicAccessDialog(
                     Spacer(Modifier.width(8.dp))
                     Button(
                         onClick = {
-                            // Standalone VNC does not use the managed desktop-user
-                            // launcher. Do not silently overwrite the saved X11 user
-                            // with root merely because the user chose VNC access.
-                            if (userSelectionRequired) {
-                                GraphicSessionUserManager.selectForNextStart(
-                                    containerName,
-                                    userSelection
-                                )
-                            }
                             onConfirm(
                                 selectedMode,
-                                password.takeIf { selectedMode.requiresVnc }
+                                password.takeIf { selectedMode == SessionAccessMode.VNC }
                             )
                         },
-                        enabled = passwordValid && userSelectionValid
+                        enabled = passwordValid
                     ) {
-                        Text("Continue")
+                        Text("Start")
                     }
                 }
             }
