@@ -19,9 +19,7 @@ import com.saas.x11manager.ui.component.ContainerCardActions
 import com.saas.x11manager.ui.component.TerminalDialog
 import com.saas.x11manager.util.ContainerInfo
 import com.saas.x11manager.util.GraphicSessionUserManager
-import com.saas.x11manager.util.GraphicSessionUserSelection
 import com.saas.x11manager.util.RuntimeAccessPolicy
-import com.saas.x11manager.util.SessionAccessMode
 import com.saas.x11manager.util.VncSettings
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -149,31 +147,21 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     items(containers, key = { it.name }) { container ->
-                        val savedMode = RuntimeAccessPolicy.normalize(
-                            VncSettings.getAccessMode(context, container.name)
-                        )
-                        val startLabel = when (savedMode) {
-                            SessionAccessMode.VNC -> "Start VNC"
-                            SessionAccessMode.INTEGRATED_X11, SessionAccessMode.BOTH -> "Start X11"
-                        }
-
                         ContainerCard(
                             container = container,
                             isExpanded = expandedContainerName.value == container.name,
                             isOperationRunning = activeOperation != null,
                             actions = ContainerCardActions(
-                                startLabel = startLabel,
+                                // The transport is intentionally not encoded in the
+                                // card anymore. Start first chooses the Linux user,
+                                // then asks for Integrated X11 or standalone VNC.
+                                startLabel = "Start",
                                 onToggleExpand = {
                                     expandedContainerName.value =
                                         if (expandedContainerName.value == container.name) null else container.name
                                 },
                                 onShowLogs = { viewModel.showLogs(container) },
-                                onStartX11 = {
-                                    // Runtime Start always has two explicit user-facing
-                                    // steps: choose the Linux desktop user, then choose
-                                    // Integrated X11 or standalone VNC.
-                                    pendingUserContainer = container
-                                },
+                                onStartX11 = { pendingUserContainer = container },
                                 onStop = { viewModel.stopContainer(container) },
                                 onEdit = {
                                     expandedContainerName.value = null
