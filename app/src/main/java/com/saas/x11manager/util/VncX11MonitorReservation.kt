@@ -104,6 +104,32 @@ object VncX11MonitorReservation {
         }
     }
 
+    /**
+     * Roll back only a lease created for a VNC start that failed and returned the
+     * container to STOPPED. RUNNING/UNKNOWN states are deliberately preserved.
+     */
+    suspend fun rollbackAfterFailedVncStart(
+        containerName: String,
+        displaySlot: X11DisplaySlot?,
+        logger: ContainerLogger? = null
+    ) = withContext(Dispatchers.IO) {
+        if (displaySlot == null) return@withContext
+
+        val (status, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
+        if (status != ContainerStatus.STOPPED) {
+            logger?.i("[X11] • Failed VNC cleanup kept ${displaySlot.describe()} because container state is $status")
+            return@withContext
+        }
+
+        logger?.i("[X11] Rolling back stopped monitor reservation after VNC start failure")
+        X11SessionManager.stopIntegratedServer(displaySlot, logger)
+        if (ContainerConfigManager.clearManualX11Config(containerName, logger)) {
+            logger?.i("[X11] ✓ Failed VNC monitor reservation released")
+        } else {
+            logger?.w("[X11] ! Monitor runtime was cleaned but its stopped-container bind could not be confirmed released")
+        }
+    }
+
     private fun shellQuote(value: String): String =
         "'" + value.replace("'", "'\\''") + "'"
 }
