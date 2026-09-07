@@ -1,6 +1,6 @@
 package com.saas.x11manager.util
 
-/** Pure templates for init-owned graphical session files on the fixed :0 X11 transport. */
+/** Pure templates for init-owned graphical session files on the integrated X11 transport. */
 internal object GraphicSessionInitFiles {
 
     private fun fixedDisplayEnvironment(): String =
@@ -9,8 +9,11 @@ internal object GraphicSessionInitFiles {
 
     /**
      * Compatibility launcher for the traditional root-owned desktop path.
-     * OpenRC still receives /bin/sh and systemd still receives /bin/bash from
-     * the caller; their init services remain completely separate.
+     *
+     * This deliberately preserves the launcher semantics that were physically
+     * stable before graphical-user selection was added. OpenRC still receives
+     * /bin/sh and systemd still receives /bin/bash from the caller; their init
+     * services remain completely separate.
      */
     fun rootSessionScript(session: GraphicSession, shell: String): String {
         val sessionType = if (session.protocol == GraphicProtocol.WAYLAND) "wayland" else "x11"
@@ -37,6 +40,7 @@ internal object GraphicSessionInitFiles {
             "export SAAS_GRAPHIC_PROTOCOL=$sessionType\n" +
             "export XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
             "mkdir -p \"\$XDG_RUNTIME_DIR\" && chmod 700 \"\$XDG_RUNTIME_DIR\"\n" +
+            PulseAudioClientConfig.sessionEnvironment() +
             launch
     }
 
@@ -103,6 +107,8 @@ internal object GraphicSessionInitFiles {
             "export USER=\$SESSION_USER\n" +
             "export LOGNAME=\$SESSION_USER\n" +
             "export SHELL=\$SESSION_SHELL\n" +
+            // Keep the established runtime path so existing Wayland/X11 health checks
+            // remain compatible; ownership follows the selected graphical user.
             "export XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
             "mkdir -p \"\$XDG_RUNTIME_DIR\" || exit 1\n" +
             "chown \"\$SESSION_UID:\$SESSION_GID\" \"\$XDG_RUNTIME_DIR\" || exit 1\n" +
@@ -113,6 +119,8 @@ internal object GraphicSessionInitFiles {
         val protocolEnvironment = if (session.protocol == GraphicProtocol.WAYLAND) {
             "export XDG_SESSION_TYPE=wayland\n" +
                 "export SAAS_WAYLAND_SOCKET=wayland-0\n" +
+                // Do not export WAYLAND_DISPLAY here: the selected compositor is the
+                // Wayland server, not a client of another Wayland compositor.
                 "unset WAYLAND_DISPLAY\n"
         } else {
             "export XDG_SESSION_TYPE=x11\n"
@@ -131,6 +139,7 @@ internal object GraphicSessionInitFiles {
             selectedUserEnvironment(shell) +
             protocolEnvironment +
             "export SAAS_GRAPHIC_PROTOCOL=$sessionType\n" +
+            PulseAudioClientConfig.sessionEnvironment() +
             launch
     }
 
@@ -142,18 +151,7 @@ internal object GraphicSessionInitFiles {
             "}\n\n" +
             "start() {\n" +
             "    ebegin \"Setting up Manager X11 transport socket\"\n" +
-            "    if [ ! -d /usr/.X11-unix ]; then\n" +
-            "        eerror \"X11 source socket directory /usr/.X11-unix is missing\"\n" +
-            "        eend 1\n" +
-            "        return 1\n" +
-            "    fi\n" +
-            "    mkdir -p /tmp/.X11-unix /tmp/runtime-root || { eend 1; return 1; }\n" +
-            "    chmod 700 /tmp/runtime-root || { eend 1; return 1; }\n" +
-            "    if mountpoint -q /tmp/.X11-unix 2>/dev/null; then\n" +
-            "        eend 0\n" +
-            "        return 0\n" +
-            "    fi\n" +
-            "    mount --bind /usr/.X11-unix /tmp/.X11-unix\n" +
+            "    (\n" + X11SessionCommands.socketSetup() + "\n    )\n" +
             "    rc=\$?\n" +
             "    eend \$rc\n" +
             "    return \$rc\n" +
@@ -180,7 +178,9 @@ internal object GraphicSessionInitFiles {
             "command=\"/usr/local/bin/x11-session.sh\"\n" +
             "command_background=\"yes\"\n" +
             "pidfile=\"/run/x11-session.pid\"\n" +
-            "stopgroup=\"yes\"\n\n" +
+            "stopgroup=\"yes\"\n" +
+            "output_log=\"/var/log/saas-x11-session.log\"\n" +
+            "error_log=\"/var/log/saas-x11-session.log\"\n\n" +
             "depend() {\n" +
             "    need x11-setup\n" +
             "}\n"
@@ -225,6 +225,10 @@ internal object GraphicSessionInitFiles {
             "Restart=on-failure\n" +
             "RestartSec=3\n\n" +
             "[Install]\n" +
+            // DroidSpaces containers commonly reach multi-user.target without
+            // transitioning through graphical.target. The runtime controller can
+            // still start this service on demand, but installing it in multi-user
+            // makes automatic startup match the container's real boot target.
             "WantedBy=multi-user.target\n"
     }
 }

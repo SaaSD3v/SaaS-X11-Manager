@@ -267,7 +267,8 @@ object X11SessionManager {
 
     suspend fun startX11Session(
         containerName: String,
-        logger: ContainerLogger? = null
+        logger: ContainerLogger? = null,
+        beforeGraphicSession: (suspend () -> Unit)? = null
     ): Boolean = withContext(Dispatchers.IO) {
         var lease: ServerLease? = null
         var containerStartAccepted = false
@@ -330,6 +331,7 @@ object X11SessionManager {
             }
             logger?.i("[+] Container command channel ready")
 
+            beforeGraphicSession?.invoke()
             if (!ensureContainerGraphicSession(containerName, logger)) {
                 logger?.e("[-] Configured graphic session did not become active on ${Constants.X11_DISPLAY}")
                 return@withContext false

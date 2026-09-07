@@ -60,6 +60,9 @@ object PulseAudioNatScriptTransport {
         containerName: String,
         logger: ContainerLogger? = null
     ): Boolean = withContext(Dispatchers.IO) {
+        if (!FixSettings.isPulseAudioEnabled(X11Application.instance, containerName)) {
+            return@withContext true
+        }
         val info = ContainerManager.getContainerInfo(containerName)
             ?: return@withContext fail(logger, "Container $containerName was not found")
 
@@ -205,11 +208,11 @@ object PulseAudioNatScriptTransport {
             }
 
             var verified: CommandResult? = null
-            repeat(20) {
+            for (attempt in 0 until 20) {
                 val probe = endpointInfo(uid, ip, port)
                 if (hasAndroidSink(probe)) {
                     verified = probe
-                    return@repeat
+                    break
                 }
                 delay(100)
             }
@@ -249,7 +252,7 @@ object PulseAudioNatScriptTransport {
             "PULSE_SERVER=${q("unix:$CONTROL_SOCKET")} " +
                 "PULSE_COOKIE=${q(COOKIE)} " +
                 "PULSE_CLIENTCONFIG=${q(CLIENT_CONFIG)} " +
-                "pactl $arguments"
+                "timeout 5 pactl $arguments"
         )
 
     private fun endpointInfo(uid: Int, ip: String, port: Int): CommandResult =
@@ -257,7 +260,7 @@ object PulseAudioNatScriptTransport {
             uid,
             "PULSE_SERVER=${q("tcp:$ip:$port")} " +
                 "PULSE_COOKIE=${q(COOKIE)} " +
-                "PULSE_CLIENTCONFIG=${q(CLIENT_CONFIG)} pactl info"
+                "PULSE_CLIENTCONFIG=${q(CLIENT_CONFIG)} timeout 5 pactl info"
         )
 
     private fun hasAndroidSink(result: CommandResult): Boolean =
@@ -414,7 +417,8 @@ object PulseAudioNatScriptTransport {
 
     private fun execAsTermux(uid: Int, command: String): CommandResult {
         val wrapped = buildString {
-            append("export HOME=").append(q(TERMUX_HOME)).append("; ")
+            append("export LC_ALL=C; ")
+        append("export HOME=").append(q(TERMUX_HOME)).append("; ")
             append("export PREFIX=").append(q(TERMUX_PREFIX)).append("; ")
             append("export TMPDIR=").append(q("$TERMUX_PREFIX/tmp")).append("; ")
             append("export PATH=").append(q("$TERMUX_PREFIX/bin:/system/bin:/system/xbin")).append("; ")
@@ -429,7 +433,7 @@ object PulseAudioNatScriptTransport {
         }
     }
 
-    private fun buildContainerPayload(server: String, cookieEscaped: String): String = """
+    internal fun buildContainerPayload(server: String, cookieEscaped: String): String = """
         set -u
         SERVER=${q(server)}
         COOKIE_ESCAPED=${q(cookieEscaped)}
@@ -548,7 +552,9 @@ object PulseAudioNatScriptTransport {
                 mv /etc/conf.d/x11-session.saas-audio.tmp /etc/conf.d/x11-session
         fi
 
-        info="${'$'}(PULSE_SERVER="${'$'}SERVER" PULSE_COOKIE="${'$'}cookie" pactl info 2>&1)" || {
+        ${PulseAudioClientConfig.install(server).prependIndent("        ")}
+
+        info="${'$'}(PULSE_SERVER="${'$'}SERVER" PULSE_COOKIE="${'$'}cookie" timeout 5 pactl info 2>&1)" || {
             printf '%s\n' "${'$'}info" >&2
             die "pactl cannot reach ${'$'}SERVER"
         }
