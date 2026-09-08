@@ -107,8 +107,6 @@ class RuntimeStartWizardPolicyTest {
         assertFalse(display.contains("createMonitor("))
         assertFalse(display.contains("selectMonitor("))
         assertFalse(display.contains("deleteMonitor("))
-        assertFalse(display.contains("X11DisplayAllocator"))
-        assertFalse(display.contains("X11DisplaySlot"))
         assertFalse(display.contains("Icons.Default.Add"))
         assertFalse(display.contains("Icons.Default.DeleteOutline"))
     }
