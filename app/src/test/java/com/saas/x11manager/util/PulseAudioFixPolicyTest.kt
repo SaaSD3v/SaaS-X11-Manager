@@ -97,7 +97,7 @@ class PulseAudioFixPolicyTest {
     }
 
     @Test
-    fun unifiedTransportKeepsHostValidatedAndNatExperimentalOnTheSameCore() {
+    fun unifiedTransportKeepsAuthenticatedHostAndNatOnTheSameCore() {
         val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioUnifiedTransport.kt")
 
         assertTrue(transport.contains("BASE_PORT = 4713"))
@@ -106,7 +106,7 @@ class PulseAudioFixPolicyTest {
         assertTrue(transport.contains("DROIDSPACES_NAT_GATEWAY = \"172.28.0.1\""))
         assertTrue(transport.contains("resolveNatEndpoint"))
         assertTrue(transport.contains("discoverContainerDefaultGateway"))
-        assertTrue(transport.contains("HOST is the physically validated APK baseline"))
+        assertTrue(transport.contains("PulseAudioContainerCommand.build(containerName, payload)"))
         assertTrue(transport.contains("NAT transport status: experimental until physical APK verification"))
         assertTrue(transport.contains("configuredPortForwardOwner"))
         assertTrue(transport.contains("module-native-protocol-tcp"))
