@@ -32,12 +32,16 @@ class RuntimeStartWizardPolicyTest {
     }
 
     @Test
-    fun accessDialogExposesOnlyIndependentX11AndVncModes() {
+    fun accessDialogExposesOnlyIndependentX11AndVncModesWithAdvancedVncAccess() {
         val dialog = source("app/src/main/java/com/saas/x11manager/ui/screen/GraphicAccessDialog.kt")
 
         assertTrue(dialog.contains("title = \"Integrated X11\""))
         assertTrue(dialog.contains("title = \"VNC\""))
         assertTrue(dialog.contains("Integrated X11 stays off"))
+        assertTrue(dialog.contains("Text(\"Advanced settings\")"))
+        assertTrue(dialog.contains("TigerVncSettingsDialog("))
+        assertTrue(dialog.contains("ADB forward local port"))
+        assertTrue(dialog.contains("127.0.0.1:"))
         assertFalse(dialog.contains("SessionAccessMode.BOTH"))
         assertFalse(dialog.contains("title = \"Both\""))
         assertFalse(dialog.contains("Run desktop as"))
@@ -69,8 +73,21 @@ class RuntimeStartWizardPolicyTest {
         assertTrue(vnc.contains("GraphicSessionInitFiles.vncSessionScript(session, \"/bin/sh\")"))
         assertTrue(access.contains("VncX11MonitorReservation.reserveBeforeVncStart"))
         assertTrue(access.indexOf("VncX11MonitorReservation.reserveBeforeVncStart") < access.indexOf("VncServerManager.startStandalone"))
+        assertTrue(access.contains("desktopUser = userPreparation.selection.userName"))
+        assertTrue(access.contains("adbLocalPort = vncAdbLocalPort"))
         assertTrue(reservation.contains("reserve only; Integrated X11 remains off"))
         assertTrue(reservation.contains("X11DisplayAllocator.firstFree(occupied)"))
         assertTrue(reservation.contains("ContainerConfigManager.ensureManualX11Config"))
+    }
+
+    @Test
+    fun activeVncConnectionSummaryIsPinnedUntilRuntimeEnds() {
+        val viewModel = source("app/src/main/java/com/saas/x11manager/ui/screen/HomeViewModel.kt")
+        val guide = source("app/src/main/java/com/saas/x11manager/util/VncConnectionGuide.kt")
+
+        assertTrue(guide.contains("ACTIVE_SUMMARY_BEGIN"))
+        assertTrue(guide.contains("Connection information pinned until this VNC/container session ends"))
+        assertTrue(viewModel.contains("VncConnectionGuide.retainPinnedSummary(logs)"))
+        assertTrue(viewModel.contains("removePinnedVncSummary"))
     }
 }
