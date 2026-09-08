@@ -17,14 +17,25 @@ class VncAdbForwardGuidePolicyTest {
     }
 
     @Test
-    fun restartRecoveryUsesTheActualConfiguredPort() {
+    fun connectionGuideKeepsPcLocalPortSeparateFromVncServerPort() {
         val guide = source("app/src/main/java/com/saas/x11manager/util/VncConnectionGuide.kt")
 
-        assertTrue(guide.contains("adb forward --remove tcp:\$port"))
-        assertTrue(guide.contains("adb forward tcp:\$port tcp:\$port"))
-        assertTrue(guide.contains("127.0.0.1:\$port"))
+        assertTrue(guide.contains("ADB forward local port: \$effectiveLocalPort"))
+        assertTrue(guide.contains("USB local endpoint after forward: 127.0.0.1:\$effectiveLocalPort"))
+        assertTrue(guide.contains("adb forward tcp:\$effectiveLocalPort tcp:\$port"))
+        assertTrue(guide.contains("the Manager does not create PC-side forwards"))
+        assertFalse(guide.contains("adb forward tcp:5901 tcp:5901"))
+    }
+
+    @Test
+    fun restartRecoveryUsesActualLocalAndRemotePorts() {
+        val guide = source("app/src/main/java/com/saas/x11manager/util/VncConnectionGuide.kt")
+
+        assertTrue(guide.contains("adb forward --remove tcp:\$effectiveLocalPort"))
+        assertTrue(guide.contains("adb forward tcp:\$effectiveLocalPort tcp:\$port"))
+        assertTrue(guide.contains("127.0.0.1:\$effectiveLocalPort"))
         assertTrue(guide.contains("wait until the Manager reports VNC ready"))
-        assertTrue(guide.contains("removes only the PC-side ADB forward"))
+        assertTrue(guide.contains("does not stop TigerVNC"))
         assertFalse(guide.contains("adb forward --remove tcp:5901"))
     }
 
@@ -36,6 +47,7 @@ class VncAdbForwardGuidePolicyTest {
         val rollbackIndex = access.indexOf("VncX11MonitorReservation.rollbackAfterFailedVncStart")
 
         assertTrue(recoveryIndex >= 0)
+        assertTrue(access.contains("localPort = vncAdbLocalPort"))
         assertTrue(access.contains("onlyIfTroubleshooting = true"))
         assertTrue(rollbackIndex > recoveryIndex)
     }
