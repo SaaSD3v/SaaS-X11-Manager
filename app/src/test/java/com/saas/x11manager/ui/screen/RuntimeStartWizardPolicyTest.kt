@@ -102,7 +102,7 @@ class RuntimeStartWizardPolicyTest {
         assertTrue(display.contains("add(Constants.X11_DISPLAY)"))
         assertTrue(display.contains("private fun FixedMonitorDeck("))
         assertTrue(display.contains(".width(204.dp)"))
-        assertTrue(display.contains("Monitor 1 (${ '$' }{Constants.X11_DISPLAY})".replace(" ", "")) || display.contains("Monitor 1 (\${Constants.X11_DISPLAY})"))
+        assertTrue(display.contains("Monitor 1 (\${Constants.X11_DISPLAY})"))
 
         assertFalse(display.contains("createMonitor("))
         assertFalse(display.contains("selectMonitor("))
