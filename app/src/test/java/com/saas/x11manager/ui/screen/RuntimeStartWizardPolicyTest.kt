@@ -93,9 +93,24 @@ class RuntimeStartWizardPolicyTest {
         assertTrue(access.contains("desktopUser = userPreparation.selection.userName"))
         assertTrue(access.contains("adbLocalPort = vncAdbLocalPort"))
         assertTrue(access.contains("Constants.X11_DISPLAY"))
-        assertTrue(display.contains("Monitor 1 · ${'$'}{Constants.X11_DISPLAY}"))
+
+        // Preserve the current X11APP workspace language, but collapse it to the
+        // one Manager-owned monitor/display that X11-0nly is allowed to expose.
+        assertTrue(display.contains("text = \"X11 Screen\""))
+        assertTrue(display.contains("text = \"Monitors\""))
+        assertTrue(display.contains("add(\"Monitor 1\")"))
+        assertTrue(display.contains("add(Constants.X11_DISPLAY)"))
+        assertTrue(display.contains("private fun FixedMonitorDeck("))
+        assertTrue(display.contains(".width(204.dp)"))
+        assertTrue(display.contains("Monitor 1 (${ '$' }{Constants.X11_DISPLAY})".replace(" ", "")) || display.contains("Monitor 1 (\${Constants.X11_DISPLAY})"))
+
         assertFalse(display.contains("createMonitor("))
         assertFalse(display.contains("selectMonitor("))
+        assertFalse(display.contains("deleteMonitor("))
+        assertFalse(display.contains("X11DisplayAllocator"))
+        assertFalse(display.contains("X11DisplaySlot"))
+        assertFalse(display.contains("Icons.Default.Add"))
+        assertFalse(display.contains("Icons.Default.DeleteOutline"))
     }
 
     @Test
