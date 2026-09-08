@@ -130,7 +130,9 @@ class PulseAudioFixPolicyTest {
         val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioUnifiedTransport.kt")
 
         assertTrue(transport.contains("transport.cookie"))
-        assertTrue(transport.contains("od -An -v -tu1"))
+        assertTrue(transport.contains("PulseAudioCookieTransport.encodeCommand(COOKIE)"))
+        val encoder = source("app/src/main/java/com/saas/x11manager/util/PulseAudioCookieTransport.kt")
+        assertTrue(encoder.contains("od -An -v -tu1"))
         assertTrue(transport.contains("printf '%b'"))
         assertTrue(transport.contains("COOKIE_ESCAPED"))
         assertTrue(transport.contains("cookie-file = /root/.config/pulse/saas-audio.cookie"))

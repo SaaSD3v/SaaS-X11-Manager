@@ -110,8 +110,14 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
+    - name: Install real PulseAudio transport test dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends pulseaudio pulseaudio-utils alsa-utils libasound2-plugins
+
     - name: Test and build Android App with Gradle
       env:
+        SAAS_PULSE_INTEGRATION_REQUIRED: "1"
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}

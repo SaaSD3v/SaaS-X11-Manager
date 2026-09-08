@@ -754,8 +754,8 @@ object PulseAudioFixManager {
     }
 
     private fun cookieEscaped(runtime: TermuxRuntime): String? {
-        val command = "od -An -v -tu1 ${shellQuote(HOST_COOKIE)} 2>/dev/null | awk '{ for (i=1; i<=NF; i++) printf \"\\\\0%03o\", ${'$'}i }'"
-        return runAsTermuxOutput(runtime, command).joinToString("").trim().takeIf { it.isNotEmpty() }
+        val command = PulseAudioCookieTransport.encodeCommand(HOST_COOKIE)
+        return PulseAudioCookieTransport.fromOutput(runAsTermuxOutput(runtime, command))
     }
 
     private fun verifyContainerClient(containerName: String, server: String): Boolean {

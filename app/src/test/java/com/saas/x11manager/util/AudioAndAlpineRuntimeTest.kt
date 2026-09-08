@@ -116,7 +116,12 @@ class AudioAndAlpineRuntimeTest {
     @Test fun completeHostAndNatPayloadsPreserveBinaryCookieAndFinishTheirProof() {
         val server = "tcp:172.28.0.1:4714"
         val cookie = ByteArray(256) { it.toByte() }
-        val octal = cookie.joinToString("") { "\\0%03o".format(it.toInt() and 255) }
+        val octal = Fixture().use { encoder ->
+            val file = encoder.file("host-cookie").apply { writeBytes(cookie) }
+            val result = encoder.run(PulseAudioCookieTransport.encodeCommand(file.path))
+            assertEquals(result.second, 0, result.first)
+            requireNotNull(PulseAudioCookieTransport.fromOutput(result.second.lines()))
+        }
         val payloads = listOf(
             PulseAudioUnifiedTransport.buildContainerPayload(server, octal),
             PulseAudioNatScriptTransport.buildContainerPayload(server, octal)
