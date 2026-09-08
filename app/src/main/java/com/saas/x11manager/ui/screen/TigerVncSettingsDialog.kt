@@ -90,7 +90,7 @@ internal fun TigerVncSettingsDialog(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            "$containerName · full server configuration",
+                            "$containerName · standalone VNC server configuration",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -110,17 +110,17 @@ internal fun TigerVncSettingsDialog(
                     item {
                         TigerSection(
                             title = "Manager-controlled values",
-                            subtitle = "These values remain owned by SaaS X11 Manager."
+                            subtitle = "Runtime values owned by SaaS X11 Manager."
                         ) {
                             ManagedValue("VNC port", VncSettings.getPort(context, containerName).toString())
                             ManagedValue("Password file", "/root/.vnc/passwd")
                             ManagedValue(
                                 "VNC password",
-                                "Configured through the access wizard; plaintext is never stored in Android preferences."
+                                "Configured through the Start access wizard; plaintext is never stored in Android preferences."
                             )
                             ManagedValue(
                                 "Display number",
-                                "Allocated automatically. Mirror mode uses the active Integrated X11 display."
+                                "Allocated automatically for the standalone TigerVNC virtual X display."
                             )
                         }
                     }
@@ -128,7 +128,7 @@ internal fun TigerVncSettingsDialog(
                     item {
                         TigerSection(
                             title = "Standalone Xvnc display",
-                            subtitle = "Virtual display options used when access mode is VNC."
+                            subtitle = "Virtual display options used by standalone VNC."
                         ) {
                             TigerTextField(
                                 label = "Resolution (geometry)",
@@ -418,43 +418,8 @@ internal fun TigerVncSettingsDialog(
 
                     item {
                         TigerSection(
-                            title = "x0vncserver mirror",
-                            subtitle = "Only used by access mode Both, which mirrors the Integrated X11 display."
-                        ) {
-                            TigerTextField(
-                                label = "Mirror crop geometry",
-                                value = settings.mirrorGeometry,
-                                supporting = "Optional WIDTHxHEIGHT or WIDTHxHEIGHT+X+Y. Empty shares the full Integrated X11 display."
-                            ) { update { s -> s.copy(mirrorGeometry = it) } }
-                            TigerTextField(
-                                label = "HostsFile",
-                                value = settings.hostsFile,
-                                supporting = "Optional x0vncserver hosts access-control file."
-                            ) { update { s -> s.copy(hostsFile = it) } }
-                            TigerTextField(
-                                label = "MaxProcessorUsage",
-                                value = settings.maxProcessorUsage,
-                                supporting = "1-100. Default 35.",
-                                numeric = true
-                            ) { update { s -> s.copy(maxProcessorUsage = it) } }
-                            TigerTextField(
-                                label = "PollingCycle",
-                                value = settings.pollingCycle,
-                                supporting = "Milliseconds. Default 30.",
-                                numeric = true
-                            ) { update { s -> s.copy(pollingCycle = it) } }
-                            TigerSwitch(
-                                title = "Use shared memory",
-                                subtitle = "Enable x0vncserver UseSHM.",
-                                checked = settings.useShm
-                            ) { update { s -> s.copy(useShm = it) } }
-                        }
-                    }
-
-                    item {
-                        TigerSection(
                             title = "Extra TigerVNC arguments",
-                            subtitle = "Compatibility escape hatch for package/version-specific parameters."
+                            subtitle = "Compatibility escape hatch for package/version-specific standalone Xvnc parameters."
                         ) {
                             OutlinedTextField(
                                 value = settings.extraArguments,
@@ -494,7 +459,7 @@ internal fun TigerVncSettingsDialog(
                             }
                         } else {
                             Text(
-                                "Settings are valid. They are applied on the next VNC/Both start.",
+                                "Settings are valid. They are applied on the next standalone VNC start.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
