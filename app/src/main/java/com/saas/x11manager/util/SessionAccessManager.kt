@@ -48,12 +48,10 @@ object SessionAccessManager {
         logger?.i("--- Graphic Access Start ---")
         logger?.i("[CTX] Access method: ${accessMode.label}")
         logger?.i("[CTX] Session: ${session.label}")
-        if (accessMode.requiresVnc) {
-            logger?.i("[VNC] Preparing standalone VNC transport")
-            logger?.i("[VNC] • Server port: $vncPort")
-            logger?.i("[VNC] • ADB local port: $vncAdbLocalPort")
-        }
 
+        // Resolve and apply the selected Linux account before transport-specific
+        // output so the terminal reads in user-facing order: session -> user ->
+        // transport -> monitor/runtime.
         val userPreparation = GraphicSessionUserManager.prepareForStart(
             containerName = containerName,
             session = session,
@@ -68,7 +66,20 @@ object SessionAccessManager {
             logger?.i("[*] Graphical user changed; restarting only the managed desktop session")
             X11SessionManager.stopContainerGraphicSession(containerName, logger)
         }
-        logger?.i("")
+
+        if (accessMode.requiresVnc) {
+            logger?.i(LogLayout.SPACER)
+            logger?.i("[VNC] Preparing standalone VNC transport")
+            logger?.i("[VNC] • Server port: $vncPort")
+            logger?.i("[VNC] • PC local ADB port: $vncAdbLocalPort")
+            logger?.i(
+                if (vncPassword == null) {
+                    "[VNC] • Authentication requested: none"
+                } else {
+                    "[VNC] • Authentication requested: VNC password"
+                }
+            )
+        }
 
         var vncReservedSlot: X11DisplaySlot? = null
         if (accessMode == SessionAccessMode.VNC) {
