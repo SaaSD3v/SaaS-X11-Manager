@@ -147,6 +147,7 @@ internal object GraphicSessionRuntimeController {
         logger?.i("[CTX] Container lifecycle: unchanged")
 
         if (configuredSession == null || configuredSession == GraphicSession.NONE) {
+            logger?.i("[CTX] Configured graphic session: none")
             logger?.i("[*] No managed graphic session is configured for $containerName")
             logger?.i("[+] Leaving ${Constants.X11_DISPLAY} available as a raw X11 server")
             return@withContext true
@@ -154,6 +155,10 @@ internal object GraphicSessionRuntimeController {
 
         logger?.i("[CTX] Protocol: ${configuredSession.protocol.label}")
         logger?.i("[CTX] Configured graphic session: ${configuredSession.label}")
+        logger?.i("[CTX] Session command: ${configuredSession.startCommand}")
+        if (configuredSession.protocol == GraphicProtocol.WAYLAND) {
+            logger?.i("[CTX] Wayland runtime: /tmp/runtime-root")
+        }
         logger?.i("[*] Ensuring ${configuredSession.label} session on ${Constants.X11_DISPLAY}...")
         val startedAt = System.nanoTime()
         var result = runContainerCommand(
@@ -184,7 +189,14 @@ internal object GraphicSessionRuntimeController {
                         )
                     )
                     logRuntimeMarkers(result.out, logger)
+                } else {
+                    logger?.w(
+                        "[!] X11 transport restart failed: " +
+                            (restarted.exceptionOrNull()?.message ?: "unknown error")
+                    )
                 }
+            } else {
+                logger?.w("[!] Could not restart the unusable fixed ${Constants.X11_DISPLAY} transport")
             }
         }
 
@@ -214,10 +226,14 @@ internal object GraphicSessionRuntimeController {
         logger?.i("[CTX] Container lifecycle: remains RUNNING")
 
         if (configuredSession == null || configuredSession == GraphicSession.NONE) {
+            logger?.i("[CTX] Configured graphic session: none")
             logger?.i("[+] No managed graphic session process needs to be stopped")
             return@withContext true
         }
 
+        logger?.i("[CTX] Protocol: ${configuredSession.protocol.label}")
+        logger?.i("[CTX] Configured graphic session: ${configuredSession.label}")
+        logger?.i("[CTX] Session command: ${configuredSession.startCommand}")
         logger?.i("[*] Stopping ${configuredSession.label} graphic session only...")
         val startedAt = System.nanoTime()
         val result = runContainerCommand(containerName, buildStopCommand())
