@@ -19,7 +19,7 @@ class VncLaunchSettingsPolicyTest {
     }
 
     @Test
-    fun defaultSettingsPreserveExistingStandaloneLaunchPolicy() {
+    fun defaultSettingsPreserveExistingStandaloneLaunchPolicyWhenPasswordIsUsed() {
         val settings = VncLaunchSettings()
         assertNull(VncSettings.validateLaunchSettings(settings))
 
@@ -39,6 +39,20 @@ class VncLaunchSettingsPolicyTest {
         assertTrue(args.windowed("-rfbauth", "/root/.vnc/passwd"))
         assertTrue(args.contains("-AlwaysShared"))
         assertFalse(args.any { it.startsWith("-Password=") })
+    }
+
+    @Test
+    fun passwordlessStandaloneUsesNoneAndNeverAddsRfbAuth() {
+        val args = TigerVncCommandOptions.standalone(
+            settings = VncLaunchSettings(),
+            displayNumber = 1,
+            port = 5901,
+            passwordFile = null
+        )
+
+        assertTrue(args.windowed("-SecurityTypes", "None"))
+        assertFalse(args.contains("-rfbauth"))
+        assertFalse(args.any { it.contains("/root/.vnc/passwd") })
     }
 
     @Test
