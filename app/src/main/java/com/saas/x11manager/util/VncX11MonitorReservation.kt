@@ -21,6 +21,7 @@ object VncX11MonitorReservation {
         logger: ContainerLogger? = null
     ): Result<X11DisplaySlot?> = withContext(Dispatchers.IO) {
         try {
+            logger?.i(LogLayout.SPACER)
             logger?.i("[X11] Reserving a stopped monitor for VNC container")
             logger?.i("[CONTAINER] • Container: $containerName")
             logger?.i("[X11] • Policy: reserve only; Integrated X11 remains off")
@@ -117,10 +118,12 @@ object VncX11MonitorReservation {
 
         val (status, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
         if (status != ContainerStatus.STOPPED) {
+            logger?.i(LogLayout.SPACER)
             logger?.i("[X11] • Failed VNC cleanup kept ${displaySlot.describe()} because container state is $status")
             return@withContext
         }
 
+        logger?.i(LogLayout.SPACER)
         logger?.i("[X11] Rolling back stopped monitor reservation after VNC start failure")
         X11SessionManager.stopIntegratedServer(displaySlot, logger)
         if (ContainerConfigManager.clearManualX11Config(containerName, logger)) {
