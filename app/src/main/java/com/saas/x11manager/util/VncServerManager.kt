@@ -71,6 +71,9 @@ object VncServerManager {
         val lease = ensureContainerReady(containerName, logger)
             ?: return@withContext VncStartResult(false, port)
 
+        logger?.i(LogLayout.SPACER)
+        logger?.i("[VNC] Preparing TigerVNC runtime")
+
         var success = false
         try {
             if (!prepareTigerVnc(
@@ -84,6 +87,8 @@ object VncServerManager {
                 return@withContext VncStartResult(false, port)
             }
 
+            logger?.i(LogLayout.SPACER)
+            logger?.i("[VNC] Launching standalone VNC runtime")
             stopManagedVnc(containerName, logger)
             if (isPortListening(containerName, port)) {
                 logger?.e("[-] Port $port is already in use inside the container network namespace")
