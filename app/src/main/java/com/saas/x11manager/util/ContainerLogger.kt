@@ -91,5 +91,14 @@ class ViewModelLogger(
     }
 
     private fun reduce(level: Int, msg: String): List<Pair<Int, String>> =
-        synchronized(reducerLock) { reducer.reduce(level, msg) }
+        synchronized(reducerLock) {
+            reducer.reduce(level, msg).filterNot { (_, text) ->
+                // Replaced by VncConnectionGuide's exact active-session summary.
+                // Keeping these legacy generic lines would either duplicate the
+                // new facts or refer to addresses that the reducer intentionally
+                // did not retain.
+                text == "[VNC] ✓ Connect with any standard VNC client using one of the reachable addresses above" ||
+                    text == "[VNC] ✓ Previous Manager-owned VNC runtime cleared"
+            }
+        }
 }
