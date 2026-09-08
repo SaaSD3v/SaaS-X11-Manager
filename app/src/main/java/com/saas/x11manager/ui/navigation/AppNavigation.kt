@@ -13,6 +13,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.ViewModelProvider
+import com.saas.x11manager.X11Application
+import com.saas.x11manager.operations.*
+import com.saas.x11manager.ui.screen.EditContainerViewModel
+import com.saas.x11manager.ui.screen.ManagedDisplayViewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -52,6 +57,40 @@ fun AppNavigation(
     val scope = rememberCoroutineScope()
     var displayScreenOpen by remember { mutableStateOf(false) }
     var fixesScreenContainer by remember { mutableStateOf<String?>(null) }
+
+    val operationStore = X11Application.instance.operationLogs
+    val openLogRequest = operationStore.openRequest
+    LaunchedEffect(openLogRequest) {
+        val request = openLogRequest ?: return@LaunchedEffect
+        operationStore.awaitLoaded()
+        fixesScreenContainer = null
+        viewModel.onEditNavigated()
+        displayScreenOpen = false
+        when (request.owner.area) {
+            OperationArea.HOME -> {
+                pagerState.scrollToPage(0)
+                viewModel.openSavedLogs(request.owner.target)
+            }
+            OperationArea.SETUP -> {
+                val editor = ViewModelProvider(X11Application.instance)
+                    .get("edit:${request.owner.target}", EditContainerViewModel::class.java)
+                editor.load(request.owner.target, X11Application.instance.cacheDir)
+                editor.openInstallTerminal()
+                viewModel.navigateToEditContainer(request.owner.target)
+            }
+            OperationArea.MONITOR -> {
+                val number = request.owner.target.toIntOrNull()
+                val monitor = ViewModelProvider(X11Application.instance)[ManagedDisplayViewModel::class.java]
+                monitor.selectedDisplayNumber = number
+                monitor.openLogs(number)
+                displayScreenOpen = true
+            }
+        }
+        operationStore.get(request.owner).takeUnless { it.running }?.let {
+            OperationNotifications.dismiss(X11Application.instance, it)
+        }
+        operationStore.consumeOpen(request)
+    }
 
     val navigateToEdit = viewModel.navigateToEdit
 

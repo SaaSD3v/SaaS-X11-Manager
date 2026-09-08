@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import com.saas.x11manager.ui.component.ContainerCard
 import com.saas.x11manager.ui.component.ContainerCardActions
 import com.saas.x11manager.ui.component.TerminalDialog
+import com.saas.x11manager.ui.component.OperationResultCard
 import com.saas.x11manager.util.ContainerInfo
 import com.saas.x11manager.util.GraphicSessionUserManager
 import com.saas.x11manager.util.RuntimeAccessPolicy
@@ -90,9 +91,10 @@ fun HomeScreen(
             viewModel.containerLogs[containerName] ?: emptyList()
         val isBlocking = activeOperation == containerName || activeOperation == "__all__"
         TerminalDialog(
-            title = "Logs: $containerName",
+            title = if (containerName == "__all__") "Stop all logs" else "Logs: $containerName",
             logs = memoryLogs,
             onDismiss = { viewModel.dismissLogViewer() },
+            onMinimize = { viewModel.minimizeLogViewer(containerName) },
             onClear = { viewModel.clearLogsBuffer(containerName) },
             isBlocking = isBlocking
         )
@@ -147,11 +149,18 @@ fun HomeScreen(
                     contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    if (viewModel.logOperation("__all__").available) {
+                        item(key = "all-operation-logs") {
+                            OperationResultCard(viewModel.logOperation("__all__")) {
+                                viewModel.openSavedLogs("__all__")
+                            }
+                        }
+                    }
                     items(containers, key = { it.name }) { container ->
                         ContainerCard(
                             container = container,
                             isExpanded = expandedContainerName.value == container.name,
-                            isOperationRunning = activeOperation != null,
+                            isOperationRunning = viewModel.hasRunningOperations,
                             actions = ContainerCardActions(
                                 // The transport is intentionally not encoded in the
                                 // card anymore. Start first chooses the Linux user,
@@ -179,6 +188,12 @@ fun HomeScreen(
                                 }
                             )
                         )
+                        if (viewModel.logOperation(container.name).available) {
+                            Spacer(Modifier.height(8.dp))
+                            OperationResultCard(viewModel.logOperation(container.name)) {
+                                viewModel.openSavedLogs(container.name)
+                            }
+                        }
                     }
                 }
             }

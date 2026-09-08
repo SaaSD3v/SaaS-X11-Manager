@@ -52,12 +52,15 @@ class IntegratedX11CleanupPolicyTest {
             "app/src/main/java/com/saas/x11manager/ui/screen/ManagedDisplayScreen.kt"
         )
 
-        assertTrue(display.contains("mutableStateOf<Int?>(null)"))
+        val operations = source(
+            "app/src/main/java/com/saas/x11manager/ui/screen/ManagedDisplayViewModel.kt"
+        )
+        assertTrue(operations.contains("mutableStateOf<Int?>(null)"))
         assertFalse(display.contains("add(0)"))
         assertFalse(display.contains("monitor.slot.number == 0"))
         assertFalse(display.contains("monitor.slot.number > 0"))
         assertFalse(display.contains("Monitor 1 (:0) retained as the primary monitor"))
-        assertTrue(display.contains("Raw/unowned Stop is a complete release"))
+        assertTrue(operations.contains("Raw/unowned Stop is a complete release"))
     }
 
     @Test

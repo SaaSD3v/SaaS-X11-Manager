@@ -10,6 +10,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saas.x11manager.X11Application
+import com.saas.x11manager.operations.*
 import com.saas.x11manager.util.*
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.CancellationException
@@ -23,6 +24,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class HomeViewModel : ViewModel() {
+    private val operationStore get() = X11Application.instance.operationLogs
+    fun logOperation(name: String) = operationStore.get(OperationOwner(OperationArea.HOME, name))
+    val hasRunningOperations get() = runningOperationContainer != null || operationStore.records.values.any { it.running }
     private val _containers = MutableStateFlow<List<ContainerInfo>>(emptyList())
     val containers: StateFlow<List<ContainerInfo>> = _containers
 
@@ -209,7 +213,7 @@ class HomeViewModel : ViewModel() {
     }
 
     private fun tryBeginOperation(containerName: String): Boolean {
-        if (runningOperationContainer != null) return false
+        if (hasRunningOperations) return false
         runtimeStateGeneration++
         runningOperationContainer = containerName
         return true
@@ -225,10 +229,16 @@ class HomeViewModel : ViewModel() {
         if (!tryBeginOperation(container.name)) return
 
         viewModelScope.launch {
+            val operation = logOperation(container.name)
+            operation.begin("Starting ${container.name}")
+            var succeeded = false
             val logs = logsFor(container.name)
             logs.clear()
             showLogViewerFor = container.name
-            val logger = ViewModelLogger { level, message -> appendLog(logs, level, message) }
+            val logger = ViewModelLogger { level, message ->
+                appendLog(logs, level, message)
+                operation.changed()
+            }
 
             try {
                 runtimeRefreshJob?.join()
@@ -259,10 +269,13 @@ class HomeViewModel : ViewModel() {
                 val (running, pid) = ContainerManager.checkContainerStatusPublic(container.name)
                 if (running) updateContainerState(container.name, ContainerStatus.RUNNING, pid)
                 if (!started) logger.e("[-] ${runtimeMode.label} start was not fully confirmed")
+                succeeded = started
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "startSession failed", e)
                 logger.e("Error: ${e.message}")
             } finally {
+                logger.flush()
+                operation.finish(succeeded, if (succeeded) "Session started" else "Session start was not confirmed — view logs")
                 runningOperationContainer = null
                 refreshRuntimeAfterOperation()
             }
@@ -283,10 +296,14 @@ class HomeViewModel : ViewModel() {
             // running. Other historical lines are cleared so the terminal remains
             // focused on the current lifecycle operation.
             val pinnedAtStopStart = VncConnectionGuide.retainPinnedSummary(logs)
-            logs.clear()
-            logs.addAll(pinnedAtStopStart)
+            val operation = logOperation(container.name)
+            operation.begin("Stopping ${container.name}", initialLogs = pinnedAtStopStart)
+            var succeeded = false
             showLogViewerFor = container.name
-            val logger = ViewModelLogger { level, message -> appendLog(logs, level, message) }
+            val logger = ViewModelLogger { level, message ->
+                appendLog(logs, level, message)
+                operation.changed()
+            }
             try {
                 runtimeRefreshJob?.join()
                 val accessMode = RuntimeAccessPolicy.normalize(
@@ -306,10 +323,13 @@ class HomeViewModel : ViewModel() {
                 }
                 val stopped = X11SessionManager.stopX11Session(container.name, logger)
                 if (stopped) updateContainerState(container.name, ContainerStatus.STOPPED, null)
+                succeeded = stopped
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "stopContainer failed", e)
                 logger.e("Error: ${e.message}")
             } finally {
+                logger.flush()
+                operation.finish(succeeded, if (succeeded) "Container stopped" else "Container stop was not confirmed — view logs")
                 runningOperationContainer = null
                 refreshRuntimeAfterOperation()
             }
@@ -319,7 +339,12 @@ class HomeViewModel : ViewModel() {
     fun stopAll() {
         if (!tryBeginOperation("__all__")) return
         viewModelScope.launch {
-            val logger = ViewModelLogger { _, _ -> }
+            val operation = logOperation("__all__")
+            operation.begin("Stopping all containers and monitors")
+            logsFor("__all__")
+            showLogViewerFor = "__all__"
+            var succeeded = false
+            val logger = ViewModelLogger(operation::append)
             try {
                 runtimeRefreshJob?.join()
                 val currentContainers = ContainerManager.listContainers()
@@ -330,13 +355,17 @@ class HomeViewModel : ViewModel() {
                     if (accessMode.requiresVnc) VncServerManager.stopManagedVnc(container.name, logger)
                 }
                 X11SessionManager.stopAll(logger)
-                _containers.value = _containers.value.map {
-                    it.copy(status = ContainerStatus.STOPPED, pid = null)
-                }
+                val snapshot = readRuntimeSnapshot()
+                applyRuntimeSnapshot(snapshot)
+                succeeded = snapshot.containers.none { it.isRunning } &&
+                    snapshot.monitors.none { it.status == X11ServerStatus.Running }
                 containerLogs.values.forEach(::removePinnedVncSummary)
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "stopAll failed", e)
+                logger.e("[-] ${e.message ?: "Stop all failed"}")
             } finally {
+                logger.flush()
+                operation.finish(succeeded, if (succeeded) "All containers and monitors stopped" else "Stop all was not fully confirmed — view logs")
                 runningOperationContainer = null
                 refreshRuntimeAfterOperation()
             }
@@ -355,10 +384,20 @@ class HomeViewModel : ViewModel() {
             if (container.hostname.isNotEmpty()) appendLog(logs, Log.INFO, "  Hostname: ${container.hostname}")
             appendLog(logs, Log.INFO, "")
             appendLog(logs, Log.INFO, "Press Start to choose a Linux user and X11 or VNC.")
+            logOperation(container.name).changed(immediate = true)
         }
     }
 
     fun dismissLogViewer() { showLogViewerFor = null }
+
+    fun minimizeLogViewer(name: String) {
+        if (operationStore.minimize(logOperation(name))) showLogViewerFor = null
+    }
+
+    fun openSavedLogs(name: String) {
+        logsFor(name)
+        showLogViewerFor = name
+    }
 
     fun clearLogsBuffer(name: String) {
         val logs = containerLogs[name] ?: return
@@ -366,6 +405,7 @@ class HomeViewModel : ViewModel() {
         logs.clear()
         logs.addAll(pinned)
         containerLogs = containerLogs.toMutableMap()
+        logOperation(name).changed(immediate = true)
     }
 
     fun navigateToEditContainer(name: String) { navigateToEdit = name }
@@ -373,7 +413,7 @@ class HomeViewModel : ViewModel() {
 
     private fun logsFor(name: String): SnapshotStateList<Pair<Int, String>> {
         containerLogs[name]?.let { return it }
-        val newLogs = mutableStateListOf<Pair<Int, String>>()
+        val newLogs = logOperation(name).logs
         containerLogs = containerLogs.toMutableMap().apply { put(name, newLogs) }
         return newLogs
     }

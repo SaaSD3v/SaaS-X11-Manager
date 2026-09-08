@@ -32,39 +32,36 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.ui.component.TerminalDialog
-import com.saas.x11manager.util.ViewModelLogger
+import com.saas.x11manager.ui.component.OperationResultCard
+import com.saas.x11manager.X11Application
 import com.saas.x11manager.util.X11DisplayAllocator
 import com.saas.x11manager.util.X11DisplaySlot
 import com.saas.x11manager.util.X11MonitorInfo
 import com.saas.x11manager.util.X11ServerStatus
 import com.saas.x11manager.util.X11SessionManager
 import com.termux.x11.EmbeddedDisplayHost
-import kotlinx.coroutines.launch
-
-/** Persisted only for explicitly-created raw monitor placeholders. */
-private const val PREF_KNOWN_MONITOR_SLOTS = "saas_known_monitor_slots"
 
 @Composable
 fun ManagedDisplayScreen(
     viewModel: HomeViewModel,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    model: ManagedDisplayViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+        viewModelStoreOwner = X11Application.instance
+    )
 ) {
     val containers by viewModel.containers.collectAsState()
     val runtimeMonitors by viewModel.monitors.collectAsState()
     val context = LocalContext.current
     val activity = remember(context) { context.findManagedDisplayActivity() }
-    val scope = rememberCoroutineScope()
     val prefs = remember(context) { EmbeddedDisplayHost.getPrefs(context) }
     val store = remember(prefs) { prefs.get() }
     val xkbSeedContainer = containers.firstOrNull { it.isRunning } ?: containers.firstOrNull()
 
     var monitors by remember { mutableStateOf<List<X11MonitorInfo>>(emptyList()) }
-    var manualDisplayNumbers by remember(store) {
-        mutableStateOf(readKnownMonitorSlots(store))
-    }
-    var selectedDisplayNumber by remember { mutableStateOf<Int?>(null) }
-    var busyDisplayNumber by remember { mutableStateOf<Int?>(null) }
-    var message by remember { mutableStateOf<String?>(null) }
+    val manualDisplayNumbers = model.manualDisplayNumbers
+    val selectedDisplayNumber = model.selectedDisplayNumber
+    val busyDisplayNumber = model.busyDisplayNumber
+    val message = model.message
     var connected by remember { mutableStateOf(false) }
     var showConfiguration by remember { mutableStateOf(false) }
     var fullscreen by remember { mutableStateOf(false) }
@@ -75,9 +72,6 @@ fun ManagedDisplayScreen(
     var additionalKeysVisible by remember { mutableStateOf(false) }
     var extraKeysConfig by remember { mutableStateOf(store.getString("extra_keys_config", null)) }
 
-    val monitorLogs = remember { mutableStateListOf<Pair<Int, String>>() }
-    var showMonitorLogs by remember { mutableStateOf(false) }
-    var monitorLogTitle by remember { mutableStateOf("X11 monitor logs") }
 
     val selectedMonitor = selectedDisplayNumber?.let { selected ->
         monitors.firstOrNull { it.slot.number == selected }
@@ -86,13 +80,7 @@ fun ManagedDisplayScreen(
     val selectedStatus = selectedMonitor?.status ?: X11ServerStatus.Stopped
     val selectedPid = selectedMonitor?.pid
 
-    fun persistManualDisplayNumbers(numbers: Set<Int>) {
-        val sanitized = numbers.filter { it >= 0 }.toSortedSet()
-        manualDisplayNumbers = sanitized
-        store.edit()
-            .putStringSet(PREF_KNOWN_MONITOR_SLOTS, sanitized.map(Int::toString).toSet())
-            .apply()
-    }
+    fun persistManualDisplayNumbers(numbers: Set<Int>) = model.persistManualDisplayNumbers(numbers)
 
     /**
      * Compose-only projection of the already-published runtime snapshot. The old
@@ -129,7 +117,7 @@ fun ManagedDisplayScreen(
 
         if (selectedDisplayNumber !in visibleNumbers) {
             connected = false
-            selectedDisplayNumber = visibleNumbers.firstOrNull()
+            model.selectedDisplayNumber = visibleNumbers.firstOrNull()
         }
     }
 
@@ -165,7 +153,7 @@ fun ManagedDisplayScreen(
     fun selectMonitor(slot: X11DisplaySlot) {
         if (slot.number == selectedDisplayNumber) return
         connected = false
-        selectedDisplayNumber = slot.number
+        model.selectedDisplayNumber = slot.number
     }
 
     fun createMonitor() {
@@ -174,184 +162,18 @@ fun ManagedDisplayScreen(
         val slot = X11DisplayAllocator.firstFree(occupied)
         persistManualDisplayNumbers(manualDisplayNumbers + slot.number)
         connected = false
-        selectedDisplayNumber = slot.number
+        model.selectedDisplayNumber = slot.number
         refreshMonitors()
     }
 
-    fun operationLogger(): ViewModelLogger = ViewModelLogger { level, line ->
-        scope.launch { monitorLogs.add(level to line) }
-    }
-
     fun deleteMonitor(monitor: X11MonitorInfo) {
-        if (busyDisplayNumber != null) return
-
         selectMonitor(monitor.slot)
-        monitorLogs.clear()
-        monitorLogTitle = "Deleting ${monitor.slot.describe()}"
-        showMonitorLogs = true
-        val logger = operationLogger()
-
-        scope.launch {
-            busyDisplayNumber = monitor.slot.number
-            message = null
-            try {
-                logger.i("--- Deleting X11 monitor ---")
-                logger.i("[*] Monitor: ${monitor.monitorNumber}")
-                logger.i("[*] Display: ${monitor.displayName}")
-                logger.i("[*] Runtime: ${monitor.slot.runtimeDir}")
-                logger.i("[*] Socket: ${monitor.slot.socketFile}")
-                logger.i("")
-
-                if (monitor.containerName != null) {
-                    message = "${monitor.slot.describe()} is reserved by ${monitor.containerName}"
-                    logger.w("[!] Monitor is reserved by running container '${monitor.containerName}'")
-                    logger.w("[!] Stop the container or stop its monitor before deleting the slot")
-                    return@launch
-                }
-                if (monitor.status == X11ServerStatus.Running) {
-                    message = "${monitor.slot.describe()} is still running"
-                    logger.w("[!] Stop the monitor before deleting it")
-                    return@launch
-                }
-
-                // A delete is an authoritative release, not just a UI preference
-                // change. Reuse the verified server-stop cleanup so stale sockets,
-                // lock files and the complete unowned runtime directory disappear.
-                val released = X11SessionManager.stopIntegratedServer(monitor.slot, logger)
-                if (!released) {
-                    message = "${monitor.slot.describe()} could not be fully deleted"
-                    logger.e("[-] Monitor delete failed because runtime cleanup was not confirmed")
-                    return@launch
-                }
-
-                persistManualDisplayNumbers(manualDisplayNumbers - monitor.slot.number)
-                if (selectedDisplayNumber == monitor.slot.number) {
-                    connected = false
-                    selectedDisplayNumber = monitors
-                        .asSequence()
-                        .map { it.slot.number }
-                        .filter { it != monitor.slot.number }
-                        .minOrNull()
-                }
-                refreshMonitors()
-                logger.i("[+] ${monitor.slot.describe()} runtime fully released")
-                logger.i("[+] Monitor removed from the monitor list")
-                viewModel.refreshRuntimeState()
-            } finally {
-                busyDisplayNumber = null
-            }
-        }
+        model.deleteMonitor(monitor)
     }
 
     fun toggleMonitor(monitor: X11MonitorInfo) {
-        if (busyDisplayNumber != null) return
         selectMonitor(monitor.slot)
-        monitorLogs.clear()
-        monitorLogTitle = if (monitor.status == X11ServerStatus.Running) {
-            "Stopping ${monitor.slot.describe()}"
-        } else {
-            "Starting ${monitor.slot.describe()}"
-        }
-        showMonitorLogs = true
-        val logger = operationLogger()
-
-        scope.launch {
-            busyDisplayNumber = monitor.slot.number
-            message = null
-            try {
-                if (monitor.status == X11ServerStatus.Running) {
-                    logger.i("--- Stopping X11 monitor ---")
-                    logger.i("[*] Monitor: ${monitor.monitorNumber}")
-                    logger.i("[*] Display: ${monitor.displayName}")
-                    monitor.pid?.let { logger.i("[*] PID: $it") }
-                    monitor.containerName?.let { logger.i("[*] Container remains running: $it") }
-                    logger.i("")
-
-                    if (monitor.containerName != null) {
-                        val sessionStopped = X11SessionManager.stopContainerGraphicSession(
-                            monitor.containerName,
-                            logger
-                        )
-                        if (!sessionStopped) {
-                            logger.w("[!] Continuing with X11 server stop; container is still running")
-                        }
-                    }
-
-                    // A monitor action owns only the Manager X11 server. Stopping
-                    // the card must never stop the associated DroidSpaces container.
-                    val stopped = X11SessionManager.stopIntegratedServer(monitor.slot, logger)
-
-                    if (!stopped) {
-                        message = "${monitor.slot.describe()} could not be stopped"
-                        logger.e("[-] ${monitor.slot.describe()} stop failed")
-                    } else {
-                        connected = false
-                        if (monitor.containerName != null) {
-                            // The running container itself keeps this slot visible.
-                            // No manual/persistent monitor placeholder is needed.
-                            persistManualDisplayNumbers(manualDisplayNumbers - monitor.slot.number)
-                            logger.i("[+] Container '${monitor.containerName}' was left running")
-                            logger.i("[+] Empty monitor bind anchor retained for the running container")
-                        } else {
-                            // Raw/unowned Stop is a complete release: no process,
-                            // socket, runtime directory or UI placeholder survives.
-                            persistManualDisplayNumbers(manualDisplayNumbers - monitor.slot.number)
-                            logger.i("[+] ${monitor.slot.describe()} fully released")
-                            logger.i("[+] Monitor removed from the monitor list")
-                        }
-                        if (fullscreen && monitor.slot.number == selectedDisplayNumber) {
-                            setFullscreen(false)
-                        }
-                    }
-                } else {
-                    logger.i("--- Starting X11 monitor ---")
-                    logger.i("[*] Monitor: ${monitor.monitorNumber}")
-                    logger.i("[*] Display: ${monitor.displayName}")
-                    logger.i("[*] Process: ${monitor.slot.processName}")
-                    logger.i("[*] Runtime: ${monitor.slot.runtimeDir}")
-                    logger.i("[*] Socket: ${monitor.slot.socketFile}")
-                    logger.i("")
-
-                    val seed = monitor.containerName ?: xkbSeedContainer?.name
-                    val started = X11SessionManager.startIntegratedServer(
-                        displaySlot = monitor.slot,
-                        containerName = seed,
-                        logger = logger
-                    )
-                    if (started.isSuccess) {
-                        val graphicSessionReady = monitor.containerName?.let { containerName ->
-                            X11SessionManager.ensureContainerGraphicSession(
-                                containerName = containerName,
-                                displaySlot = monitor.slot,
-                                logger = logger
-                            )
-                        } ?: true
-
-                        if (monitor.containerName == null) {
-                            persistManualDisplayNumbers(manualDisplayNumbers + monitor.slot.number)
-                        } else {
-                            persistManualDisplayNumbers(manualDisplayNumbers - monitor.slot.number)
-                        }
-                        logger.i("")
-                        logger.i("[+] ${monitor.slot.describe()} is ready")
-                        logger.i("[+] PID: ${started.getOrNull()}")
-                        if (!graphicSessionReady) {
-                            message =
-                                "${monitor.slot.describe()} is running, but its graphic session did not start"
-                        }
-                    } else {
-                        message = started.exceptionOrNull()?.message
-                            ?: "${monitor.slot.describe()} could not start"
-                        logger.e("[-] ${message ?: "X11 start failed"}")
-                    }
-                }
-            } finally {
-                // Publish one shared runtime snapshot. The Screen no longer starts
-                // a second X11 discovery pass of its own.
-                viewModel.refreshRuntimeState()
-                busyDisplayNumber = null
-            }
-        }
+        model.toggleMonitor(monitor, xkbSeedContainer?.name)
     }
 
     LaunchedEffect(store) {
@@ -408,6 +230,7 @@ fun ManagedDisplayScreen(
     )
 
     LaunchedEffect(selectedStatus, fullscreen) {
+        if (selectedStatus != X11ServerStatus.Running) connected = false
         if (fullscreen && selectedStatus != X11ServerStatus.Running) {
             setFullscreen(false)
         }
@@ -446,14 +269,17 @@ fun ManagedDisplayScreen(
         )
     }
 
-    if (showMonitorLogs) {
-        TerminalDialog(
-            title = monitorLogTitle,
-            logs = monitorLogs,
-            onDismiss = { if (busyDisplayNumber == null) showMonitorLogs = false },
-            onClear = { if (busyDisplayNumber == null) monitorLogs.clear() },
-            isBlocking = busyDisplayNumber != null
-        )
+    if (model.showMonitorLogs) {
+        model.logOperation?.let { operation ->
+            TerminalDialog(
+                title = operation.title,
+                logs = operation.logs,
+                onDismiss = model::dismissLogs,
+                onMinimize = model::minimizeLogs,
+                onClear = model::clearLogs,
+                isBlocking = operation.running
+            )
+        }
     }
 
     Surface(
@@ -476,11 +302,11 @@ fun ManagedDisplayScreen(
                         serverStatus = selectedStatus,
                         serverPid = selectedPid,
                         connected = connected,
-                        hasLogs = monitorLogs.isNotEmpty(),
+                        hasLogs = model.selectedLogOperation?.available == true,
                         additionalKeysEnabled = additionalKeysEnabled,
                         additionalKeysVisible = additionalKeysVisible,
                         onClose = ::closeScreen,
-                        onShowLogs = { showMonitorLogs = true },
+                        onShowLogs = { model.openLogs() },
                         onToggleAdditionalKeys = ::toggleAdditionalKeys,
                         onFullscreen = { setFullscreen(true) },
                         onConfiguration = { showConfiguration = true }
@@ -498,6 +324,11 @@ fun ManagedDisplayScreen(
                     )
                 }
 
+                if (!fullscreen) model.selectedLogOperation?.let { operation ->
+                    Box(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                        OperationResultCard(operation) { model.openLogs(operation.owner.target.toIntOrNull()) }
+                    }
+                }
                 message?.let { DisplayErrorMessage(it) }
 
                 Box(
@@ -964,7 +795,7 @@ private fun DisplayErrorMessage(message: String) {
     }
 }
 
-private fun readKnownMonitorSlots(store: SharedPreferences): Set<Int> =
+internal fun readKnownMonitorSlots(store: SharedPreferences): Set<Int> =
     store.getStringSet(PREF_KNOWN_MONITOR_SLOTS, emptySet())
         .orEmpty()
         .mapNotNullTo(mutableSetOf()) { value ->
