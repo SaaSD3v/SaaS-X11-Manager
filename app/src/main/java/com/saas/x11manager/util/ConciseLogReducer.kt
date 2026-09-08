@@ -9,15 +9,26 @@ import android.util.Log
  * diagnostics and PulseAudio probe chatter are discarded before they reach Compose.
  * Important start/stop/delete ownership transitions are deliberately retained so a
  * blocking operation never looks idle or blank while real work is happening.
+ *
+ * Visual spacing is semantic rather than raw-output driven. Shell/package-manager
+ * blank lines are ignored; major lifecycle sections and explicit [LogLayout] markers
+ * produce exactly one empty terminal row between related blocks.
  */
 internal class ConciseLogReducer {
     private var installMode = false
     private var insideDroidSpacesBlock = false
     private var lastMessage: String? = null
+    private var lastWasError = false
 
     fun reduce(level: Int, original: String): List<Pair<Int, String>> {
         val message = AnsiColorParser.stripAnsi(original).trim()
+        if (message == LogLayout.SPACER) return emitSpacer(level)
         if (message.isEmpty()) return emptyList()
+
+        val startsMajorSection =
+            message.startsWith("--- Installing Graphic Session:") ||
+                message.startsWith("--- Verifying Graphic Session:") ||
+                sectionSummary(message) != null
 
         val entries = when {
             message.startsWith("--- Installing Graphic Session:") -> {
@@ -46,18 +57,57 @@ internal class ConciseLogReducer {
             }
         }
 
-        return entries.filter { (_, text) ->
-            if (text == lastMessage) {
-                false
-            } else {
-                lastMessage = text
-                true
-            }
+        return applyLayout(entries, forceLeadingSpacer = startsMajorSection)
+    }
+
+    private fun applyLayout(
+        entries: List<Pair<Int, String>>,
+        forceLeadingSpacer: Boolean
+    ): List<Pair<Int, String>> {
+        if (entries.isEmpty()) return emptyList()
+
+        val firstMeaningful = entries.firstOrNull { it.second.isNotEmpty() }
+        val startsErrorBlock = firstMeaningful?.let { (entryLevel, text) ->
+            (entryLevel >= Log.ERROR || text.contains("✗")) && !lastWasError
+        } == true
+
+        val out = mutableListOf<Pair<Int, String>>()
+        if ((forceLeadingSpacer || startsErrorBlock) && lastMessage != null && lastMessage!!.isNotEmpty()) {
+            out += (firstMeaningful?.first ?: Log.INFO) to ""
+            lastMessage = ""
+            lastWasError = false
         }
+
+        entries.forEach { entry ->
+            val text = entry.second
+            if (text.isEmpty()) {
+                if (lastMessage != null && lastMessage!!.isNotEmpty()) {
+                    out += entry.first to ""
+                    lastMessage = ""
+                    lastWasError = false
+                }
+                return@forEach
+            }
+
+            if (text == lastMessage) return@forEach
+            out += entry
+            lastMessage = text
+            lastWasError = entry.first >= Log.ERROR || text.contains("✗")
+        }
+        return out
+    }
+
+    private fun emitSpacer(level: Int): List<Pair<Int, String>> {
+        if (lastMessage == null || lastMessage!!.isEmpty()) return emptyList()
+        lastMessage = ""
+        lastWasError = false
+        return listOf(level to "")
     }
 
     private fun reduceInstall(level: Int, message: String): List<Pair<Int, String>> {
-        if (message.startsWith("---") && message.endsWith("---")) return emptyList()
+        if (message.startsWith("---") && message.endsWith("---")) {
+            return listOf(level to "")
+        }
         if (looksLikeDroidSpacesBlock(message)) return emptyList()
         if (message.startsWith("root@") || message.startsWith("# ")) return emptyList()
 
