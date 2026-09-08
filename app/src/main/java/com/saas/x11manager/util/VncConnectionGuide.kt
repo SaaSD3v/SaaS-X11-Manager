@@ -37,6 +37,7 @@ object VncConnectionGuide {
             )
             RuntimeConnectionSnapshot(
                 netMode = info?.netMode?.trim()?.lowercase(),
+                containerIpv4 = containerIpv4Addresses(containerName),
                 preferredLan = preferredLanAddress(),
                 androidHostPortListening = isAndroidHostPortListening(port),
                 settings = settings
@@ -62,6 +63,14 @@ object VncConnectionGuide {
         }
         logger.i("[VNC] • Localhost only: ${onOff(runtime.settings.localhostOnly)}")
         logger.i("[VNC] • IPv4: ${onOff(runtime.settings.useIPv4)} · IPv6: ${onOff(runtime.settings.useIPv6)}")
+
+        if (runtime.containerIpv4.isEmpty()) {
+            logger.w("[VNC] ! Container IPv4 address could not be resolved")
+        } else {
+            runtime.containerIpv4.forEach { ip ->
+                logger.i("[VNC] • Container IPv4: $ip:$port")
+            }
+        }
 
         when {
             runtime.preferredLan == null -> {
@@ -174,6 +183,7 @@ object VncConnectionGuide {
 
     private data class RuntimeConnectionSnapshot(
         val netMode: String?,
+        val containerIpv4: List<String>,
         val preferredLan: String?,
         val androidHostPortListening: Boolean,
         val settings: VncLaunchSettings
@@ -195,6 +205,27 @@ object VncConnectionGuide {
         )?.address
     }
 
+    private fun containerIpv4Addresses(containerName: String): List<String> {
+        return try {
+            val command =
+                "${Constants.DS_BINARY_PATH} --name=${shellQuote(containerName)} run sh -c " +
+                    shellQuote(
+                        "hostname -I 2>/dev/null || " +
+                            "ip -4 -o addr show scope global 2>/dev/null | " +
+                            "sed -n 's/.* inet \\([0-9.]*\\)\\/.*/\\1/p'"
+                    )
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) return emptyList()
+            result.out
+                .flatMap { it.trim().split(Regex("\\s+")) }
+                .filter(::isIpv4Address)
+                .filterNot { it == "127.0.0.1" }
+                .distinct()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     private fun isAndroidHostPortListening(port: Int): Boolean {
         if (!VncSettings.isValidPort(port)) return false
         return try {
@@ -202,8 +233,8 @@ object VncConnectionGuide {
                 "hex=\$(printf '%04X' $port); " +
                     "for table in /proc/net/tcp /proc/net/tcp6; do " +
                     "[ -r \"\$table\" ] || continue; " +
-                    "while read -r sl local rest; do " +
-                    "case \"\$local\" in *:\$hex) case \"\$rest\" in 0A*|*' 0A '*) exit 0 ;; esac ;; esac; " +
+                    "while read -r sl local remote state rest; do " +
+                    "case \"\$local\" in *:\$hex) [ \"\$state\" = 0A ] && exit 0 ;; esac; " +
                     "done < \"\$table\"; done; exit 1"
             Shell.cmd(command).exec().isSuccess
         } catch (_: Exception) {
@@ -320,4 +351,7 @@ object VncConnectionGuide {
             number in 0..255
         }
     }
+
+    private fun shellQuote(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
 }
