@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.ui.component.TerminalDialog
 import com.saas.x11manager.util.Constants
@@ -34,9 +35,14 @@ import com.termux.x11.EmbeddedDisplayHost
 import kotlinx.coroutines.launch
 
 /**
- * Single-display version of the current X11APP managed monitor workspace.
- * X11-0nly deliberately owns only Monitor 1 / :0 / X0.
+ * Current X11APP display workspace adapted to the X11-0nly contract.
+ *
+ * The visual model intentionally stays the same: an app top bar, a monitor deck,
+ * a monitor card, operation logs and the managed viewport. X11-0nly exposes only
+ * Monitor 1 on :0/X0, so there is no create/delete/switch UI and no secondary
+ * Manager display lifecycle.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ManagedDisplayScreen(
     viewModel: HomeViewModel,
@@ -55,6 +61,7 @@ fun ManagedDisplayScreen(
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var connected by remember { mutableStateOf(false) }
+    var ownerName by remember { mutableStateOf<String?>(null) }
     var showConfiguration by remember { mutableStateOf(false) }
     var fullscreen by remember { mutableStateOf(false) }
     var showFullscreenExitConfirmation by remember { mutableStateOf(false) }
@@ -118,14 +125,17 @@ fun ManagedDisplayScreen(
             try {
                 if (serverStatus == X11ServerStatus.Running) {
                     logger.i("--- Stopping X11 monitor ---")
-                    logger.i("[CTX] Monitor: 1")
-                    logger.i("[CTX] Display: ${Constants.X11_DISPLAY}")
-                    serverPid?.let { logger.i("[CTX] Live PIDs before stop: $it") }
+                    logger.i("[*] Monitor: 1")
+                    logger.i("[*] Display: ${Constants.X11_DISPLAY}")
+                    serverPid?.let { logger.i("[*] PID: $it") }
+                    ownerName?.let { logger.i("[*] Container remains running: $it") }
 
-                    val owner = X11SessionManager.getOwnerContainerName()
-                    owner?.let {
-                        logger.i("[CTX] Container owner: $it")
-                        X11SessionManager.stopContainerGraphicSession(it, logger)
+                    val owner = ownerName ?: X11SessionManager.getOwnerContainerName()
+                    if (owner != null) {
+                        val sessionStopped = X11SessionManager.stopContainerGraphicSession(owner, logger)
+                        if (!sessionStopped) {
+                            logger.w("[!] Continuing with X11 server stop; container is still running")
+                        }
                     }
 
                     val stopped = X11SessionManager.stopIntegratedServer(logger)
@@ -134,25 +144,24 @@ fun ManagedDisplayScreen(
                         logger.e("[-] Monitor 1 (${Constants.X11_DISPLAY}) stop failed")
                     } else {
                         connected = false
-                        logger.i("[+] Monitor 1 (${Constants.X11_DISPLAY}) fully stopped")
+                        logger.i("[+] Monitor 1 (${Constants.X11_DISPLAY}) inactive")
                         owner?.let { logger.i("[+] Container '$it' was left running") }
                         if (fullscreen) setFullscreen(false)
                     }
                 } else {
                     logger.i("--- Starting X11 monitor ---")
-                    logger.i("[CTX] Monitor: 1")
-                    logger.i("[CTX] Display: ${Constants.X11_DISPLAY}")
-                    logger.i("[CTX] Process: ${Constants.X11_SERVER_PROCESS}")
-                    logger.i("[CTX] Runtime: ${Constants.INTEGRATED_X11_RUNTIME_DIR}")
-                    logger.i("[CTX] Socket: ${Constants.X11_SOCK_FILE}")
+                    logger.i("[*] Monitor: 1")
+                    logger.i("[*] Display: ${Constants.X11_DISPLAY}")
+                    logger.i("[*] Process: ${Constants.X11_SERVER_PROCESS}")
+                    logger.i("[*] Runtime: ${Constants.INTEGRATED_X11_RUNTIME_DIR}")
+                    logger.i("[*] Socket: ${Constants.X11_SOCK_FILE}")
 
                     val started = X11SessionManager.startIntegratedServer(
                         containerName = xkbSeedContainer?.name,
                         logger = logger
                     )
                     if (started.isSuccess) {
-                        logger.i("[+] Monitor 1 (${Constants.X11_DISPLAY}) is ready")
-                        logger.i("[+] PID: ${started.getOrNull()}")
+                        logger.i("[+] Monitor 1 (${Constants.X11_DISPLAY}) ready (PID=${started.getOrNull()})")
                     } else {
                         message = started.exceptionOrNull()?.message
                             ?: "Monitor 1 could not start"
@@ -162,6 +171,7 @@ fun ManagedDisplayScreen(
             } finally {
                 busy = false
                 viewModel.refreshRuntimeState()
+                ownerName = X11SessionManager.getOwnerContainerName()
             }
         }
     }
@@ -178,6 +188,11 @@ fun ManagedDisplayScreen(
         publishLoriePreferenceChange(context, PREF_ADDITIONAL_KEYS_VISIBLE)
         publishLoriePreferenceChange(context, PREF_FULLSCREEN)
         viewModel.refreshRuntimeState()
+        ownerName = X11SessionManager.getOwnerContainerName()
+    }
+
+    LaunchedEffect(serverStatus, containers) {
+        ownerName = X11SessionManager.getOwnerContainerName()
     }
 
     DisposableEffect(store) {
@@ -233,7 +248,7 @@ fun ManagedDisplayScreen(
             onDismissRequest = { showFullscreenExitConfirmation = false },
             title = { Text("Exit fullscreen?") },
             text = {
-                Text("Return to the Monitor 1 controls while keeping ${Constants.X11_DISPLAY} running?")
+                Text("Return to the X11 monitor controls while keeping Monitor 1 running?")
             },
             confirmButton = {
                 TextButton(
@@ -265,7 +280,7 @@ fun ManagedDisplayScreen(
 
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = Color(0xFF07090C)
+        color = if (fullscreen) Color.Black else MaterialTheme.colorScheme.surface
     ) {
         Column(
             modifier = Modifier
@@ -276,20 +291,27 @@ fun ManagedDisplayScreen(
                 )
         ) {
             if (!fullscreen) {
-                SingleMonitorToolbar(
+                FixedDisplayTopBar(
                     serverStatus = serverStatus,
                     serverPid = serverPid,
                     connected = connected,
-                    busy = busy,
-                    xkbSeedContainer = xkbSeedContainer,
+                    ownerName = ownerName,
                     additionalKeysEnabled = additionalKeysEnabled,
                     additionalKeysVisible = additionalKeysVisible,
                     onClose = ::closeScreen,
                     onShowLogs = { showMonitorLogs = true },
-                    onToggleServer = ::toggleServer,
                     onToggleAdditionalKeys = ::toggleAdditionalKeys,
                     onFullscreen = { setFullscreen(true) },
                     onConfiguration = { showConfiguration = true }
+                )
+
+                FixedMonitorDeck(
+                    serverStatus = serverStatus,
+                    serverPid = serverPid,
+                    ownerName = ownerName,
+                    busy = busy,
+                    canStartStopped = xkbSeedContainer != null,
+                    onToggle = ::toggleServer
                 )
             }
 
@@ -301,22 +323,23 @@ fun ManagedDisplayScreen(
                     .fillMaxWidth()
                     .then(
                         if (fullscreen) Modifier
-                        else Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
+                        else Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                     )
             ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    shape = if (fullscreen) RoundedCornerShape(0.dp) else RoundedCornerShape(18.dp),
+                    shape = if (fullscreen) RoundedCornerShape(0.dp) else RoundedCornerShape(8.dp),
                     color = Color.Black,
+                    tonalElevation = 0.dp,
                     border = if (fullscreen) {
                         null
                     } else {
                         BorderStroke(
                             1.dp,
                             if (connected) {
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
                             } else {
-                                Color.White.copy(alpha = 0.12f)
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
                             }
                         )
                     }
@@ -348,88 +371,59 @@ fun ManagedDisplayScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SingleMonitorToolbar(
+private fun FixedDisplayTopBar(
     serverStatus: X11ServerStatus,
     serverPid: Int?,
     connected: Boolean,
-    busy: Boolean,
-    xkbSeedContainer: ContainerInfo?,
+    ownerName: String?,
     additionalKeysEnabled: Boolean,
     additionalKeysVisible: Boolean,
     onClose: () -> Unit,
     onShowLogs: () -> Unit,
-    onToggleServer: () -> Unit,
     onToggleAdditionalKeys: () -> Unit,
     onFullscreen: () -> Unit,
     onConfiguration: () -> Unit
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = Color(0xFF0E1116),
-        tonalElevation = 0.dp,
-        shadowElevation = 8.dp
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onClose) {
-                Icon(Icons.Default.Close, contentDescription = "Close screen", tint = Color.White)
-            }
-
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 4.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        "Monitor 1 · ${Constants.X11_DISPLAY}",
-                        color = Color.White,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    DisplayStatusPill(serverStatus, connected)
-                }
+    TopAppBar(
+        title = {
+            Column {
                 Text(
-                    serverPid?.let { "PID $it" } ?: "Single embedded X11 display",
-                    color = Color.White.copy(alpha = 0.52f),
-                    style = MaterialTheme.typography.labelSmall
+                    text = "X11 Screen",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = buildList {
+                        add("Monitor 1")
+                        add(Constants.X11_DISPLAY)
+                        add(
+                            when {
+                                connected -> "connected"
+                                serverStatus == X11ServerStatus.Running -> "running"
+                                else -> "stopped"
+                            }
+                        )
+                        ownerName?.let(::add)
+                        serverPid?.let { add("PID $it") }
+                    }.joinToString(" · "),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-
+        },
+        navigationIcon = {
+            IconButton(onClick = onClose) {
+                Icon(Icons.Default.Close, contentDescription = "Close screen")
+            }
+        },
+        actions = {
             IconButton(onClick = onShowLogs) {
-                Icon(Icons.Default.ReceiptLong, contentDescription = "Monitor logs", tint = Color.White)
+                Icon(Icons.Default.ReceiptLong, contentDescription = "Monitor logs")
             }
-
-            IconButton(
-                onClick = onToggleServer,
-                enabled = !busy && (
-                    serverStatus == X11ServerStatus.Running || xkbSeedContainer != null
-                )
-            ) {
-                if (busy) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
-                        color = Color.White
-                    )
-                } else {
-                    val enabled = serverStatus == X11ServerStatus.Running || xkbSeedContainer != null
-                    Icon(
-                        if (serverStatus == X11ServerStatus.Running) Icons.Default.Stop else Icons.Default.PlayArrow,
-                        contentDescription = if (serverStatus == X11ServerStatus.Running) "Stop monitor" else "Start monitor",
-                        tint = if (enabled) Color.White else Color.White.copy(alpha = 0.3f)
-                    )
-                }
-            }
-
             if (additionalKeysEnabled) {
                 IconButton(
                     onClick = onToggleAdditionalKeys,
@@ -438,49 +432,205 @@ private fun SingleMonitorToolbar(
                     Icon(
                         Icons.Default.Keyboard,
                         contentDescription = "Additional key bar",
-                        tint = if (additionalKeysVisible) MaterialTheme.colorScheme.primary else Color.White
+                        tint = if (additionalKeysVisible) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
                     )
                 }
             }
-
             IconButton(
                 onClick = onFullscreen,
                 enabled = serverStatus == X11ServerStatus.Running
             ) {
-                Icon(
-                    Icons.Default.Fullscreen,
-                    contentDescription = "Fullscreen",
-                    tint = if (serverStatus == X11ServerStatus.Running) Color.White else Color.White.copy(alpha = 0.3f)
-                )
+                Icon(Icons.Default.Fullscreen, contentDescription = "Fullscreen")
             }
-
             IconButton(onClick = onConfiguration) {
-                Icon(Icons.Default.Settings, contentDescription = "X11 configuration", tint = Color.White)
+                Icon(Icons.Default.Settings, contentDescription = "X11 configuration")
             }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+            actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    )
+}
+
+@Composable
+private fun FixedMonitorDeck(
+    serverStatus: X11ServerStatus,
+    serverPid: Int?,
+    ownerName: String?,
+    busy: Boolean,
+    canStartStopped: Boolean,
+    onToggle: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Monitors",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = if (serverStatus == X11ServerStatus.Running) "1 active" else "0 active",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+        ) {
+            FixedMonitorCard(
+                serverStatus = serverStatus,
+                serverPid = serverPid,
+                ownerName = ownerName,
+                busy = busy,
+                canStart = canStartStopped,
+                onToggle = onToggle
+            )
         }
     }
 }
 
 @Composable
-private fun DisplayStatusPill(serverStatus: X11ServerStatus, connected: Boolean) {
+private fun FixedMonitorCard(
+    serverStatus: X11ServerStatus,
+    serverPid: Int?,
+    ownerName: String?,
+    busy: Boolean,
+    canStart: Boolean,
+    onToggle: () -> Unit
+) {
+    val running = serverStatus == X11ServerStatus.Running
+
     Surface(
-        shape = RoundedCornerShape(50),
-        color = when {
-            serverStatus != X11ServerStatus.Running -> Color(0xFF2B2F36)
-            connected -> Color(0xFF163B2C)
-            else -> Color(0xFF3A3217)
-        }
-    ) {
-        Text(
-            when {
-                serverStatus != X11ServerStatus.Running -> "Stopped"
-                connected -> "Connected"
-                else -> "Connecting"
-            },
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-            color = Color.White.copy(alpha = 0.9f),
-            style = MaterialTheme.typography.labelSmall
+        modifier = Modifier.width(204.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 0.dp,
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.primary.copy(alpha = if (running) 0.65f else 0.28f)
         )
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Monitor 1",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = Constants.X11_DISPLAY,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = if (running) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHighest
+                    }
+                ) {
+                    Text(
+                        text = if (running) "Running" else "Stopped",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (running) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+            }
+
+            Text(
+                text = when {
+                    ownerName != null -> ownerName
+                    running -> "X11 server running"
+                    else -> "Available"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            serverPid?.let {
+                Text(
+                    text = "PID $it",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (running) {
+                OutlinedButton(
+                    onClick = onToggle,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (busy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(15.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Stop,
+                            contentDescription = null,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Stop", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            } else {
+                FilledTonalButton(
+                    onClick = onToggle,
+                    enabled = !busy && canStart,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (busy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(15.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(17.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Start", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -531,7 +681,7 @@ private fun ManagedDisplayViewport(
                     if (!hasSeedContainer) {
                         "Create a container before starting the embedded X11 server."
                     } else {
-                        "Use the play button above to start ${Constants.X11_DISPLAY}."
+                        "Use the Monitor 1 card above to start ${Constants.X11_DISPLAY}."
                     },
                     color = Color.White.copy(alpha = 0.58f),
                     style = MaterialTheme.typography.bodySmall
@@ -544,8 +694,12 @@ private fun ManagedDisplayViewport(
 @Composable
 private fun DisplayErrorMessage(message: String) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.errorContainer
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.errorContainer,
+        tonalElevation = 0.dp
     ) {
         Text(
             message,
