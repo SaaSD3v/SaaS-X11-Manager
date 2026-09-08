@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
@@ -25,6 +27,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -41,15 +45,31 @@ internal fun GraphicAccessDialog(
     initialMode: SessionAccessMode,
     onDismiss: () -> Unit,
     onBack: () -> Unit,
-    onConfirm: (SessionAccessMode, String?) -> Unit
+    onConfirm: (SessionAccessMode, Int, Int, String?) -> Unit
 ) {
+    val context = LocalContext.current
     var selectedMode by remember(containerName, initialMode) {
         mutableStateOf(RuntimeAccessPolicy.normalize(initialMode))
     }
     var password by remember(containerName) { mutableStateOf("") }
+    var adbLocalPortText by remember(containerName, port) { mutableStateOf(port.toString()) }
+    var showAdvancedSettings by remember(containerName) { mutableStateOf(false) }
 
     val passwordRequired = selectedMode == SessionAccessMode.VNC
     val passwordValid = !passwordRequired || VncSettings.isValidPassword(password)
+    val adbLocalPort = adbLocalPortText.toIntOrNull()
+    val adbLocalPortValid = !passwordRequired ||
+        (adbLocalPort != null && VncSettings.isValidPort(adbLocalPort))
+    val startEnabled = passwordValid && adbLocalPortValid
+
+    if (showAdvancedSettings) {
+        TigerVncSettingsDialog(
+            containerName = containerName,
+            onDismiss = { showAdvancedSettings = false },
+            onSaved = { showAdvancedSettings = false }
+        )
+        return
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -107,7 +127,7 @@ internal fun GraphicAccessDialog(
                         ) {
                             Text("TigerVNC", style = MaterialTheme.typography.titleSmall)
                             Text(
-                                "Port: $port · The selected Linux user will own the desktop session.",
+                                "Server port: $port · The selected Linux user will own the desktop session.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -125,12 +145,49 @@ internal fun GraphicAccessDialog(
                                 supportingText = {
                                     Text(
                                         "${VncSettings.MIN_PASSWORD_LENGTH}-${VncSettings.MAX_PASSWORD_LENGTH} characters. " +
-                                            "The plaintext exists only for this Start operation."
+                                            "The plaintext exists only for this active Start session."
                                     )
                                 },
                                 visualTransformation = PasswordVisualTransformation(),
                                 singleLine = true,
                                 isError = password.isNotEmpty() && !passwordValid
+                            )
+
+                            OutlinedButton(
+                                onClick = { showAdvancedSettings = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Advanced settings")
+                            }
+
+                            OutlinedTextField(
+                                value = adbLocalPortText,
+                                onValueChange = { value ->
+                                    if (value.length <= 5 && value.all(Char::isDigit)) {
+                                        adbLocalPortText = value
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("ADB forward local port") },
+                                supportingText = {
+                                    Text(
+                                        if (adbLocalPortValid) {
+                                            "PC-side local port. USB client endpoint after forwarding: 127.0.0.1:${adbLocalPort ?: port}."
+                                        } else {
+                                            "Enter a port from ${VncSettings.MIN_PORT} to ${VncSettings.MAX_PORT}."
+                                        }
+                                    )
+                                },
+                                isError = adbLocalPortText.isNotEmpty() && !adbLocalPortValid,
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                            )
+
+                            Text(
+                                "The Manager will show the exact adb forward command after VNC is ready. " +
+                                    "It does not create the PC-side ADB mapping automatically.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -148,12 +205,15 @@ internal fun GraphicAccessDialog(
                     Spacer(Modifier.width(8.dp))
                     Button(
                         onClick = {
+                            val localPort = adbLocalPort ?: port
                             onConfirm(
                                 selectedMode,
+                                port,
+                                localPort,
                                 password.takeIf { selectedMode == SessionAccessMode.VNC }
                             )
                         },
-                        enabled = passwordValid
+                        enabled = startEnabled
                     ) {
                         Text("Start")
                     }
