@@ -48,6 +48,26 @@ class RuntimeStartWizardPolicyTest {
     }
 
     @Test
+    fun vncPasswordIsOptionalShortInputGetsDialogAndAdvancedSettingsStayLast() {
+        val dialog = source("app/src/main/java/com/saas/x11manager/ui/screen/GraphicAccessDialog.kt")
+
+        assertTrue(dialog.contains("VNC password (optional)"))
+        assertTrue(dialog.contains("leave the password field completely empty"))
+        assertTrue(dialog.contains("VNC password is too short"))
+        assertTrue(dialog.contains("password.takeIf { vncSelected && it.isNotEmpty() }"))
+
+        val passwordIndex = dialog.indexOf("VNC password (optional)")
+        val adbPortIndex = dialog.indexOf("ADB forward local port")
+        val advancedIndex = dialog.indexOf("Text(\"Advanced settings\")")
+        assertTrue(passwordIndex >= 0)
+        assertTrue(adbPortIndex > passwordIndex)
+        assertTrue(advancedIndex > adbPortIndex)
+
+        // No decorative horizontal separator is part of this compact Start dialog.
+        assertFalse(dialog.contains("HorizontalDivider("))
+    }
+
+    @Test
     fun editContainerShowsDetectedFactsAsSummaryAndLeavesRuntimeAccessForHome() {
         val screen = source("app/src/main/java/com/saas/x11manager/ui/screen/EditContainerScreen.kt")
         val viewModel = source("app/src/main/java/com/saas/x11manager/ui/screen/EditContainerViewModel.kt")
@@ -86,7 +106,7 @@ class RuntimeStartWizardPolicyTest {
         val guide = source("app/src/main/java/com/saas/x11manager/util/VncConnectionGuide.kt")
 
         assertTrue(guide.contains("ACTIVE_SUMMARY_BEGIN"))
-        assertTrue(guide.contains("Connection information pinned until this VNC/container session ends"))
+        assertTrue(guide.contains("Connection details pinned until this session ends"))
         assertTrue(viewModel.contains("VncConnectionGuide.retainPinnedSummary(logs)"))
         assertTrue(viewModel.contains("removePinnedVncSummary"))
     }
