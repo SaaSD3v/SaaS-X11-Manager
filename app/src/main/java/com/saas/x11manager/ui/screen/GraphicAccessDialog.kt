@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -54,13 +55,34 @@ internal fun GraphicAccessDialog(
     var password by remember(containerName) { mutableStateOf("") }
     var adbLocalPortText by remember(containerName, port) { mutableStateOf(port.toString()) }
     var showAdvancedSettings by remember(containerName) { mutableStateOf(false) }
+    var showShortPasswordDialog by remember(containerName) { mutableStateOf(false) }
 
-    val passwordRequired = selectedMode == SessionAccessMode.VNC
-    val passwordValid = !passwordRequired || VncSettings.isValidPassword(password)
+    val vncSelected = selectedMode == SessionAccessMode.VNC
+    val passwordProvided = password.isNotEmpty()
+    val passwordValid = !passwordProvided || VncSettings.isValidPassword(password)
     val adbLocalPort = adbLocalPortText.toIntOrNull()
-    val adbLocalPortValid = !passwordRequired ||
+    val adbLocalPortValid = !vncSelected ||
         (adbLocalPort != null && VncSettings.isValidPort(adbLocalPort))
-    val startEnabled = passwordValid && adbLocalPortValid
+    val startEnabled = adbLocalPortValid
+
+    if (showShortPasswordDialog) {
+        AlertDialog(
+            onDismissRequest = { showShortPasswordDialog = false },
+            title = { Text("VNC password is too short") },
+            text = {
+                Text(
+                    "Use ${VncSettings.MIN_PASSWORD_LENGTH}-${VncSettings.MAX_PASSWORD_LENGTH} characters, " +
+                        "or leave the password field completely empty to start VNC without password authentication."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showShortPasswordDialog = false }) {
+                    Text("OK")
+                }
+            }
+        )
+        return
+    }
 
     if (showAdvancedSettings) {
         TigerVncSettingsDialog(
@@ -110,7 +132,7 @@ internal fun GraphicAccessDialog(
                     onClick = { selectedMode = SessionAccessMode.VNC }
                 )
 
-                if (passwordRequired) {
+                if (vncSelected) {
                     Spacer(Modifier.height(16.dp))
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
@@ -131,6 +153,7 @@ internal fun GraphicAccessDialog(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+
                             OutlinedTextField(
                                 value = password,
                                 onValueChange = { value ->
@@ -141,23 +164,25 @@ internal fun GraphicAccessDialog(
                                     }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                                label = { Text("VNC password") },
+                                label = { Text("VNC password (optional)") },
                                 supportingText = {
                                     Text(
-                                        "${VncSettings.MIN_PASSWORD_LENGTH}-${VncSettings.MAX_PASSWORD_LENGTH} characters. " +
-                                            "The plaintext exists only for this active Start session."
+                                        "Leave empty for no password. If used, enter " +
+                                            "${VncSettings.MIN_PASSWORD_LENGTH}-${VncSettings.MAX_PASSWORD_LENGTH} characters."
                                     )
                                 },
                                 visualTransformation = PasswordVisualTransformation(),
                                 singleLine = true,
-                                isError = password.isNotEmpty() && !passwordValid
+                                isError = passwordProvided && !passwordValid
                             )
 
-                            OutlinedButton(
-                                onClick = { showAdvancedSettings = true },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Advanced settings")
+                            if (!passwordProvided) {
+                                Text(
+                                    "No password means any client that can reach this VNC port may connect. " +
+                                        "Use only on a network/path you trust.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.tertiary
+                                )
                             }
 
                             OutlinedTextField(
@@ -172,7 +197,8 @@ internal fun GraphicAccessDialog(
                                 supportingText = {
                                     Text(
                                         if (adbLocalPortValid) {
-                                            "PC-side local port. USB client endpoint after forwarding: 127.0.0.1:${adbLocalPort ?: port}."
+                                            "PC-side local port. USB endpoint after a valid forward: " +
+                                                "127.0.0.1:${adbLocalPort ?: port}."
                                         } else {
                                             "Enter a port from ${VncSettings.MIN_PORT} to ${VncSettings.MAX_PORT}."
                                         }
@@ -184,11 +210,18 @@ internal fun GraphicAccessDialog(
                             )
 
                             Text(
-                                "The Manager will show the exact adb forward command after VNC is ready. " +
-                                    "It does not create the PC-side ADB mapping automatically.",
+                                "The Manager shows the exact ADB command only when the Android-side VNC target can be verified. " +
+                                    "It never creates the PC-side mapping automatically.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+
+                            OutlinedButton(
+                                onClick = { showAdvancedSettings = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Advanced settings")
+                            }
                         }
                     }
                 }
@@ -205,12 +238,16 @@ internal fun GraphicAccessDialog(
                     Spacer(Modifier.width(8.dp))
                     Button(
                         onClick = {
+                            if (vncSelected && passwordProvided && !passwordValid) {
+                                showShortPasswordDialog = true
+                                return@Button
+                            }
                             val localPort = adbLocalPort ?: port
                             onConfirm(
                                 selectedMode,
                                 port,
                                 localPort,
-                                password.takeIf { selectedMode == SessionAccessMode.VNC }
+                                password.takeIf { vncSelected && it.isNotEmpty() }
                             )
                         },
                         enabled = startEnabled
