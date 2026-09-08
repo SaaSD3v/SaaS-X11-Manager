@@ -1,6 +1,5 @@
 package com.saas.x11manager.util
 
-import android.util.Log
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -10,7 +9,8 @@ import kotlinx.coroutines.withContext
  *
  * Every endpoint comes from either the effective Manager configuration or a real
  * runtime probe. The Manager never claims that a PC-side ADB forward already
- * exists; it only prints the exact command the user can run.
+ * exists; it only prints an exact command when the Android host-side TCP target
+ * is actually listening.
  */
 object VncConnectionGuide {
     const val ACTIVE_SUMMARY_BEGIN = "[VNC] ── Active VNC session ──"
@@ -38,6 +38,7 @@ object VncConnectionGuide {
             RuntimeConnectionSnapshot(
                 netMode = info?.netMode?.trim()?.lowercase(),
                 preferredLan = preferredLanAddress(),
+                androidHostPortListening = isAndroidHostPortListening(port),
                 settings = settings
             )
         }
@@ -70,25 +71,36 @@ object VncConnectionGuide {
                 logger.i("[VNC] • Detected Android LAN: ${runtime.preferredLan}:$port")
                 logger.w("[VNC] ! Direct LAN VNC is disabled because Localhost only is enabled")
             }
+            runtime.androidHostPortListening -> {
+                logger.i("[VNC] • Android/LAN endpoint: ${runtime.preferredLan}:$port")
+            }
             runtime.netMode == "host" -> {
-                logger.i("[VNC] • LAN endpoint: ${runtime.preferredLan}:$port")
+                logger.i("[VNC] • Detected Android LAN: ${runtime.preferredLan}:$port")
+                logger.w("[VNC] ! Android host TCP $port was not confirmed listening; do not assume this LAN endpoint is reachable")
             }
             else -> {
-                logger.i("[VNC] • Android LAN address: ${runtime.preferredLan}:$port")
+                logger.i("[VNC] • Detected Android LAN: ${runtime.preferredLan}:$port")
                 logger.w(
-                    "[VNC] ! Container network mode is ${runtime.netMode ?: "unknown"}; direct LAN access may require DroidSpaces port forwarding"
+                    "[VNC] ! Container network mode is ${runtime.netMode ?: "unknown"}; direct LAN access requires a real DroidSpaces host-port publication"
                 )
             }
         }
 
-        logger.i("[VNC] • ADB forward local port: $effectiveLocalPort")
-        logger.i("[VNC] • USB local endpoint after forward: 127.0.0.1:$effectiveLocalPort")
-        logger.i("[VNC] • ADB forward command: adb forward tcp:$effectiveLocalPort tcp:$port")
-        logger.i("[VNC] • ADB mapping: run the command on the PC; the Manager does not create PC-side forwards")
+        logger.i("[VNC] • ADB forward local port selected: $effectiveLocalPort")
+        if (runtime.androidHostPortListening) {
+            logger.i("[VNC] • Android host target: 127.0.0.1:$port")
+            logger.i("[VNC] • ADB forward command: adb forward tcp:$effectiveLocalPort tcp:$port")
+            logger.i("[VNC] • USB local endpoint after forward: 127.0.0.1:$effectiveLocalPort")
+            logger.i("[VNC] • ADB mapping: run the command on the PC; the Manager does not create PC-side forwards")
+        } else {
+            logger.w("[VNC] ! Android host TCP $port is not listening, so an exact USB ADB forward target cannot be advertised yet")
+            logger.i("[VNC] • USB local endpoint after a valid forward will be: 127.0.0.1:$effectiveLocalPort")
+            logger.i("[VNC] • After DroidSpaces publishes VNC on Android host port <hostPort>, use: adb forward tcp:$effectiveLocalPort tcp:<hostPort>")
+        }
 
         if (password != null) {
-            logger.w("[VNC] • Password: $password")
-            logger.w("[VNC] • Password visibility: kept only in this in-memory active-session log")
+            logger.i("[VNC] • Password: $password")
+            logger.i("[VNC] • Password visibility: kept only in this in-memory active-session log")
         } else {
             logger.i("[VNC] • Password: already configured inside the container")
             logger.i("[VNC] • Password plaintext: unavailable to the Manager on this start")
@@ -135,7 +147,8 @@ object VncConnectionGuide {
 
     /**
      * Explains exact stop/restart ordering for a PC-side ADB forward. Local and
-     * remote ports may be different, so never collapse them into one value.
+     * remote ports may be different. This recovery helper assumes the caller is
+     * referring to a host-side port that was already known to work previously.
      */
     suspend fun logAdbForwardRestartRecovery(
         port: Int,
@@ -153,7 +166,8 @@ object VncConnectionGuide {
         }
         logger.i("[VNC] • Remove old PC mapping: adb forward --remove tcp:$effectiveLocalPort")
         logger.i("[VNC] • Start VNC again and wait until the Manager reports VNC ready")
-        logger.i("[VNC] • Recreate mapping: adb forward tcp:$effectiveLocalPort tcp:$port")
+        logger.i("[VNC] • Recreate the mapping only if Android host TCP $port is published and listening")
+        logger.i("[VNC] • Mapping command: adb forward tcp:$effectiveLocalPort tcp:$port")
         logger.i("[VNC] • USB client endpoint: 127.0.0.1:$effectiveLocalPort")
         logger.w("[VNC] ! adb forward --remove changes only the PC-side ADB mapping; it does not stop TigerVNC")
     }
@@ -161,6 +175,7 @@ object VncConnectionGuide {
     private data class RuntimeConnectionSnapshot(
         val netMode: String?,
         val preferredLan: String?,
+        val androidHostPortListening: Boolean,
         val settings: VncLaunchSettings
     )
 
@@ -178,6 +193,22 @@ object VncConnectionGuide {
                 .thenBy { it.interfaceName }
                 .thenBy { it.address }
         )?.address
+    }
+
+    private fun isAndroidHostPortListening(port: Int): Boolean {
+        if (!VncSettings.isValidPort(port)) return false
+        return try {
+            val command =
+                "hex=\$(printf '%04X' $port); " +
+                    "for table in /proc/net/tcp /proc/net/tcp6; do " +
+                    "[ -r \"\$table\" ] || continue; " +
+                    "while read -r sl local rest; do " +
+                    "case \"\$local\" in *:\$hex) case \"\$rest\" in 0A*|*' 0A '*) exit 0 ;; esac ;; esac; " +
+                    "done < \"\$table\"; done; exit 1"
+            Shell.cmd(command).exec().isSuccess
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun lanPriority(entry: HostIpv4): Int {
