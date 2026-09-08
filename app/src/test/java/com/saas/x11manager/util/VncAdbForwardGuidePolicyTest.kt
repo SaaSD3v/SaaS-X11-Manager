@@ -20,11 +20,22 @@ class VncAdbForwardGuidePolicyTest {
     fun connectionGuideKeepsPcLocalPortSeparateFromVncServerPort() {
         val guide = source("app/src/main/java/com/saas/x11manager/util/VncConnectionGuide.kt")
 
-        assertTrue(guide.contains("ADB forward local port: \$effectiveLocalPort"))
+        assertTrue(guide.contains("ADB forward local port selected: \$effectiveLocalPort"))
         assertTrue(guide.contains("USB local endpoint after forward: 127.0.0.1:\$effectiveLocalPort"))
         assertTrue(guide.contains("adb forward tcp:\$effectiveLocalPort tcp:\$port"))
         assertTrue(guide.contains("the Manager does not create PC-side forwards"))
         assertFalse(guide.contains("adb forward tcp:5901 tcp:5901"))
+    }
+
+    @Test
+    fun connectionGuideOnlyAdvertisesExactUsbTargetAfterHostPortProbe() {
+        val guide = source("app/src/main/java/com/saas/x11manager/util/VncConnectionGuide.kt")
+
+        assertTrue(guide.contains("androidHostPortListening = isAndroidHostPortListening(port)"))
+        assertTrue(guide.contains("if (runtime.androidHostPortListening)"))
+        assertTrue(guide.contains("Android host TCP \$port is not listening"))
+        assertTrue(guide.contains("tcp:<hostPort>"))
+        assertTrue(guide.contains("/proc/net/tcp /proc/net/tcp6"))
     }
 
     @Test
