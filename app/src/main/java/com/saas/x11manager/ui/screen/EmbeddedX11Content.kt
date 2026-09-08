@@ -94,14 +94,54 @@ internal fun EmbeddedX11Surface(
                 }
                 requestFocus()
                 EmbeddedDisplayHost.tryConnect()
+                scheduleFixedEmbeddedSurfaceResync(this)
             }
         },
         update = { view ->
             val connected = view.connected()
             onConnectionChanged(connected)
-            if (!connected) EmbeddedDisplayHost.tryConnect()
+            if (!connected) {
+                EmbeddedDisplayHost.tryConnect()
+                scheduleFixedEmbeddedSurfaceResync(view)
+            }
         }
     )
+}
+
+/**
+ * Re-assert the viewport after an X11 (re)connection once the Android Surface is
+ * valid. This is the current X11APP resync policy without any dynamic display
+ * selection: X11-0nly always reconnects the one visible renderer to fixed :0/X0.
+ */
+private fun scheduleFixedEmbeddedSurfaceResync(view: LorieView, attempt: Int = 0) {
+    if (attempt >= 6) return
+
+    val delayMs = when (attempt) {
+        0 -> 60L
+        1 -> 120L
+        2 -> 240L
+        else -> 400L
+    }
+
+    view.postDelayed({
+        if (EmbeddedDisplayHost.getActiveView() !== view || !view.isAttachedToWindow) {
+            return@postDelayed
+        }
+
+        if (!view.connected()) {
+            EmbeddedDisplayHost.tryConnect()
+            scheduleFixedEmbeddedSurfaceResync(view, attempt + 1)
+            return@postDelayed
+        }
+
+        if (!view.holder.surface.isValid) {
+            scheduleFixedEmbeddedSurfaceResync(view, attempt + 1)
+            return@postDelayed
+        }
+
+        view.triggerCallback()
+        view.postInvalidateOnAnimation()
+    }, delayMs)
 }
 
 private val modifierKeyCodes = mapOf(
