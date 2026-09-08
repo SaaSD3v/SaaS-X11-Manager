@@ -49,6 +49,15 @@ class PulseAudioTransportRuntimeTest {
 
     private fun q(value: String) = "'" + value.replace("'", "'\\''") + "'"
 
+    private fun daemonFixture(): File {
+        val path = System.getenv("SAAS_DROIDSPACES_AUDIO_FIXTURE")
+        if (System.getenv("SAAS_PULSE_INTEGRATION_REQUIRED") == "1") {
+            assertFalse("CI must build the upstream DroidSpaces request parser", path.isNullOrBlank())
+        }
+        assumeTrue("Set SAAS_DROIDSPACES_AUDIO_FIXTURE to the compiled native fixture", !path.isNullOrBlank())
+        return File(requireNotNull(path)).also { assertTrue("Native parser is not executable: $it", it.canExecute()) }
+    }
+
     private fun encode(f: Fixture, cookie: File): String {
         // Execute the actual HOST command envelope as well as its encoder.
         // Only replace Termux's PATH with the test machine's command directory.
@@ -118,11 +127,44 @@ class PulseAudioTransportRuntimeTest {
         }
     }
 
+    @Test fun originalAudioPayloadsAreRejectedBeforeExecutionByTheRealDroidSpacesParser() {
+        val ds = daemonFixture()
+        Fixture().use { f ->
+            val cookie = f.file("cookie").apply { writeBytes(ByteArray(256) { it.toByte() }) }
+            val encoded = encode(f, cookie)
+            for (payload in listOf(
+                PulseAudioUnifiedTransport.buildContainerPayload("tcp:127.0.0.1:4713", encoded),
+                PulseAudioNatScriptTransport.buildContainerPayload("tcp:127.0.0.2:4713", encoded)
+            )) {
+                // /bin/true makes this a parser-only reproduction. The full
+                // client payload remains one argv word, as it was before the fix.
+                val old = f.run("${q(ds.path)} --name=audio-fixture run /bin/true ${q(payload)}")
+                assertEquals(old.details, 1, old.code)
+                assertTrue(old.details, old.err.contains("daemon: bad request"))
+                assertEquals("", old.out)
+                assertTrue(PulseAudioClientConfig.failureSummary(old.code, old.err.lines())
+                    .startsWith("DroidSpaces rejected the audio command before execution"))
+            }
+        }
+    }
+
+    @Test fun audioCommandPreservesLargeQuotedUnicodeScriptsThroughTheRealDroidSpacesParser() {
+        val ds = daemonFixture()
+        Fixture().use { f ->
+            val text = "' quoted \\" + "${'$'}(never_execute) `literal` 🎵終\n".repeat(800)
+            val payload = "cat <<'SAAS_LITERAL_TEST'\n$text\nSAAS_LITERAL_TEST\n"
+            val result = f.run(PulseAudioContainerCommand.build("audio-fixture", payload, ds.path))
+            assertEquals(result.details, 0, result.code)
+            assertEquals(text + "\n", result.out)
+        }
+    }
+
     @Test(timeout = 90000) fun realPulseAudioAuthenticatesBothPayloadsAndDrainsPulseAndAlsaStreams() {
         // Required by CI. Local Android-only environments can run the encoder
         // tests without installing the Linux PulseAudio daemon.
         assumeTrue("Enable the real PulseAudio fixture with SAAS_PULSE_INTEGRATION_REQUIRED=1",
             System.getenv("SAAS_PULSE_INTEGRATION_REQUIRED") == "1")
+        val ds = daemonFixture()
         Fixture().use { f ->
             for (tool in listOf("pulseaudio", "pactl", "pacat", "aplay", "speaker-test")) {
                 val available = f.run("command -v $tool")
@@ -162,16 +204,16 @@ class PulseAudioTransportRuntimeTest {
                 }
                 assertTrue("Real PulseAudio did not become ready:\n${log.readText()}", ready)
                 val encoded = encode(f, cookie)
-                // Only the root/namespace boundary is represented here. No pactl,
-                // pacat, ALSA plugin or PulseAudio protocol operation is mocked.
+                // The native fixture runs upstream recv_req(), including the real
+                // wire limits and argv reconstruction. Only namespace/root entry
+                // is represented here; PulseAudio and ALSA operations are real.
                 f.command("id", "echo 0")
-                val ds = f.command("droidspaces", "[ \"\$1\" = '--name=audio fixture' ] || exit 40\n[ \"\$2\" = run ] || exit 41\nshift 2\nexec \"\$@\"")
                 val modes = listOf(host to false, alternate to true, host to false)
                 for ((server, nat) in modes) {
                     val payload = if (nat) PulseAudioNatScriptTransport.buildContainerPayload(server, encoded)
                         else PulseAudioUnifiedTransport.buildContainerPayload(server, encoded)
                     val body = "export PATH=${q(f.bin.path)}:\$PATH\n" + f.mapped(payload)
-                    val result = f.run("${q(ds.path)} '--name=audio fixture' run /bin/sh -lc ${q(body)}")
+                    val result = f.run(PulseAudioContainerCommand.build("audio-fixture", body, ds.path))
                     assertEquals(result.details + "\n" + log.readText(), 0, result.code)
                     assertTrue(result.details, result.out.contains("__SAAS_AUDIO_PCM_DRAINED__"))
                     assertTrue(result.details, result.out.contains(if (nat) "__SAAS_AUDIO_TRANSPORT_READY__" else "__READY__"))

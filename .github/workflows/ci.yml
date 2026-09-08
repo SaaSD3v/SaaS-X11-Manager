@@ -115,6 +115,22 @@ jobs:
         sudo apt-get update -qq
         sudo apt-get install -y --no-install-recommends pulseaudio pulseaudio-utils alsa-utils libasound2-plugins
 
+    - name: Build the real DroidSpaces audio request parser
+      run: |
+        set -euo pipefail
+        audio_fixture_dir="$RUNNER_TEMP/saas-audio-protocol"
+        mkdir -p "$audio_fixture_dir"
+        upstream="https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/f60294ac4c8aa2cc860773ac85bc5790104eb77f/src"
+        curl --fail --silent --show-error --location "$upstream/daemon.c" -o "$audio_fixture_dir/daemon.c"
+        curl --fail --silent --show-error --location "$upstream/include/droidspace.h" -o "$audio_fixture_dir/droidspace.h"
+        printf '%s  %s\n' \
+          3357017c7c56bac0bd5fd76125f6534e3a51f2dd2b90aa65070a07c75be280eb "$audio_fixture_dir/daemon.c" \
+          4cc3466f2cf799ba018d36b7067766452554b612e3fb1d9ec2915b0d80aafb1f "$audio_fixture_dir/droidspace.h" | sha256sum --check
+        cc -O2 -ffunction-sections -fdata-sections -I"$audio_fixture_dir" \
+          app/src/test/native/droidspaces_audio_request.c -Wl,--gc-sections \
+          -o "$audio_fixture_dir/droidspaces-audio-request"
+        printf 'SAAS_DROIDSPACES_AUDIO_FIXTURE=%s\n' "$audio_fixture_dir/droidspaces-audio-request" >> "$GITHUB_ENV"
+
     - name: Test and build Android App with Gradle
       env:
         SAAS_PULSE_INTEGRATION_REQUIRED: "1"

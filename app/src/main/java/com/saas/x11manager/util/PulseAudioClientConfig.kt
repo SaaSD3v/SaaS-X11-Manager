@@ -25,7 +25,9 @@ internal object PulseAudioClientConfig {
             "user-client" -> "desktop user audio configuration"
             "client-auth" -> "client authentication"
             "pcm-playback" -> "PCM playback"
-            else -> "container command"
+            else -> if (output.any { it.contains("daemon: bad request") })
+                "DroidSpaces rejected the audio command before execution"
+            else "container command"
         }
         val code = failure?.getOrNull(1)?.toIntOrNull() ?: exitCode
         return "$step (exit $code)"

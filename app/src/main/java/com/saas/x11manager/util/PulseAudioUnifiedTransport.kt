@@ -8,7 +8,7 @@ import kotlinx.coroutines.withContext
  * Final HOST/NAT data-path adapter for the single Manager-owned PulseAudio core.
  *
  * Validation status:
- * - HOST is the physically validated APK baseline.
+ * - HOST uses the authenticated loopback transport from the working shell script.
  * - NAT uses the DroidSpaces runtime topology and remains experimental until
  *   the complete APK path is physically verified on-device.
  *
@@ -652,8 +652,7 @@ object PulseAudioUnifiedTransport {
             printf '%s\n' "${'$'}info" | grep -Fq "Server String: ${'$'}server" || exit 74
             printf '%s\n' "${'$'}info" | grep -Eq '^Default Sink: (AAudio_sink|OpenSL_ES_sink)$'
         """.trimIndent()
-        val command =
-            "${Constants.DS_BINARY_PATH} --name=${q(containerName)} run /bin/sh -lc ${q(payload)}"
+        val command = PulseAudioContainerCommand.build(containerName, payload)
         return try {
             Shell.cmd(command).exec().isSuccess
         } catch (_: Exception) {
@@ -682,8 +681,7 @@ object PulseAudioUnifiedTransport {
             printf '%s\n' "${'$'}info" | grep -Fq "Default Sink: ${'$'}expected" || exit 84
         """.trimIndent()
 
-        val command =
-            "${Constants.DS_BINARY_PATH} --name=${q(containerName)} run /bin/sh -lc ${q(payload)}"
+        val command = PulseAudioContainerCommand.build(containerName, payload)
         return try {
             val result = Shell.cmd(command).exec()
             result.out.filter { it.isNotBlank() }.takeLast(12).forEach { logger?.i(it) }
@@ -707,8 +705,7 @@ object PulseAudioUnifiedTransport {
     ): Boolean {
         val payload = buildContainerPayload(server, octal)
 
-        val command =
-            "${Constants.DS_BINARY_PATH} --name=${q(containerName)} run /bin/sh -lc ${q(payload)}"
+        val command = PulseAudioContainerCommand.build(containerName, payload)
 
         return try {
             val result = Shell.cmd(command).exec()

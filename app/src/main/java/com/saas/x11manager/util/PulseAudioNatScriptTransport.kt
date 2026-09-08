@@ -106,8 +106,7 @@ object PulseAudioNatScriptTransport {
             ?: return@withContext fail(logger, "Manager PulseAudio cookie could not be serialized")
 
         val payload = buildContainerPayload(listener.server, cookieEscaped)
-        val command =
-            "${Constants.DS_BINARY_PATH} --name=${q(containerName)} run /bin/sh -lc ${q(payload)}"
+        val command = PulseAudioContainerCommand.build(containerName, payload)
 
         logger?.i("[*] Configuring and verifying the PulseAudio client inside $containerName...")
 
