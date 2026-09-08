@@ -104,7 +104,8 @@ object VncServerManager {
             val launchCommand = standaloneLaunchCommand(
                 displayNumber = displayNumber,
                 port = port,
-                settings = launchSettings
+                settings = launchSettings,
+                passwordEnabled = password != null
             )
             if (!runContainerCommand(
                     containerName,
@@ -148,7 +149,6 @@ object VncServerManager {
                 return@withContext VncStartResult(false, port, displayName)
             }
 
-            logConnectionAddresses(containerName, port, displayName, mirror = false, logger = logger)
             logger?.i("[+] VNC server started successfully")
             success = true
             VncStartResult(true, port, displayName = displayName)
@@ -300,10 +300,8 @@ object VncServerManager {
             return false
         }
 
-        val existingPassword = probeContainer(containerName, "test -s $PASSWORD_FILE")
-        if (password == null && !existingPassword) {
-            logger?.e("[-] No TigerVNC password is configured for this container")
-            logger?.e("[-] Press Start again, choose VNC, and provide a VNC password")
+        if (needsMirror && password == null && !probeContainer(containerName, "test -s $PASSWORD_FILE")) {
+            logger?.e("[-] Legacy VNC mirror requires an existing TigerVNC password file")
             return false
         }
 
@@ -358,6 +356,12 @@ object VncServerManager {
                 return false
             }
             logger?.i("[+] TigerVNC password file ready")
+        } else if (!needsMirror) {
+            if (!runContainerCommandRaw(containerName, "rm -f $PASSWORD_FILE")) {
+                logger?.e("[-] Could not clear the previous Manager-owned VNC password file")
+                return false
+            }
+            logger?.i("[VNC] • Authentication: none for this Start")
         }
 
         if (!needsMirror) {
@@ -464,13 +468,14 @@ object VncServerManager {
     private fun standaloneLaunchCommand(
         displayNumber: Int,
         port: Int,
-        settings: VncLaunchSettings
+        settings: VncLaunchSettings,
+        passwordEnabled: Boolean
     ): String {
         val argv = TigerVncCommandOptions.standalone(
             settings = settings,
             displayNumber = displayNumber,
             port = port,
-            passwordFile = PASSWORD_FILE
+            passwordFile = PASSWORD_FILE.takeIf { passwordEnabled }
         ).joinToString(" ") { shellQuote(it) }
 
         return "mkdir -p /root/.vnc /tmp/.X11-unix $STATE_DIR && chmod 1777 /tmp/.X11-unix && " +
