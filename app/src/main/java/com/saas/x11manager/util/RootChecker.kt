@@ -20,15 +20,9 @@ object RootChecker {
 
     private const val KSU_DIR = "/data/adb/ksu"
     private const val KSU_BIN = "/data/adb/ksud"
-    private const val KSU_PKG = "me.weishu.kernelsu"
     private const val APATCH_DIR = "/data/adb/ap"
     private const val APATCH_BIN = "/data/adb/apd"
-    private const val APATCH_PKG = "me.bmax.apatch"
     private const val MAGISK_DIR = "/data/adb/magisk"
-    private const val MAGISK_PKG = "com.topjohnwu.magisk"
-    private const val SUPERSU_PKG_A = "eu.chainfire.supersu"
-    private const val SUPERSU_PKG_B = "com.noshufou.android.su"
-    private const val LINEAGE_PKG = "org.lineageos.su"
 
     suspend fun checkRootAccess(): RootStatus = withContext(Dispatchers.IO) {
         return@withContext try {
@@ -58,12 +52,21 @@ object RootChecker {
 
     fun getRootProvider(): String = detectRootProvider().displayName
 
+    /**
+     * Provider detection is diagnostic only. Keep it deliberately cheap: the
+     * Manager needs a working root shell, not a package-manager inventory.
+     *
+     * Older code issued multiple `pm path` commands here. Because libsu owns a
+     * shared shell, those probes could sit in front of X11/container operations
+     * and make unrelated UI actions appear frozen. Root-manager package presence
+     * is therefore no longer queried from the interactive runtime path.
+     */
     fun detectRootProvider(): RootProvider {
         return try {
             val probe = Shell.cmd(ROOT_PROVIDER_PROBE).exec()
             val output = (probe.out + probe.err).joinToString("\n").lowercase()
             when {
-                "kernelsu" in output || "ksu" in output -> RootProvider.KernelSU
+                "kernelsu" in output || "ksud" in output -> RootProvider.KernelSU
                 "apatch" in output || "apd" in output -> RootProvider.APatch
                 "magisk" in output || "zygisk" in output -> RootProvider.Magisk
                 "supersu" in output -> RootProvider.SuperSU
@@ -78,20 +81,12 @@ object RootChecker {
     private val ROOT_PROVIDER_PROBE = """
         {
           su -v 2>/dev/null
-          su -V 2>/dev/null
-          magisk -V 2>/dev/null && echo magisk
-          magisk --path 2>/dev/null
           test -d $KSU_DIR && echo kernelsu
-          test -d $APATCH_DIR && echo apatch
-          test -d $MAGISK_DIR && echo magisk
           test -f $KSU_BIN && echo kernelsu
+          test -d $APATCH_DIR && echo apatch
           test -f $APATCH_BIN && echo apatch
-          pm path $KSU_PKG 2>/dev/null && echo kernelsu
-          pm path $APATCH_PKG 2>/dev/null && echo apatch
-          pm path $MAGISK_PKG 2>/dev/null && echo magisk
-          pm path $SUPERSU_PKG_A 2>/dev/null && echo supersu
-          pm path $SUPERSU_PKG_B 2>/dev/null && echo supersu
-          pm path $LINEAGE_PKG 2>/dev/null && echo lineagesu
+          test -d $MAGISK_DIR && echo magisk
+          command -v magisk >/dev/null 2>&1 && echo magisk
         } 2>/dev/null
     """
 }

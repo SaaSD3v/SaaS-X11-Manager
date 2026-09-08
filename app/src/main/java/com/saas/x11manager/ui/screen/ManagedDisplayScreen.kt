@@ -6,7 +6,6 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -14,6 +13,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
@@ -24,13 +24,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.saas.x11manager.ui.component.TerminalDialog
 import com.saas.x11manager.util.Constants
 import com.saas.x11manager.util.ContainerInfo
+import com.saas.x11manager.util.ViewModelLogger
 import com.saas.x11manager.util.X11ServerStatus
 import com.saas.x11manager.util.X11SessionManager
 import com.termux.x11.EmbeddedDisplayHost
 import kotlinx.coroutines.launch
 
+/**
+ * Single-display version of the current X11APP managed monitor workspace.
+ * X11-0nly deliberately owns only Monitor 1 / :0 / X0.
+ */
 @Composable
 fun ManagedDisplayScreen(
     viewModel: HomeViewModel,
@@ -51,11 +57,16 @@ fun ManagedDisplayScreen(
     var connected by remember { mutableStateOf(false) }
     var showConfiguration by remember { mutableStateOf(false) }
     var fullscreen by remember { mutableStateOf(false) }
+    var showFullscreenExitConfirmation by remember { mutableStateOf(false) }
     var additionalKeysEnabled by remember {
         mutableStateOf(store.getBoolean(PREF_SHOW_ADDITIONAL_KEYS, false))
     }
     var additionalKeysVisible by remember { mutableStateOf(false) }
     var extraKeysConfig by remember { mutableStateOf(store.getString("extra_keys_config", null)) }
+
+    val monitorLogs = remember { mutableStateListOf<Pair<Int, String>>() }
+    var showMonitorLogs by remember { mutableStateOf(false) }
+    var monitorLogTitle by remember { mutableStateOf("Monitor 1 logs") }
 
     fun publishAdditionalKeysVisible() {
         store.edit()
@@ -72,6 +83,7 @@ fun ManagedDisplayScreen(
     fun setFullscreen(value: Boolean) {
         if (value && serverStatus != X11ServerStatus.Running) return
         fullscreen = value
+        if (!value) showFullscreenExitConfirmation = false
         store.edit()
             .putBoolean(PREF_FULLSCREEN, value)
             .putBoolean(PREF_ADDITIONAL_KEYS_VISIBLE, additionalKeysVisible)
@@ -85,22 +97,66 @@ fun ManagedDisplayScreen(
         onClose()
     }
 
+    fun operationLogger(): ViewModelLogger = ViewModelLogger { level, line ->
+        scope.launch { monitorLogs.add(level to line) }
+    }
+
     fun toggleServer() {
+        if (busy) return
+        monitorLogs.clear()
+        monitorLogTitle = if (serverStatus == X11ServerStatus.Running) {
+            "Stopping Monitor 1"
+        } else {
+            "Starting Monitor 1"
+        }
+        showMonitorLogs = true
+        val logger = operationLogger()
+
         scope.launch {
             busy = true
             message = null
             try {
                 if (serverStatus == X11ServerStatus.Running) {
-                    if (!X11SessionManager.stopIntegratedServer()) {
-                        message = "Integrated X11 server could not be stopped"
+                    logger.i("--- Stopping X11 monitor ---")
+                    logger.i("[CTX] Monitor: 1")
+                    logger.i("[CTX] Display: ${Constants.X11_DISPLAY}")
+                    serverPid?.let { logger.i("[CTX] Live PIDs before stop: $it") }
+
+                    val owner = X11SessionManager.getOwnerContainerName()
+                    owner?.let {
+                        logger.i("[CTX] Container owner: $it")
+                        X11SessionManager.stopContainerGraphicSession(it, logger)
                     }
-                    connected = false
-                    if (fullscreen) setFullscreen(false)
+
+                    val stopped = X11SessionManager.stopIntegratedServer(logger)
+                    if (!stopped) {
+                        message = "Monitor 1 could not be stopped"
+                        logger.e("[-] Monitor 1 (${Constants.X11_DISPLAY}) stop failed")
+                    } else {
+                        connected = false
+                        logger.i("[+] Monitor 1 (${Constants.X11_DISPLAY}) fully stopped")
+                        owner?.let { logger.i("[+] Container '$it' was left running") }
+                        if (fullscreen) setFullscreen(false)
+                    }
                 } else {
-                    val started = X11SessionManager.startIntegratedServer(xkbSeedContainer?.name)
-                    if (started.isFailure) {
+                    logger.i("--- Starting X11 monitor ---")
+                    logger.i("[CTX] Monitor: 1")
+                    logger.i("[CTX] Display: ${Constants.X11_DISPLAY}")
+                    logger.i("[CTX] Process: ${Constants.X11_SERVER_PROCESS}")
+                    logger.i("[CTX] Runtime: ${Constants.INTEGRATED_X11_RUNTIME_DIR}")
+                    logger.i("[CTX] Socket: ${Constants.X11_SOCK_FILE}")
+
+                    val started = X11SessionManager.startIntegratedServer(
+                        containerName = xkbSeedContainer?.name,
+                        logger = logger
+                    )
+                    if (started.isSuccess) {
+                        logger.i("[+] Monitor 1 (${Constants.X11_DISPLAY}) is ready")
+                        logger.i("[+] PID: ${started.getOrNull()}")
+                    } else {
                         message = started.exceptionOrNull()?.message
-                            ?: "Integrated X11 server could not start"
+                            ?: "Monitor 1 could not start"
+                        logger.e("[-] ${message ?: "X11 start failed"}")
                     }
                 }
             } finally {
@@ -121,6 +177,7 @@ fun ManagedDisplayScreen(
             .apply()
         publishLoriePreferenceChange(context, PREF_ADDITIONAL_KEYS_VISIBLE)
         publishLoriePreferenceChange(context, PREF_FULLSCREEN)
+        viewModel.refreshRuntimeState()
     }
 
     DisposableEffect(store) {
@@ -139,6 +196,7 @@ fun ManagedDisplayScreen(
                 PREF_FULLSCREEN -> {
                     val requested = store.getBoolean(PREF_FULLSCREEN, false)
                     fullscreen = requested && serverStatus == X11ServerStatus.Running
+                    if (!fullscreen) showFullscreenExitConfirmation = false
                 }
                 "extra_keys_config" -> {
                     extraKeysConfig = store.getString("extra_keys_config", null)
@@ -162,90 +220,122 @@ fun ManagedDisplayScreen(
         }
     }
 
-    // MainActivity owns Back while fullscreen so the focused Lorie/X11 surface
-    // cannot consume it and so the existing confirmation dialog is always used.
-    BackHandler(enabled = !fullscreen) {
-        onClose()
+    BackHandler {
+        if (fullscreen) {
+            showFullscreenExitConfirmation = true
+        } else {
+            onClose()
+        }
+    }
+
+    if (showFullscreenExitConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showFullscreenExitConfirmation = false },
+            title = { Text("Exit fullscreen?") },
+            text = {
+                Text("Return to the Monitor 1 controls while keeping ${Constants.X11_DISPLAY} running?")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showFullscreenExitConfirmation = false
+                        setFullscreen(false)
+                    }
+                ) {
+                    Text("Exit fullscreen")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFullscreenExitConfirmation = false }) {
+                    Text("Stay fullscreen")
+                }
+            }
+        )
+    }
+
+    if (showMonitorLogs) {
+        TerminalDialog(
+            title = monitorLogTitle,
+            logs = monitorLogs,
+            onDismiss = { if (!busy) showMonitorLogs = false },
+            onClear = { if (!busy) monitorLogs.clear() },
+            isBlocking = busy
+        )
     }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = Color(0xFF07090C)
     ) {
-        Box(Modifier.fillMaxSize()) {
-            Column(
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (fullscreen) Modifier
+                    else Modifier.statusBarsPadding().navigationBarsPadding()
+                )
+        ) {
+            if (!fullscreen) {
+                SingleMonitorToolbar(
+                    serverStatus = serverStatus,
+                    serverPid = serverPid,
+                    connected = connected,
+                    busy = busy,
+                    xkbSeedContainer = xkbSeedContainer,
+                    additionalKeysEnabled = additionalKeysEnabled,
+                    additionalKeysVisible = additionalKeysVisible,
+                    onClose = ::closeScreen,
+                    onShowLogs = { showMonitorLogs = true },
+                    onToggleServer = ::toggleServer,
+                    onToggleAdditionalKeys = ::toggleAdditionalKeys,
+                    onFullscreen = { setFullscreen(true) },
+                    onConfiguration = { showConfiguration = true }
+                )
+            }
+
+            message?.let { DisplayErrorMessage(it) }
+
+            Box(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .weight(1f)
+                    .fillMaxWidth()
                     .then(
                         if (fullscreen) Modifier
-                        else Modifier.statusBarsPadding().navigationBarsPadding()
+                        else Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
                     )
             ) {
-                if (!fullscreen) {
-                    ManagedDisplayToolbar(
-                        serverStatus = serverStatus,
-                        serverPid = serverPid,
-                        connected = connected,
-                        busy = busy,
-                        xkbSeedContainer = xkbSeedContainer,
-                        additionalKeysEnabled = additionalKeysEnabled,
-                        additionalKeysVisible = additionalKeysVisible,
-                        onClose = ::closeScreen,
-                        onToggleServer = ::toggleServer,
-                        onToggleAdditionalKeys = ::toggleAdditionalKeys,
-                        onFullscreen = { setFullscreen(true) },
-                        onConfiguration = { showConfiguration = true }
-                    )
-                }
-
-                message?.let { DisplayErrorMessage(it) }
-
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .then(
-                            if (fullscreen) Modifier
-                            else Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
-                        )
-                ) {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        shape = if (fullscreen) {
-                            RoundedCornerShape(0.dp)
-                        } else {
-                            RoundedCornerShape(18.dp)
-                        },
-                        color = Color.Black,
-                        border = if (fullscreen) {
-                            null
-                        } else {
-                            BorderStroke(
-                                1.dp,
-                                if (connected) {
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
-                                } else {
-                                    Color.White.copy(alpha = 0.12f)
-                                }
-                            )
-                        }
-                    ) {
-                        ManagedDisplayViewport(
-                            serverStatus = serverStatus,
-                            connected = connected,
-                            hasSeedContainer = xkbSeedContainer != null,
-                            onConnectionChanged = { connected = it }
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    shape = if (fullscreen) RoundedCornerShape(0.dp) else RoundedCornerShape(18.dp),
+                    color = Color.Black,
+                    border = if (fullscreen) {
+                        null
+                    } else {
+                        BorderStroke(
+                            1.dp,
+                            if (connected) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
+                            } else {
+                                Color.White.copy(alpha = 0.12f)
+                            }
                         )
                     }
-                }
-
-                if (additionalKeysEnabled && additionalKeysVisible) {
-                    EmbeddedExtraKeysBar(
-                        config = extraKeysConfig,
-                        onOpenSettings = { showConfiguration = true },
-                        onExitDisplay = ::closeScreen
+                ) {
+                    ManagedDisplayViewport(
+                        serverStatus = serverStatus,
+                        connected = connected,
+                        hasSeedContainer = xkbSeedContainer != null,
+                        onConnectionChanged = { connected = it }
                     )
                 }
+            }
+
+            if (additionalKeysEnabled && additionalKeysVisible) {
+                EmbeddedExtraKeysBar(
+                    config = extraKeysConfig,
+                    onOpenSettings = { showConfiguration = true },
+                    onExitDisplay = ::closeScreen
+                )
             }
         }
     }
@@ -259,7 +349,7 @@ fun ManagedDisplayScreen(
 }
 
 @Composable
-private fun ManagedDisplayToolbar(
+private fun SingleMonitorToolbar(
     serverStatus: X11ServerStatus,
     serverPid: Int?,
     connected: Boolean,
@@ -268,6 +358,7 @@ private fun ManagedDisplayToolbar(
     additionalKeysEnabled: Boolean,
     additionalKeysVisible: Boolean,
     onClose: () -> Unit,
+    onShowLogs: () -> Unit,
     onToggleServer: () -> Unit,
     onToggleAdditionalKeys: () -> Unit,
     onFullscreen: () -> Unit,
@@ -286,11 +377,7 @@ private fun ManagedDisplayToolbar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onClose) {
-                Icon(
-                    Icons.Default.Close,
-                    contentDescription = "Close screen",
-                    tint = Color.White
-                )
+                Icon(Icons.Default.Close, contentDescription = "Close screen", tint = Color.White)
             }
 
             Column(
@@ -303,28 +390,45 @@ private fun ManagedDisplayToolbar(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        "Display ${Constants.X11_DISPLAY}",
+                        "Monitor 1 · ${Constants.X11_DISPLAY}",
                         color = Color.White,
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.SemiBold
                     )
                     DisplayStatusPill(serverStatus, connected)
                 }
                 Text(
-                    serverPid?.let { "PID $it" } ?: "Embedded X11 workspace",
+                    serverPid?.let { "PID $it" } ?: "Single embedded X11 display",
                     color = Color.White.copy(alpha = 0.52f),
                     style = MaterialTheme.typography.labelSmall
                 )
             }
 
-            DisplayControlButton(
-                busy = busy,
-                running = serverStatus == X11ServerStatus.Running,
+            IconButton(onClick = onShowLogs) {
+                Icon(Icons.Default.ReceiptLong, contentDescription = "Monitor logs", tint = Color.White)
+            }
+
+            IconButton(
+                onClick = onToggleServer,
                 enabled = !busy && (
                     serverStatus == X11ServerStatus.Running || xkbSeedContainer != null
-                ),
-                onClick = onToggleServer
-            )
+                )
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                } else {
+                    val enabled = serverStatus == X11ServerStatus.Running || xkbSeedContainer != null
+                    Icon(
+                        if (serverStatus == X11ServerStatus.Running) Icons.Default.Stop else Icons.Default.PlayArrow,
+                        contentDescription = if (serverStatus == X11ServerStatus.Running) "Stop monitor" else "Start monitor",
+                        tint = if (enabled) Color.White else Color.White.copy(alpha = 0.3f)
+                    )
+                }
+            }
 
             if (additionalKeysEnabled) {
                 IconButton(
@@ -334,11 +438,7 @@ private fun ManagedDisplayToolbar(
                     Icon(
                         Icons.Default.Keyboard,
                         contentDescription = "Additional key bar",
-                        tint = if (additionalKeysVisible) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            Color.White
-                        }
+                        tint = if (additionalKeysVisible) MaterialTheme.colorScheme.primary else Color.White
                     )
                 }
             }
@@ -350,20 +450,12 @@ private fun ManagedDisplayToolbar(
                 Icon(
                     Icons.Default.Fullscreen,
                     contentDescription = "Fullscreen",
-                    tint = if (serverStatus == X11ServerStatus.Running) {
-                        Color.White
-                    } else {
-                        Color.White.copy(alpha = 0.3f)
-                    }
+                    tint = if (serverStatus == X11ServerStatus.Running) Color.White else Color.White.copy(alpha = 0.3f)
                 )
             }
 
             IconButton(onClick = onConfiguration) {
-                Icon(
-                    Icons.Default.Settings,
-                    contentDescription = "X11 configuration",
-                    tint = Color.White
-                )
+                Icon(Icons.Default.Settings, contentDescription = "X11 configuration", tint = Color.White)
             }
         }
     }
@@ -430,7 +522,7 @@ private fun ManagedDisplayViewport(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    "Display stopped",
+                    "Monitor 1 stopped",
                     color = Color.White,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
@@ -461,30 +553,6 @@ private fun DisplayErrorMessage(message: String) {
             color = MaterialTheme.colorScheme.onErrorContainer,
             style = MaterialTheme.typography.bodySmall
         )
-    }
-}
-
-@Composable
-private fun DisplayControlButton(
-    busy: Boolean,
-    running: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit
-) {
-    IconButton(onClick = onClick, enabled = enabled) {
-        if (busy) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
-                strokeWidth = 2.dp,
-                color = Color.White
-            )
-        } else {
-            Icon(
-                if (running) Icons.Default.Stop else Icons.Default.PlayArrow,
-                contentDescription = if (running) "Stop display" else "Start display",
-                tint = if (enabled) Color.White else Color.White.copy(alpha = 0.3f)
-            )
-        }
     }
 }
 

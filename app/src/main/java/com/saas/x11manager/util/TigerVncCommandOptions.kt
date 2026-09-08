@@ -13,6 +13,7 @@ object TigerVncCommandOptions {
         "password",
         "passwordfile",
         "rfbauth",
+        "securitytypes",
         "display"
     )
 
@@ -57,7 +58,7 @@ object TigerVncCommandOptions {
         settings: VncLaunchSettings,
         displayNumber: Int,
         port: Int,
-        passwordFile: String
+        passwordFile: String?
     ): List<String> {
         require(VncSettings.validateLaunchSettings(settings) == null) {
             VncSettings.validateLaunchSettings(settings) ?: "Invalid TigerVNC settings"
@@ -65,14 +66,20 @@ object TigerVncCommandOptions {
         require(VncSettings.isValidPort(port))
         require(displayNumber in 1..99)
 
+        val passwordEnabled = !passwordFile.isNullOrBlank()
         val out = mutableListOf<String>()
         out += ":$displayNumber"
         out += listOf("-geometry", VncSettings.normalizeGeometry(settings.geometry))
         out += listOf("-depth", settings.depth.trim())
         out += listOf("-rfbport", port.toString())
         out += listOf("-localhost", if (settings.localhostOnly) "yes" else "no")
-        out += listOf("-SecurityTypes", resolvedStandaloneSecurityTypes(settings))
-        out += listOf("-rfbauth", passwordFile)
+        out += listOf(
+            "-SecurityTypes",
+            if (passwordEnabled) resolvedStandaloneSecurityTypes(settings) else "None"
+        )
+        if (passwordEnabled) {
+            out += listOf("-rfbauth", passwordFile!!)
+        }
 
         if (settings.alwaysShared) {
             out += "-AlwaysShared"

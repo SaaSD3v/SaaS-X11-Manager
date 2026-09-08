@@ -11,30 +11,34 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.saas.x11manager.util.GraphicSessionUserManager
-import com.saas.x11manager.util.GraphicSessionUserSelection
+import com.saas.x11manager.util.RuntimeAccessPolicy
 import com.saas.x11manager.util.SessionAccessMode
 import com.saas.x11manager.util.VncSettings
 
+/** Second step of runtime Start: Linux user was already selected before this dialog. */
 @Composable
 internal fun GraphicAccessDialog(
     containerName: String,
@@ -42,24 +46,52 @@ internal fun GraphicAccessDialog(
     initialMode: SessionAccessMode,
     onDismiss: () -> Unit,
     onBack: () -> Unit,
-    onConfirm: (SessionAccessMode, String?) -> Unit
+    onConfirm: (SessionAccessMode, Int, Int, String?) -> Unit
 ) {
-    var selectedMode by remember(containerName, initialMode) { mutableStateOf(initialMode) }
+    val context = LocalContext.current
+    var selectedMode by remember(containerName, initialMode) {
+        mutableStateOf(RuntimeAccessPolicy.normalize(initialMode))
+    }
     var password by remember(containerName) { mutableStateOf("") }
-    var userSelection by remember(containerName) {
-        mutableStateOf(GraphicSessionUserSelection.ROOT)
+    var adbLocalPortText by remember(containerName, port) { mutableStateOf(port.toString()) }
+    var showAdvancedSettings by remember(containerName) { mutableStateOf(false) }
+    var showShortPasswordDialog by remember(containerName) { mutableStateOf(false) }
+
+    val vncSelected = selectedMode == SessionAccessMode.VNC
+    val passwordProvided = password.isNotEmpty()
+    val passwordValid = !passwordProvided || VncSettings.isValidPassword(password)
+    val adbLocalPort = adbLocalPortText.toIntOrNull()
+    val adbLocalPortValid = !vncSelected ||
+        (adbLocalPort != null && VncSettings.isValidPort(adbLocalPort))
+    val startEnabled = adbLocalPortValid
+
+    if (showShortPasswordDialog) {
+        AlertDialog(
+            onDismissRequest = { showShortPasswordDialog = false },
+            title = { Text("VNC password is too short") },
+            text = {
+                Text(
+                    "Use ${VncSettings.MIN_PASSWORD_LENGTH}-${VncSettings.MAX_PASSWORD_LENGTH} characters, " +
+                        "or leave the password field completely empty to start VNC without password authentication."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showShortPasswordDialog = false }) {
+                    Text("OK")
+                }
+            }
+        )
+        return
     }
 
-    LaunchedEffect(containerName) {
-        GraphicSessionUserManager.currentSelection(containerName)?.let { saved ->
-            userSelection = saved
-        }
+    if (showAdvancedSettings) {
+        TigerVncSettingsDialog(
+            containerName = containerName,
+            onDismiss = { showAdvancedSettings = false },
+            onSaved = { showAdvancedSettings = false }
+        )
+        return
     }
-
-    val passwordRequired = selectedMode.requiresVnc
-    val passwordValid = !passwordRequired || VncSettings.isValidPassword(password)
-    val userSelectionRequired = selectedMode != SessionAccessMode.VNC
-    val userSelectionValid = !userSelectionRequired || isValidGraphicUserSelection(userSelection)
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -77,13 +109,10 @@ internal fun GraphicAccessDialog(
             )
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Text(
-                    "Choose access method",
-                    style = MaterialTheme.typography.titleLarge
-                )
+                Text("Choose access method", style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "$containerName · final access configuration",
+                    "$containerName · choose how to start this session",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -91,53 +120,19 @@ internal fun GraphicAccessDialog(
 
                 AccessChoice(
                     title = "Integrated X11",
-                    subtitle = "Use the Manager's embedded X11 screen only.",
+                    subtitle = "Start the Manager X11 monitor and graphical session now.",
                     selected = selectedMode == SessionAccessMode.INTEGRATED_X11,
                     onClick = { selectedMode = SessionAccessMode.INTEGRATED_X11 }
                 )
                 Spacer(Modifier.height(10.dp))
                 AccessChoice(
                     title = "VNC",
-                    subtitle = "Start an external TigerVNC virtual display for the selected session.",
+                    subtitle = "Start a standalone TigerVNC virtual display. Integrated X11 stays off.",
                     selected = selectedMode == SessionAccessMode.VNC,
                     onClick = { selectedMode = SessionAccessMode.VNC }
                 )
-                Spacer(Modifier.height(10.dp))
-                AccessChoice(
-                    title = "Both",
-                    subtitle = "Start Integrated X11 and share that exact same screen through TigerVNC.",
-                    selected = selectedMode == SessionAccessMode.BOTH,
-                    onClick = { selectedMode = SessionAccessMode.BOTH }
-                )
 
-                Spacer(Modifier.height(16.dp))
-                if (userSelectionRequired) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(
-                            1.dp,
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                        )
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            GraphicSessionUserPicker(
-                                containerName = containerName,
-                                selection = userSelection,
-                                onSelectionChange = { userSelection = it }
-                            )
-                        }
-                    }
-                } else {
-                    Text(
-                        "Standalone VNC keeps its own root-owned virtual-display runtime. Your saved Linux desktop user is preserved for Integrated X11 and Both.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                if (passwordRequired) {
+                if (vncSelected) {
                     Spacer(Modifier.height(16.dp))
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
@@ -154,10 +149,11 @@ internal fun GraphicAccessDialog(
                         ) {
                             Text("TigerVNC", style = MaterialTheme.typography.titleSmall)
                             Text(
-                                "Port: $port · Change it from General settings on the container card.",
+                                "Server port: $port · The selected Linux user will own the desktop session.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+
                             OutlinedTextField(
                                 value = password,
                                 onValueChange = { value ->
@@ -168,17 +164,64 @@ internal fun GraphicAccessDialog(
                                     }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                                label = { Text("VNC password") },
+                                label = { Text("VNC password (optional)") },
                                 supportingText = {
                                     Text(
-                                        "${VncSettings.MIN_PASSWORD_LENGTH}-${VncSettings.MAX_PASSWORD_LENGTH} characters. " +
-                                            "It is converted to TigerVNC's password file and is not stored in Android preferences."
+                                        "Leave empty for no password. If used, enter " +
+                                            "${VncSettings.MIN_PASSWORD_LENGTH}-${VncSettings.MAX_PASSWORD_LENGTH} characters."
                                     )
                                 },
                                 visualTransformation = PasswordVisualTransformation(),
                                 singleLine = true,
-                                isError = password.isNotEmpty() && !passwordValid
+                                isError = passwordProvided && !passwordValid
                             )
+
+                            if (!passwordProvided) {
+                                Text(
+                                    "No password means any client that can reach this VNC port may connect. " +
+                                        "Use only on a network/path you trust.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.tertiary
+                                )
+                            }
+
+                            OutlinedTextField(
+                                value = adbLocalPortText,
+                                onValueChange = { value ->
+                                    if (value.length <= 5 && value.all(Char::isDigit)) {
+                                        adbLocalPortText = value
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("ADB forward local port") },
+                                supportingText = {
+                                    Text(
+                                        if (adbLocalPortValid) {
+                                            "PC-side local port. USB endpoint after a valid forward: " +
+                                                "127.0.0.1:${adbLocalPort ?: port}."
+                                        } else {
+                                            "Enter a port from ${VncSettings.MIN_PORT} to ${VncSettings.MAX_PORT}."
+                                        }
+                                    )
+                                },
+                                isError = adbLocalPortText.isNotEmpty() && !adbLocalPortValid,
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                            )
+
+                            Text(
+                                "The Manager shows the exact ADB command only when the Android-side VNC target can be verified. " +
+                                    "It never creates the PC-side mapping automatically.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            OutlinedButton(
+                                onClick = { showAdvancedSettings = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Advanced settings")
+                            }
                         }
                     }
                 }
@@ -195,23 +238,21 @@ internal fun GraphicAccessDialog(
                     Spacer(Modifier.width(8.dp))
                     Button(
                         onClick = {
-                            // Standalone VNC does not use the managed desktop-user
-                            // launcher. Do not silently overwrite the saved X11 user
-                            // with root merely because the user chose VNC access.
-                            if (userSelectionRequired) {
-                                GraphicSessionUserManager.selectForNextStart(
-                                    containerName,
-                                    userSelection
-                                )
+                            if (vncSelected && passwordProvided && !passwordValid) {
+                                showShortPasswordDialog = true
+                                return@Button
                             }
+                            val localPort = adbLocalPort ?: port
                             onConfirm(
                                 selectedMode,
-                                password.takeIf { selectedMode.requiresVnc }
+                                port,
+                                localPort,
+                                password.takeIf { vncSelected && it.isNotEmpty() }
                             )
                         },
-                        enabled = passwordValid && userSelectionValid
+                        enabled = startEnabled
                     ) {
-                        Text("Continue")
+                        Text("Start")
                     }
                 }
             }

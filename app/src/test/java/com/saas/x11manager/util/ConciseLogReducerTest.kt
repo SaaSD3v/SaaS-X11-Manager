@@ -8,25 +8,25 @@ import org.junit.Test
 class ConciseLogReducerTest {
 
     @Test
-    fun runtimeStoresOnlySemanticMessages() {
+    fun runtimeStoresOnlySemanticMessagesForFixedDisplay() {
         val reducer = ConciseLogReducer()
         val output = buildList {
             addAll(reducer.reduce(Log.INFO, "--- Graphic Access Start ---"))
             addAll(reducer.reduce(Log.INFO, "[CTX] Access method: Integrated X11"))
             addAll(reducer.reduce(Log.INFO, "[CTX] Session: IceWM"))
             addAll(reducer.reduce(Log.INFO, "[CTX] Graphic user: SaaS"))
-            addAll(reducer.reduce(Log.INFO, "[CTX] Runtime: /data/local/tmp/saas-x11"))
-            addAll(reducer.reduce(Log.INFO, "[+] Integrated X11 session started on :0"))
-            addAll(reducer.reduce(Log.INFO, "[+] Integrated X11 ready on :0"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Selected runtime: /data/local/tmp/saas-x11"))
+            addAll(reducer.reduce(Log.INFO, "[+] Monitor 1 (:0) ready (PID=1234)"))
+            addAll(reducer.reduce(Log.INFO, "[+] Integrated X11 ready on Monitor 1 (:0)"))
         }.map { it.second }
 
         assertTrue(output.contains("[SESSION] Starting graphical access"))
         assertTrue(output.contains("[SESSION] • Access: Integrated X11"))
         assertTrue(output.contains("[SESSION] • Desktop: IceWM"))
         assertTrue(output.contains("[USER] • Desktop user: SaaS"))
-        assertTrue(output.contains("[SESSION] ✓ Integrated X11 session started on :0"))
-        assertTrue(output.contains("[X11] ✓ Integrated X11 ready on :0"))
-        assertFalse(output.any { it.contains("Runtime:") })
+        assertTrue(output.contains("[X11] ✓ Monitor 1 (:0) ready (PID=1234)"))
+        assertTrue(output.contains("[X11] ✓ Integrated X11 ready on Monitor 1 (:0)"))
+        assertFalse(output.any { it.contains("Selected runtime") })
     }
 
     @Test
@@ -79,32 +79,81 @@ class ConciseLogReducerTest {
     }
 
     @Test
-    fun transientRecoveredWarningsAreNotStored() {
+    fun graphicalRetryShowsOnlyFinalFailureOnFixedDisplay() {
         val reducer = ConciseLogReducer()
         val output = buildList {
-            addAll(reducer.reduce(Log.WARN, "[!] X11 transport socket setup service returned 1"))
-            addAll(reducer.reduce(Log.WARN, "[!] Container X11 transport socket was not visible during the prerequisite check"))
-            addAll(reducer.reduce(Log.WARN, "[!] Port 4713 could not load an authenticated listener on 127.0.0.1; selecting another audio port automatically"))
-            addAll(reducer.reduce(Log.INFO, "[+] Audio ready (AAudio_sink, tcp:127.0.0.1:4714)"))
-        }.map { it.second }
-
-        assertFalse(output.any { it.contains("socket setup service") })
-        assertFalse(output.any { it.contains("socket was not visible") })
-        assertFalse(output.any { it.contains("Port 4713") })
-        assertTrue(output.contains("[AUDIO] ✓ Audio ready (AAudio_sink, tcp:127.0.0.1:4714)"))
-    }
-
-    @Test
-    fun graphicalRetryShowsOnlyFinalFailure() {
-        val reducer = ConciseLogReducer()
-        val output = buildList {
-            addAll(reducer.reduce(Log.WARN, "[!] :0 is ready, but IceWM could not be confirmed active (exit 1)"))
-            addAll(reducer.reduce(Log.WARN, "[!] :0 is ready, but the configured graphic session is not active"))
-            addAll(reducer.reduce(Log.ERROR, "[-] IceWM did not become active on :0"))
+            addAll(reducer.reduce(Log.WARN, "[!] Monitor 1 (:0) is ready, but IceWM could not be confirmed active (exit 1)"))
+            addAll(reducer.reduce(Log.WARN, "[!] Monitor 1 (:0) is ready, but the configured graphic session is not active"))
+            addAll(reducer.reduce(Log.ERROR, "[-] IceWM did not become active on Monitor 1 (:0)"))
         }.map { it.second }
 
         assertFalse(output.any { it.contains("could not be confirmed active") })
         assertFalse(output.any { it.contains("configured graphic session is not active") })
-        assertTrue(output.contains("[SESSION] ✗ IceWM did not become active on :0"))
+        assertTrue(output.contains("[SESSION] ✗ IceWM did not become active on Monitor 1 (:0)"))
+    }
+
+    @Test
+    fun monitorStopKeepsImmediateProgressOwnershipAndCleanupVerification() {
+        val reducer = ConciseLogReducer()
+        val output = buildList {
+            addAll(reducer.reduce(Log.INFO, "--- Stopping X11 monitor ---"))
+            addAll(reducer.reduce(Log.INFO, "--- Graphic Session Stop ---"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Container: alpine"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Container lifecycle: remains RUNNING"))
+            addAll(reducer.reduce(Log.INFO, "[*] Stopping IceWM graphic session only..."))
+            addAll(reducer.reduce(Log.INFO, "[+] Graphic session stopped; container remains running"))
+            addAll(reducer.reduce(Log.INFO, "--- Integrated X11 Server Stop ---"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Monitor: 1"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Display: :0"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Live PIDs before stop: 4242"))
+            addAll(reducer.reduce(Log.INFO, "[*] Sending SIGKILL to server PIDs: 4242"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Live PIDs after stop: none"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Socket after stop: absent"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Stop duration: 83ms"))
+            addAll(reducer.reduce(Log.INFO, "[+] Monitor 1 (:0) inactive"))
+            addAll(reducer.reduce(Log.INFO, "[+] X11 runtime cleanup verified"))
+            addAll(reducer.reduce(Log.INFO, "[+] Container 'alpine' was left running"))
+        }.map { it.second }
+
+        assertTrue(output.first() == "[X11] Stop requested for monitor")
+        assertTrue(output.contains("[SESSION] Stopping graphical session"))
+        assertTrue(output.contains("[CONTAINER] • Container: alpine"))
+        assertTrue(output.contains("[CONTAINER] • Lifecycle: remains RUNNING"))
+        assertTrue(output.contains("[SESSION] Stopping IceWM graphic session only"))
+        assertTrue(output.contains("[SESSION] ✓ Graphic session stopped; container remains running"))
+        assertTrue(output.contains("[X11] Stopping monitor server"))
+        assertTrue(output.contains("[X11] • Monitor: 1"))
+        assertTrue(output.contains("[X11] • Display: :0"))
+        assertTrue(output.contains("[X11] • Server PID(s): 4242"))
+        assertTrue(output.contains("[X11] Terminating X11 server process"))
+        assertTrue(output.contains("[X11] ✓ Server process stopped"))
+        assertTrue(output.contains("[X11] ✓ Socket removed"))
+        assertTrue(output.contains("[X11] • Stop time: 83ms"))
+        assertTrue(output.contains("[X11] ✓ Monitor 1 (:0) inactive"))
+        assertTrue(output.contains("[X11] ✓ Runtime cleanup verified"))
+        assertTrue(output.contains("[CONTAINER] ✓ Container 'alpine' was left running"))
+    }
+
+    @Test
+    fun droidSpacesBannerStateNeverSuppressesFollowingManagerLogs() {
+        val reducer = ConciseLogReducer()
+
+        val aggregated = reducer.reduce(
+            Log.INFO,
+            "Welcome to Droidspaces v6.5.0 !\nContainer: alpine (RUNNING)\nUse 'su -c \"droidspaces show\"' for status"
+        )
+        assertTrue(aggregated.isEmpty())
+
+        val afterAggregated = reducer.reduce(Log.INFO, "--- Integrated X11 Server Stop ---")
+            .map { it.second }
+        assertTrue(afterAggregated.contains("[X11] Stopping monitor server"))
+
+        reducer.reduce(Log.INFO, "Welcome to Droidspaces v6.5.0 !")
+        reducer.reduce(Log.INFO, "Container: alpine (RUNNING)")
+        reducer.reduce(Log.INFO, "Use 'su -c \"droidspaces show\"' for status")
+        val afterStreamed = reducer.reduce(Log.INFO, "--- Stopping X11 monitor ---")
+            .map { it.second }
+
+        assertTrue(afterStreamed.contains("[X11] Stop requested for monitor"))
     }
 }

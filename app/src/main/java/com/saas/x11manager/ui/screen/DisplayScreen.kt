@@ -36,22 +36,28 @@ fun DisplayScreen(
         ensureManagedX11Defaults(context, store)
     }
 
+    val screenSubtitle = when (serverStatus) {
+        X11ServerStatus.Running ->
+            "Monitor 1 · ${Constants.X11_DISPLAY} running${serverPid?.let { " · PID $it" } ?: ""}"
+        X11ServerStatus.Stopped -> "Open the managed X11 monitor workspace"
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Text(
                 "Integrated X11",
                 style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Black
+                fontWeight = FontWeight.SemiBold
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "Configure the embedded X11 engine or open its managed screen workspace.",
+                "Configure the embedded X11 engine or open the managed ${Constants.X11_DISPLAY} display.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -72,11 +78,7 @@ fun DisplayScreen(
                 index = "02",
                 icon = Icons.Default.DesktopWindows,
                 title = "Screen",
-                subtitle = when (serverStatus) {
-                    X11ServerStatus.Running ->
-                        "${Constants.X11_DISPLAY} running${serverPid?.let { " · PID $it" } ?: ""}"
-                    X11ServerStatus.Stopped -> "Open the full-size X11 workspace"
-                },
+                subtitle = screenSubtitle,
                 onClick = onOpenScreen
             )
         }
@@ -101,27 +103,30 @@ private fun DisplayLauncherCard(
     Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 0.dp,
         border = BorderStroke(
             1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
         )
     ) {
         Row(
-            modifier = Modifier.padding(18.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 15.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                tonalElevation = 0.dp
             ) {
-                Box(Modifier.size(54.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
+                        modifier = Modifier.size(22.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -130,12 +135,13 @@ private fun DisplayLauncherCard(
                 Text(
                     index,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Spacer(Modifier.height(2.dp))
                 Text(
                     title,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.SemiBold
                 )
                 Text(
                     subtitle,
@@ -144,7 +150,11 @@ private fun DisplayLauncherCard(
                 )
             }
 
-            Icon(Icons.Default.ChevronRight, contentDescription = null)
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

@@ -4,24 +4,35 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * One entry point for starting the selected graphical session through the user's
- * preferred access method. Integrated X11 is always display :0 on X11-0nly.
+ * One entry point for starting the selected graphical session.
  *
- * BOTH starts the single Integrated X11 session first and publishes that exact
- * :0 display with x0vncserver. It never starts a second desktop/WM instance.
+ * X11-0nly exposes the same current Start flow as X11APP, but Integrated X11 is
+ * deliberately fixed to the single Manager-owned :0 / X0 transport. BOTH is
+ * accepted only as a persisted compatibility value and is normalized to X11.
  */
 object SessionAccessManager {
     private val startMutex = Mutex()
+
     suspend fun start(
         containerName: String,
         platform: ContainerPlatform?,
         session: GraphicSession,
         accessMode: SessionAccessMode,
         vncPort: Int,
+        vncAdbLocalPort: Int = vncPort,
         vncPassword: String? = null,
         logger: ContainerLogger? = null
     ): Boolean = startMutex.withLock {
-        startLocked(containerName, platform, session, accessMode, vncPort, vncPassword, logger)
+        startLocked(
+            containerName = containerName,
+            platform = platform,
+            session = session,
+            accessMode = RuntimeAccessPolicy.normalize(accessMode),
+            vncPort = vncPort,
+            vncAdbLocalPort = vncAdbLocalPort,
+            vncPassword = vncPassword,
+            logger = logger
+        )
     }
 
     private suspend fun startLocked(
@@ -30,14 +41,15 @@ object SessionAccessManager {
         session: GraphicSession,
         accessMode: SessionAccessMode,
         vncPort: Int,
+        vncAdbLocalPort: Int,
         vncPassword: String?,
         logger: ContainerLogger?
     ): Boolean {
         logger?.i("--- Graphic Access Start ---")
         logger?.i("[CTX] Access method: ${accessMode.label}")
         logger?.i("[CTX] Session: ${session.label}")
-        if (accessMode.requiresVnc) logger?.i("[CTX] VNC port: $vncPort")
 
+        // Keep the current user-facing order: session -> Linux user -> transport.
         val userPreparation = GraphicSessionUserManager.prepareForStart(
             containerName = containerName,
             session = session,
@@ -52,8 +64,27 @@ object SessionAccessManager {
             logger?.i("[*] Graphical user changed; restarting only the managed desktop session")
             X11SessionManager.stopContainerGraphicSession(containerName, logger)
         }
-        logger?.i("")
 
+        if (accessMode.requiresVnc) {
+            logger?.i(LogLayout.SPACER)
+            logger?.i("[VNC] Preparing standalone VNC transport")
+            logger?.i("[VNC] • Server port: $vncPort")
+            logger?.i("[VNC] • PC local ADB port: $vncAdbLocalPort")
+            logger?.i(
+                if (vncPassword == null) {
+                    "[VNC] • Authentication requested: none"
+                } else {
+                    "[VNC] • Authentication requested: VNC password"
+                }
+            )
+
+            if (!ensureFixedIntegratedX11StoppedForVnc(containerName, logger)) {
+                return false
+            }
+        }
+
+        // Audio ownership and transport are intentionally unchanged from the
+        // X11-0nly baseline. This port does not replace, refactor or migrate them.
         PulseAudioRuntimeSanitizer.prepare(
             containerName = containerName,
             logger = logger
@@ -64,7 +95,8 @@ object SessionAccessManager {
         )
 
         return when (accessMode) {
-            SessionAccessMode.INTEGRATED_X11 -> {
+            SessionAccessMode.INTEGRATED_X11,
+            SessionAccessMode.BOTH -> {
                 val started = X11SessionManager.startX11Session(containerName, logger) {
                     finalizeAudioAfterContainerReady(containerName, logger)
                 }
@@ -75,7 +107,8 @@ object SessionAccessManager {
                     logger?.e("[-] ${session.label} did not become active on ${Constants.X11_DISPLAY}")
                     false
                 } else {
-                    logger?.i("[+] Integrated X11 ready on ${Constants.X11_DISPLAY}")
+                    logger?.i("[X11] ✓ Integrated X11 ready on Monitor 1 (${Constants.X11_DISPLAY})")
+                    logger?.i("[SESSION] ✓ ${session.label} is active through Integrated X11")
                     true
                 }
             }
@@ -94,60 +127,56 @@ object SessionAccessManager {
                     VncConnectionGuide.logAfterSuccessfulStart(
                         containerName = containerName,
                         port = vncPort,
+                        adbLocalPort = vncAdbLocalPort,
+                        displayName = result.displayName,
+                        desktopUser = userPreparation.selection.userName,
+                        session = session,
                         password = vncPassword,
                         logger = logger
                     )
                 } else {
                     VncConnectionGuide.logAdbForwardRestartRecovery(
                         port = vncPort,
+                        localPort = vncAdbLocalPort,
                         logger = logger,
                         onlyIfTroubleshooting = true
                     )
                 }
                 result.success
             }
-
-            SessionAccessMode.BOTH -> {
-                val started = X11SessionManager.startX11Session(containerName, logger) {
-                    finalizeAudioAfterContainerReady(containerName, logger)
-                }
-                if (!started) {
-                    logger?.e("[-] Integrated X11 could not start; VNC mirror was not attempted")
-                    false
-                } else if (!confirmManagedDesktop(containerName, session)) {
-                    logger?.e("[-] ${session.label} did not become active on ${Constants.X11_DISPLAY}; VNC mirror was not attempted")
-                    false
-                } else {
-                    val mirror = VncServerManager.startMirror(
-                        containerName = containerName,
-                        platform = platform,
-                        session = session,
-                        integratedDisplayName = Constants.X11_DISPLAY,
-                        port = vncPort,
-                        password = vncPassword,
-                        logger = logger
-                    )
-                    if (!mirror.success) {
-                        logger?.w("[!] VNC mirror failed, but Integrated X11 remains available on ${Constants.X11_DISPLAY}")
-                        VncConnectionGuide.logAdbForwardRestartRecovery(
-                            port = vncPort,
-                            logger = logger,
-                            onlyIfTroubleshooting = true
-                        )
-                        false
-                    } else {
-                        logger?.i("[+] Integrated X11 and VNC are sharing ${Constants.X11_DISPLAY}")
-                        VncConnectionGuide.logAfterSuccessfulStart(
-                            containerName = containerName,
-                            port = vncPort,
-                            password = vncPassword,
-                            logger = logger
-                        )
-                        true
-                    }
-                }
-            }
         }
+    }
+
+    /**
+     * X11APP can reserve another display while VNC runs. X11-0nly cannot and must
+     * not grow that allocator. If this same container currently owns fixed :0,
+     * stop only its managed desktop and the fixed X11 server before standalone VNC.
+     * Another container's :0 session is never touched by a VNC-only start.
+     */
+    private suspend fun ensureFixedIntegratedX11StoppedForVnc(
+        containerName: String,
+        logger: ContainerLogger?
+    ): Boolean {
+        if (X11SessionManager.getServerStatus() != X11ServerStatus.Running) {
+            logger?.i("[X11] ✓ Monitor 1 (${Constants.X11_DISPLAY}) is already stopped")
+            return true
+        }
+
+        val owner = X11SessionManager.getOwnerContainerName()
+        if (owner != null && owner != containerName) {
+            logger?.i("[X11] • Monitor 1 (${Constants.X11_DISPLAY}) remains owned by $owner")
+            return true
+        }
+
+        logger?.i("[X11] Switching this container to standalone VNC; stopping Monitor 1 (${Constants.X11_DISPLAY})")
+        X11SessionManager.stopContainerGraphicSession(containerName, logger)
+        val stopped = X11SessionManager.stopIntegratedServer(logger)
+        if (!stopped) {
+            logger?.e("[X11] ✗ Could not stop Monitor 1 (${Constants.X11_DISPLAY}) before VNC start")
+            return false
+        }
+        logger?.i("[X11] ✓ Monitor 1 (${Constants.X11_DISPLAY}) stopped; container remains available for VNC")
+        return true
     }
 
     private suspend fun confirmManagedDesktop(

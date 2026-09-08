@@ -19,8 +19,7 @@ import com.saas.x11manager.ui.component.ContainerCardActions
 import com.saas.x11manager.ui.component.TerminalDialog
 import com.saas.x11manager.util.ContainerInfo
 import com.saas.x11manager.util.GraphicSessionUserManager
-import com.saas.x11manager.util.GraphicSessionUserSelection
-import com.saas.x11manager.util.SessionAccessMode
+import com.saas.x11manager.util.RuntimeAccessPolicy
 import com.saas.x11manager.util.VncSettings
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -34,7 +33,8 @@ fun HomeScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val expandedContainerName = remember { mutableStateOf<String?>(null) }
     var generalSettingsContainer by remember { mutableStateOf<String?>(null) }
-    var pendingStartContainer by remember { mutableStateOf<ContainerInfo?>(null) }
+    var pendingUserContainer by remember { mutableStateOf<ContainerInfo?>(null) }
+    var pendingAccessContainer by remember { mutableStateOf<ContainerInfo?>(null) }
     val activeOperation = viewModel.runningOperationContainer
 
     generalSettingsContainer?.let { containerName ->
@@ -44,19 +44,42 @@ fun HomeScreen(
         )
     }
 
-    pendingStartContainer?.let { container ->
-        val accessMode = VncSettings.getAccessMode(context, container.name)
-        val vncPort = VncSettings.getPort(context, container.name)
+    pendingUserContainer?.let { container ->
         GraphicSessionUserDialog(
             containerName = container.name,
-            onDismiss = { pendingStartContainer = null },
+            onDismiss = { pendingUserContainer = null },
             onConfirm = { selection ->
                 GraphicSessionUserManager.selectForNextStart(container.name, selection)
-                pendingStartContainer = null
+                pendingUserContainer = null
+                pendingAccessContainer = container
+            }
+        )
+    }
+
+    pendingAccessContainer?.let { container ->
+        val port = VncSettings.getPort(context, container.name)
+        val initialMode = RuntimeAccessPolicy.normalize(
+            VncSettings.getAccessMode(context, container.name)
+        )
+        GraphicAccessDialog(
+            containerName = container.name,
+            port = port,
+            initialMode = initialMode,
+            onDismiss = { pendingAccessContainer = null },
+            onBack = {
+                pendingAccessContainer = null
+                pendingUserContainer = container
+            },
+            onConfirm = { mode, vncPort, adbLocalPort, password ->
+                val runtimeMode = RuntimeAccessPolicy.normalize(mode)
+                VncSettings.setAccessMode(context, container.name, runtimeMode)
+                pendingAccessContainer = null
                 viewModel.startSession(
                     container = container,
-                    accessMode = accessMode,
-                    vncPort = vncPort
+                    accessMode = runtimeMode,
+                    vncPort = vncPort,
+                    vncAdbLocalPort = adbLocalPort,
+                    vncPassword = password
                 )
             }
         )
@@ -73,6 +96,15 @@ fun HomeScreen(
             onClear = { viewModel.clearLogsBuffer(containerName) },
             isBlocking = isBlocking
         )
+    }
+
+    val startWizardVisible = pendingUserContainer != null || pendingAccessContainer != null
+    if (startWizardVisible) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {}
+        return
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -116,40 +148,21 @@ fun HomeScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     items(containers, key = { it.name }) { container ->
-                        val accessMode = VncSettings.getAccessMode(context, container.name)
-                        val vncPort = VncSettings.getPort(context, container.name)
-                        val startLabel = when (accessMode) {
-                            SessionAccessMode.INTEGRATED_X11 -> "Start X11"
-                            SessionAccessMode.VNC -> "Start VNC"
-                            SessionAccessMode.BOTH -> "Start Both"
-                        }
-
                         ContainerCard(
                             container = container,
                             isExpanded = expandedContainerName.value == container.name,
                             isOperationRunning = activeOperation != null,
                             actions = ContainerCardActions(
-                                startLabel = startLabel,
+                                // The transport is intentionally not encoded in the
+                                // card anymore. Start first chooses the Linux user,
+                                // then asks for Integrated X11 or standalone VNC.
+                                startLabel = "Start",
                                 onToggleExpand = {
                                     expandedContainerName.value =
                                         if (expandedContainerName.value == container.name) null else container.name
                                 },
                                 onShowLogs = { viewModel.showLogs(container) },
-                                onStartX11 = {
-                                    if (accessMode == SessionAccessMode.VNC) {
-                                        GraphicSessionUserManager.selectForNextStart(
-                                            container.name,
-                                            GraphicSessionUserSelection.ROOT
-                                        )
-                                        viewModel.startSession(
-                                            container = container,
-                                            accessMode = accessMode,
-                                            vncPort = vncPort
-                                        )
-                                    } else {
-                                        pendingStartContainer = container
-                                    }
-                                },
+                                onStartX11 = { pendingUserContainer = container },
                                 onStop = { viewModel.stopContainer(container) },
                                 onEdit = {
                                     expandedContainerName.value = null

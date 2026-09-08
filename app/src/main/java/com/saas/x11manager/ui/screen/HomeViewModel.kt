@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.saas.x11manager.X11Application
 import com.saas.x11manager.util.*
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.CancellationException
@@ -50,7 +51,6 @@ class HomeViewModel : ViewModel() {
         private set
 
     var showLogViewerFor by mutableStateOf<String?>(null)
-
     var navigateToEdit by mutableStateOf<String?>(null)
 
     private val _kernelVersion = MutableStateFlow("")
@@ -243,8 +243,15 @@ class HomeViewModel : ViewModel() {
         _containers.value = snapshot.containers
         _x11ServerStatus.value = snapshot.x11Status
         _x11ServerPid.value = snapshot.x11Pid
+
+        // Active VNC connection details live only for the active runtime. If a
+        // container is stopped externally, drop that pinned block on refresh.
+        snapshot.containers.filterNot { it.isRunning }.forEach { container ->
+            containerLogs[container.name]?.let(::removePinnedVncSummary)
+        }
     }
 
+    /** Fixed X11-0nly runtime snapshot: one server, one PID, one :0 display. */
     private suspend fun readRuntimeSnapshot(): RuntimeRefreshSnapshot = withContext(Dispatchers.IO) {
         val containers = ContainerManager.listContainers()
         RuntimeRefreshSnapshot(
@@ -272,7 +279,9 @@ class HomeViewModel : ViewModel() {
     fun startSession(
         container: ContainerInfo,
         accessMode: SessionAccessMode,
-        vncPort: Int
+        vncPort: Int,
+        vncAdbLocalPort: Int = vncPort,
+        vncPassword: String? = null
     ) {
         if (!tryBeginOperation(container.name)) return
 
@@ -296,18 +305,17 @@ class HomeViewModel : ViewModel() {
                     return@launch
                 }
 
-                logger.i("[CTX] Saved access method: ${accessMode.label}")
-                if (accessMode.requiresVnc) {
-                    logger.i("[CTX] Saved VNC port: $vncPort")
-                }
+                val runtimeMode = RuntimeAccessPolicy.normalize(accessMode)
+                logger.i("[CTX] Access method: ${runtimeMode.label}")
 
                 val started = SessionAccessManager.start(
                     containerName = container.name,
                     platform = profile.platform,
                     session = session,
-                    accessMode = accessMode,
+                    accessMode = runtimeMode,
                     vncPort = vncPort,
-                    vncPassword = null,
+                    vncAdbLocalPort = vncAdbLocalPort,
+                    vncPassword = vncPassword,
                     logger = logger
                 )
 
@@ -316,7 +324,7 @@ class HomeViewModel : ViewModel() {
                     updateContainerState(container.name, ContainerStatus.RUNNING, pid)
                 }
                 if (!started) {
-                    logger.e("[-] ${accessMode.label} start was not fully confirmed")
+                    logger.e("[-] ${runtimeMode.label} start was not fully confirmed")
                 }
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "startSession failed", e)
@@ -340,12 +348,31 @@ class HomeViewModel : ViewModel() {
 
         viewModelScope.launch {
             val logs = logsFor(container.name)
+            // Keep current VNC connection details visible throughout Stop. They
+            // are removed only after VNC cleanup is actually confirmed.
+            val pinnedAtStopStart = VncConnectionGuide.retainPinnedSummary(logs)
             logs.clear()
+            logs.addAll(pinnedAtStopStart)
             showLogViewerFor = container.name
             val logger = ViewModelLogger { level, message -> appendLog(logs, level, message) }
 
             try {
-                VncServerManager.stopManagedVnc(container.name, logger)
+                val accessMode = RuntimeAccessPolicy.normalize(
+                    VncSettings.getAccessMode(X11Application.instance, container.name)
+                )
+                if (accessMode.requiresVnc) {
+                    logger.i("[VNC] Stop requested for active standalone VNC")
+                    logger.i("[CONTAINER] • Container: ${container.name}")
+                    logger.i("[VNC] Stopping VNC desktop and server runtime")
+                    val vncStopped = VncServerManager.stopManagedVnc(container.name, logger)
+                    if (vncStopped) {
+                        removePinnedVncSummary(logs)
+                        logger.i("[VNC] ✓ VNC runtime stopped; active connection details released")
+                    } else {
+                        logger.w("[VNC] ! VNC runtime cleanup could not be fully confirmed; active connection details retained")
+                    }
+                }
+
                 val stopped = X11SessionManager.stopX11Session(container.name, logger)
                 if (stopped) {
                     updateContainerState(container.name, ContainerStatus.STOPPED, null)
@@ -368,12 +395,18 @@ class HomeViewModel : ViewModel() {
             try {
                 val currentContainers = ContainerManager.listContainers()
                 currentContainers.filter { it.isRunning }.forEach { container ->
-                    VncServerManager.stopManagedVnc(container.name, logger)
+                    val accessMode = RuntimeAccessPolicy.normalize(
+                        VncSettings.getAccessMode(X11Application.instance, container.name)
+                    )
+                    if (accessMode.requiresVnc) {
+                        VncServerManager.stopManagedVnc(container.name, logger)
+                    }
                 }
                 X11SessionManager.stopAll(logger)
                 _containers.value = _containers.value.map {
                     it.copy(status = ContainerStatus.STOPPED, pid = null)
                 }
+                containerLogs.values.forEach(::removePinnedVncSummary)
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "stopAll failed", e)
             } finally {
@@ -396,7 +429,7 @@ class HomeViewModel : ViewModel() {
                 appendLog(logs, Log.INFO, "  Hostname: ${container.hostname}")
             }
             appendLog(logs, Log.INFO, "")
-            appendLog(logs, Log.INFO, "Start the configured graphic session to see live logs.")
+            appendLog(logs, Log.INFO, "Press Start to choose a Linux user and X11 or VNC.")
         }
     }
 
@@ -405,7 +438,10 @@ class HomeViewModel : ViewModel() {
     }
 
     fun clearLogsBuffer(name: String) {
-        containerLogs[name]?.clear()
+        val logs = containerLogs[name] ?: return
+        val pinned = VncConnectionGuide.retainPinnedSummary(logs)
+        logs.clear()
+        logs.addAll(pinned)
         containerLogs = containerLogs.toMutableMap()
     }
 
@@ -424,6 +460,26 @@ class HomeViewModel : ViewModel() {
         return newLogs
     }
 
+    private fun removePinnedVncSummary(logs: SnapshotStateList<Pair<Int, String>>) {
+        if (!VncConnectionGuide.hasPinnedSummary(logs)) return
+        var insidePinned = false
+        val retained = logs.filter { entry ->
+            when (entry.second) {
+                VncConnectionGuide.ACTIVE_SUMMARY_BEGIN -> {
+                    insidePinned = true
+                    false
+                }
+                VncConnectionGuide.ACTIVE_SUMMARY_END -> {
+                    insidePinned = false
+                    false
+                }
+                else -> !insidePinned
+            }
+        }
+        logs.clear()
+        logs.addAll(retained)
+    }
+
     private fun appendLog(
         logs: SnapshotStateList<Pair<Int, String>>,
         level: Int,
@@ -431,9 +487,13 @@ class HomeViewModel : ViewModel() {
     ) {
         logs.add(level to message)
         if (logs.size > MAX_LOG_ENTRIES) {
+            val pinned = VncConnectionGuide.retainPinnedSummary(logs)
             val retained = logs.takeLast(LOG_ENTRIES_AFTER_TRIM)
             logs.clear()
             logs.addAll(retained)
+            pinned.forEach { entry ->
+                if (logs.none { it.second == entry.second }) logs.add(entry)
+            }
         }
     }
 

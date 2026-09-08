@@ -24,9 +24,9 @@ data class VncStartResult(
  *
  * No VNC implementation is bundled in the APK. The Manager detects TigerVNC in
  * the selected DroidSpaces container and installs the distro package only when
- * the required executable is missing. Standalone VNC owns a private Xvnc display;
- * BOTH uses x0vncserver to expose the exact already-running Integrated X11 screen
- * instead of starting a second desktop session.
+ * the required executable is missing. Standalone VNC owns a private Xvnc display.
+ * The mirror path remains only for backward API compatibility; current UI policy
+ * exposes standalone VNC and Integrated X11 as separate runtime choices.
  */
 object VncServerManager {
     private const val STATE_DIR = "/run/saas-x11-manager-vnc"
@@ -71,6 +71,9 @@ object VncServerManager {
         val lease = ensureContainerReady(containerName, logger)
             ?: return@withContext VncStartResult(false, port)
 
+        logger?.i(LogLayout.SPACER)
+        logger?.i("[VNC] Preparing TigerVNC runtime")
+
         var success = false
         try {
             if (!prepareTigerVnc(
@@ -84,6 +87,8 @@ object VncServerManager {
                 return@withContext VncStartResult(false, port)
             }
 
+            logger?.i(LogLayout.SPACER)
+            logger?.i("[VNC] Launching standalone VNC runtime")
             stopManagedVnc(containerName, logger)
             if (isPortListening(containerName, port)) {
                 logger?.e("[-] Port $port is already in use inside the container network namespace")
@@ -104,7 +109,8 @@ object VncServerManager {
             val launchCommand = standaloneLaunchCommand(
                 displayNumber = displayNumber,
                 port = port,
-                settings = launchSettings
+                settings = launchSettings,
+                passwordEnabled = password != null
             )
             if (!runContainerCommand(
                     containerName,
@@ -148,7 +154,6 @@ object VncServerManager {
                 return@withContext VncStartResult(false, port, displayName)
             }
 
-            logConnectionAddresses(containerName, port, displayName, mirror = false, logger = logger)
             logger?.i("[+] VNC server started successfully")
             success = true
             VncStartResult(true, port, displayName = displayName)
@@ -300,10 +305,8 @@ object VncServerManager {
             return false
         }
 
-        val existingPassword = probeContainer(containerName, "test -s $PASSWORD_FILE")
-        if (password == null && !existingPassword) {
-            logger?.e("[-] No TigerVNC password is configured for this container")
-            logger?.e("[-] Open Edit container and choose VNC/Both once to configure it")
+        if (needsMirror && password == null && !probeContainer(containerName, "test -s $PASSWORD_FILE")) {
+            logger?.e("[-] Legacy VNC mirror requires an existing TigerVNC password file")
             return false
         }
 
@@ -353,12 +356,17 @@ object VncServerManager {
                     "printf '%s\\n' ${shellQuote(password)} | \"\$tool\" -f > $PASSWORD_FILE && " +
                     "chmod 600 $PASSWORD_FILE && test -s $PASSWORD_FILE"
             logger?.i("[+] Configuring TigerVNC authentication")
-            // Deliberately do not print this command: it contains the user password.
             if (!runContainerCommandRaw(containerName, passwordCommand)) {
                 logger?.e("[-] Could not create the TigerVNC password file")
                 return false
             }
             logger?.i("[+] TigerVNC password file ready")
+        } else if (!needsMirror) {
+            if (!runContainerCommandRaw(containerName, "rm -f $PASSWORD_FILE")) {
+                logger?.e("[-] Could not clear the previous Manager-owned VNC password file")
+                return false
+            }
+            logger?.i("[VNC] • Authentication: none for this Start")
         }
 
         if (!needsMirror) {
@@ -369,7 +377,7 @@ object VncServerManager {
                     "chmod 755 $SESSION_SCRIPT"
             if (!runContainerCommand(
                     containerName,
-                    "Writing VNC session launcher for ${session.label}",
+                    "Writing user-aware VNC session launcher for ${session.label}",
                     writeLauncher,
                     logger,
                     logCommand = false
@@ -459,38 +467,20 @@ object VncServerManager {
         }
     }
 
-    private fun sessionLauncher(session: GraphicSession): String {
-        val protocol = if (session.protocol == GraphicProtocol.WAYLAND) "wayland" else "x11"
-        val waylandEnvironment = if (session.protocol == GraphicProtocol.WAYLAND) {
-            "export XDG_SESSION_TYPE=wayland\n" +
-                "export XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
-                "mkdir -p \"\$XDG_RUNTIME_DIR\" && chmod 700 \"\$XDG_RUNTIME_DIR\"\n" +
-                "unset WAYLAND_DISPLAY\n"
-        } else {
-            "export XDG_SESSION_TYPE=x11\n" +
-                "export XDG_RUNTIME_DIR=/tmp/runtime-root\n" +
-                "mkdir -p \"\$XDG_RUNTIME_DIR\" && chmod 700 \"\$XDG_RUNTIME_DIR\"\n"
-        }
-        return "#!/bin/sh\n" +
-            "export HOME=/root\n" +
-            "export USER=root\n" +
-            "export SHELL=/bin/sh\n" +
-            waylandEnvironment +
-            "export SAAS_GRAPHIC_PROTOCOL=$protocol\n" +
-            PulseAudioClientConfig.sessionEnvironment() +
-            "exec ${session.startCommand}\n"
-    }
+    private fun sessionLauncher(session: GraphicSession): String =
+        GraphicSessionInitFiles.vncSessionScript(session, "/bin/sh")
 
     private fun standaloneLaunchCommand(
         displayNumber: Int,
         port: Int,
-        settings: VncLaunchSettings
+        settings: VncLaunchSettings,
+        passwordEnabled: Boolean
     ): String {
         val argv = TigerVncCommandOptions.standalone(
             settings = settings,
             displayNumber = displayNumber,
             port = port,
-            passwordFile = PASSWORD_FILE
+            passwordFile = PASSWORD_FILE.takeIf { passwordEnabled }
         ).joinToString(" ") { shellQuote(it) }
 
         return "mkdir -p /root/.vnc /tmp/.X11-unix $STATE_DIR && chmod 1777 /tmp/.X11-unix && " +
