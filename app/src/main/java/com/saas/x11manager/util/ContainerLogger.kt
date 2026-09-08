@@ -35,7 +35,9 @@ class ViewModelLogger(
     private val reducerLock = Any()
     private val dispatchLock = Any()
     private val pendingUiEntries = mutableListOf<Pair<Int, String>>()
+    private val stableFacts = mutableSetOf<String>()
     private var uiFlushScheduled = false
+    private var graphicalStartSeen = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private val flushRunnable = Runnable {
@@ -92,13 +94,45 @@ class ViewModelLogger(
 
     private fun reduce(level: Int, msg: String): List<Pair<Int, String>> =
         synchronized(reducerLock) {
-            reducer.reduce(level, msg).filterNot { (_, text) ->
-                // Replaced by VncConnectionGuide's exact active-session summary.
-                // Keeping these legacy generic lines would either duplicate the
-                // new facts or refer to addresses that the reducer intentionally
-                // did not retain.
-                text == "[VNC] ✓ Connect with any standard VNC client using one of the reachable addresses above" ||
-                    text == "[VNC] ✓ Previous Manager-owned VNC runtime cleared"
-            }
+            reducer.reduce(level, msg)
+                .filterNot { (_, text) ->
+                    // Replaced by VncConnectionGuide's exact active-session summary.
+                    // Keeping these legacy generic lines would either duplicate the
+                    // new facts or refer to addresses that the reducer intentionally
+                    // did not retain.
+                    text == "[VNC] ✓ Connect with any standard VNC client using one of the reachable addresses above" ||
+                        text == "[VNC] ✓ Previous Manager-owned VNC runtime cleared"
+                }
+                .filter { (_, text) -> keepSemanticFact(text) }
         }
+
+    private fun keepSemanticFact(text: String): Boolean {
+        if (text == "[SESSION] Starting graphical access") {
+            graphicalStartSeen = true
+            return true
+        }
+
+        // Home knows the chosen mode before SessionAccessManager owns the Start.
+        // Do not print that pre-flight copy; retain the same fact when it arrives
+        // immediately after the official graphical-start lifecycle marker.
+        if (text.startsWith("[SESSION] • Access:") && !graphicalStartSeen) {
+            return false
+        }
+
+        // The pinned summary must be self-contained even if the same container,
+        // desktop or user was already named earlier in the operation.
+        if (text == VncConnectionGuide.ACTIVE_SUMMARY_BEGIN) {
+            stableFacts.clear()
+            return true
+        }
+
+        if (!isStableFact(text)) return true
+        return stableFacts.add(text)
+    }
+
+    private fun isStableFact(text: String): Boolean =
+        text.startsWith("[SESSION] • Access:") ||
+            text.startsWith("[SESSION] • Desktop:") ||
+            text.startsWith("[USER] • Desktop user:") ||
+            text.startsWith("[CONTAINER] • Container:")
 }
