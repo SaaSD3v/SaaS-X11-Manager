@@ -107,12 +107,13 @@ class VncLaunchSettingsPolicyTest {
     }
 
     @Test
-    fun extraArgumentsCannotOverrideManagerOwnedPortDisplayOrPassword() {
+    fun extraArgumentsCannotOverrideManagerOwnedPortDisplayPasswordOrSecurityPolicy() {
         listOf(
             "-rfbport=5999",
             "-Password=secret",
             "-PasswordFile=/tmp/p",
             "-rfbauth=/tmp/p",
+            "-SecurityTypes=VncAuth",
             "-display=:99"
         ).forEach { value ->
             val error = TigerVncCommandOptions.validateExtraArguments(value)
