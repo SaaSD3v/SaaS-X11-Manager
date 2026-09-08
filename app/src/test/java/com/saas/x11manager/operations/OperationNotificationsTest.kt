@@ -117,6 +117,29 @@ class OperationNotificationsTest {
         controller.destroy()
     }
 
+    @Test fun replacingACompletedRunBeforeTheServiceUpdateLeavesNoOrphanProgress() {
+        val operation = operation(OperationArea.HOME, "jellyfin")
+        operation.notified = true
+        val oldGeneration = operation.generation
+        val controller = Robolectric.buildService(LogOperationService::class.java).create()
+        controller.get().onStartCommand(Intent(app, LogOperationService::class.java)
+            .putExtra(OperationNotifications.OWNER, operation.owner.key), 0, 1)
+        operation.finish(true, "Started")
+        operation.begin("Stopping jellyfin")
+        advance()
+        assertNull(shadowOf(notifications).getNotification(operation.notificationId))
+        assertTrue(shadowOf(controller.get()).isStoppedBySelf)
+        controller.destroy()
+        val delayed = Robolectric.buildService(LogOperationService::class.java).create()
+        delayed.get().onStartCommand(Intent(app, LogOperationService::class.java)
+            .putExtra(OperationNotifications.OWNER, operation.owner.key)
+            .putExtra(OperationNotifications.GENERATION, oldGeneration), 0, 1)
+        assertNull(shadowOf(notifications).getNotification(operation.notificationId))
+        assertNull(shadowOf(notifications).getNotification(4099))
+        assertTrue(shadowOf(delayed.get()).isStoppedBySelf)
+        delayed.destroy()
+    }
+
     @Test fun clearingTheActivityDoesNotCancelTheOperationViewModel() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup()
         val original = ViewModelProvider(app)[BackgroundTask::class.java]
@@ -135,7 +158,9 @@ class OperationNotificationsTest {
     @Test fun finalLoggerBurstIsDrainedBeforeTheDurableResultAndLiveCredentialsStayPrivate() {
         val operation = operation(OperationArea.SETUP, "alpine")
         val logger = ViewModelLogger(operation::append)
+        logger.logImmediate(Log.INFO, "--- Installing Graphic Session: IceWM ---")
         logger.logImmediate(Log.INFO, "[+] IceWM installation completed successfully")
+        assertTrue(operation.logs.isEmpty())
         runBlocking { logger.flush() }
         operation.append(Log.INFO, VncConnectionGuide.ACTIVE_SUMMARY_BEGIN)
         operation.append(Log.INFO, "[VNC] • Password: secret-for-live-view-only")

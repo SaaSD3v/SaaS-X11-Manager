@@ -3,7 +3,6 @@ package com.saas.x11manager.ui.screen
 import android.os.Build
 import android.util.Log
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
@@ -375,16 +374,19 @@ class HomeViewModel : ViewModel() {
     fun showLogs(container: ContainerInfo) {
         showLogViewerFor = container.name
         val logs = logsFor(container.name)
-        if (logs.isEmpty()) {
-            val status = if (container.isRunning) "Running" else "Stopped"
-            val pidLine = if (container.pid != null) "  PID: ${container.pid}" else ""
-            appendLog(logs, Log.INFO, "Container: ${container.name}")
-            appendLog(logs, Log.INFO, "  Status: $status$pidLine")
-            appendLog(logs, Log.INFO, "  Rootfs: ${container.rootfsPath}")
-            if (container.hostname.isNotEmpty()) appendLog(logs, Log.INFO, "  Hostname: ${container.hostname}")
-            appendLog(logs, Log.INFO, "")
-            appendLog(logs, Log.INFO, "Press Start to choose a Linux user and X11 or VNC.")
-            logOperation(container.name).changed(immediate = true)
+        viewModelScope.launch {
+            operationStore.awaitLoaded()
+            if (logs.isEmpty() && !logOperation(container.name).running) {
+                val status = if (container.isRunning) "Running" else "Stopped"
+                val pidLine = if (container.pid != null) "  PID: ${container.pid}" else ""
+                appendLog(logs, Log.INFO, "Container: ${container.name}")
+                appendLog(logs, Log.INFO, "  Status: $status$pidLine")
+                appendLog(logs, Log.INFO, "  Rootfs: ${container.rootfsPath}")
+                if (container.hostname.isNotEmpty()) appendLog(logs, Log.INFO, "  Hostname: ${container.hostname}")
+                appendLog(logs, Log.INFO, "")
+                appendLog(logs, Log.INFO, "Press Start to choose a Linux user and X11 or VNC.")
+                logOperation(container.name).changed(immediate = true)
+            }
         }
     }
 

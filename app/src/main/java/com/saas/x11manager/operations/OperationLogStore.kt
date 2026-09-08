@@ -115,7 +115,9 @@ class OperationLogStore(internal val context: Context) {
     init {
         scope.launch {
             val saved = withContext(Dispatchers.IO) {
-                directory.listFiles().orEmpty().filter { it.extension == "log" }.mapNotNull { file ->
+                directory.listFiles().orEmpty()
+                    .filter { it.name.endsWith(".log") || it.name.endsWith(".log.bak") }
+                    .map { File(it.path.removeSuffix(".bak")) }.distinct().mapNotNull { file ->
                     runCatching { AtomicFile(file).openRead().use(OperationArchive::read).recovered() }
                         .getOrNull()
                 }
@@ -175,7 +177,8 @@ class OperationLogStore(internal val context: Context) {
                 // Called only from the visible minus button, satisfying FGS start restrictions.
                 ContextCompat.startForegroundService(context,
                     Intent(context, LogOperationService::class.java)
-                        .putExtra(OperationNotifications.OWNER, operation.owner.key))
+                        .putExtra(OperationNotifications.OWNER, operation.owner.key)
+                        .putExtra(OperationNotifications.GENERATION, operation.generation))
             } else OperationNotifications.post(context, operation)
             true
         } catch (error: RuntimeException) {

@@ -88,7 +88,11 @@ fun EditContainerScreen(
         viewModel.configureWizardSession(session, alpineProfile = profile)
     }
 
-    LaunchedEffect(name, status, containerName) {
+    LaunchedEffect(name, status, containerName, isInstalling) {
+        if (isInstalling) {
+            entryRunningWarningHandled = true
+            return@LaunchedEffect
+        }
         if (!entryRunningWarningHandled && name == containerName) {
             when (status) {
                 ContainerStatus.RUNNING -> {

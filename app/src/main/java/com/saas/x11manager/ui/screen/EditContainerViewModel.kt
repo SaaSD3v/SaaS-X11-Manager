@@ -511,6 +511,7 @@ class EditContainerViewModel : ViewModel() {
                         canStartGraphicSessionFromInstall = false
                     }
                 } catch (e: Exception) {
+                    logger.flush()
                     logOperationException(e, "${session.label} installation failed")
                     canStartGraphicSessionFromInstall = false
                 } finally {
@@ -574,6 +575,7 @@ class EditContainerViewModel : ViewModel() {
                         installResult = "Error: ${session.label} verification failed"
                     }
                 } catch (e: Exception) {
+                    logger.flush()
                     logOperationException(e, "${session.label} verification failed")
                 } finally {
                     try { refreshRuntimeStatus() } catch (error: Exception) {
