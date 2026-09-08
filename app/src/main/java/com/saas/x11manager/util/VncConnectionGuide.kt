@@ -13,8 +13,8 @@ import kotlinx.coroutines.withContext
  * is actually listening.
  */
 object VncConnectionGuide {
-    const val ACTIVE_SUMMARY_BEGIN = "[VNC] ── Active VNC session ──"
-    const val ACTIVE_SUMMARY_END = "[VNC] ─────────────────────────"
+    const val ACTIVE_SUMMARY_BEGIN = "[VNC] Active VNC session"
+    const val ACTIVE_SUMMARY_END = "[VNC] ✓ Connection details pinned until this session ends"
 
     suspend fun logAfterSuccessfulStart(
         containerName: String,
@@ -35,22 +35,26 @@ object VncConnectionGuide {
                 com.saas.x11manager.X11Application.instance,
                 containerName
             )
+            val containerIpv4 = containerIpv4Addresses(containerName)
             RuntimeConnectionSnapshot(
                 netMode = info?.netMode?.trim()?.lowercase(),
-                containerIpv4 = containerIpv4Addresses(containerName),
-                preferredLan = preferredLanAddress(),
+                containerIpv4 = containerIpv4,
+                preferredHost = preferredHostAddress(containerIpv4.toSet()),
                 androidHostPortListening = isAndroidHostPortListening(port),
                 settings = settings
             )
         }
 
-        logger.i("")
+        logger.i(LogLayout.SPACER)
         logger.i(ACTIVE_SUMMARY_BEGIN)
         logger.i("[VNC] ✓ Standalone VNC is ready")
         logger.i("[CONTAINER] • Container: $containerName")
         logger.i("[USER] • Desktop user: $desktopUser")
         logger.i("[SESSION] • Desktop: ${session.label}")
         displayName?.let { logger.i("[VNC] • Virtual X display: $it") }
+
+        logger.i(LogLayout.SPACER)
+        logger.i("[VNC] Connection")
         logger.i("[VNC] • Server port: $port")
         logger.i("[VNC] • Resolution: ${runtime.settings.geometry}")
         logger.i("[VNC] • Color depth: ${runtime.settings.depth}")
@@ -63,68 +67,87 @@ object VncConnectionGuide {
         }
         logger.i("[VNC] • Localhost only: ${onOff(runtime.settings.localhostOnly)}")
         logger.i("[VNC] • IPv4: ${onOff(runtime.settings.useIPv4)} · IPv6: ${onOff(runtime.settings.useIPv6)}")
+        logger.i("[VNC] • Container network mode: ${runtime.netMode ?: "unknown"}")
 
         if (runtime.containerIpv4.isEmpty()) {
             logger.w("[VNC] ! Container IPv4 address could not be resolved")
         } else {
             runtime.containerIpv4.forEach { ip ->
-                logger.i("[VNC] • Container IPv4: $ip:$port")
+                logger.i("[VNC] • Container endpoint: $ip:$port")
             }
+        }
+
+        val host = runtime.preferredHost
+        if (host == null) {
+            logger.w("[VNC] ! Android host LAN/Wi-Fi IPv4 address could not be confirmed")
+        } else {
+            logger.i("[VNC] • Android host IPv4 (${host.interfaceName}): ${host.address}")
         }
 
         when {
-            runtime.preferredLan == null -> {
-                logger.w("[VNC] ! Android LAN/Wi-Fi IPv4 address could not be detected")
-            }
             runtime.settings.localhostOnly -> {
-                logger.i("[VNC] • Detected Android LAN: ${runtime.preferredLan}:$port")
+                logger.i("[VNC] • Android host TCP $port: ${confirmed(runtime.androidHostPortListening)}")
                 logger.w("[VNC] ! Direct LAN VNC is disabled because Localhost only is enabled")
             }
-            runtime.androidHostPortListening -> {
-                logger.i("[VNC] • Android/LAN endpoint: ${runtime.preferredLan}:$port")
+            runtime.androidHostPortListening && host != null -> {
+                logger.i("[VNC] • Android host TCP $port: confirmed listening")
+                logger.i("[VNC] • LAN endpoint: ${host.address}:$port")
             }
-            runtime.netMode == "host" -> {
-                logger.i("[VNC] • Detected Android LAN: ${runtime.preferredLan}:$port")
-                logger.w("[VNC] ! Android host TCP $port was not confirmed listening; do not assume this LAN endpoint is reachable")
+            runtime.androidHostPortListening -> {
+                logger.i("[VNC] • Android host TCP $port: confirmed listening")
+                logger.w("[VNC] ! No Android LAN address was confirmed for a direct LAN endpoint")
             }
             else -> {
-                logger.i("[VNC] • Detected Android LAN: ${runtime.preferredLan}:$port")
-                logger.w(
-                    "[VNC] ! Container network mode is ${runtime.netMode ?: "unknown"}; direct LAN access requires a real DroidSpaces host-port publication"
-                )
+                logger.i("[VNC] • Android host TCP $port: not confirmed")
+                if (runtime.netMode == "host") {
+                    logger.w("[VNC] ! Host networking is configured, but this TCP listener was not confirmed on Android")
+                } else {
+                    logger.w("[VNC] ! Direct LAN access needs a real DroidSpaces host-port publication")
+                }
             }
         }
 
-        logger.i("[VNC] • ADB forward local port selected: $effectiveLocalPort")
+        logger.i(LogLayout.SPACER)
+        logger.i("[VNC] USB / ADB")
+        logger.i("[VNC] • PC local port: $effectiveLocalPort")
         if (runtime.androidHostPortListening) {
-            logger.i("[VNC] • Android host target: 127.0.0.1:$port")
-            logger.i("[VNC] • ADB forward command: adb forward tcp:$effectiveLocalPort tcp:$port")
-            logger.i("[VNC] • USB local endpoint after forward: 127.0.0.1:$effectiveLocalPort")
-            logger.i("[VNC] • ADB mapping: run the command on the PC; the Manager does not create PC-side forwards")
+            logger.i("[VNC] • Android target: 127.0.0.1:$port")
+            logger.i("[VNC] • Run on the PC:")
+            logger.i("[VNC]   adb forward tcp:$effectiveLocalPort tcp:$port")
+            logger.i("[VNC] • Then connect the VNC client to:")
+            logger.i("[VNC]   127.0.0.1:$effectiveLocalPort")
+            logger.i("[VNC] • The Manager does not create the PC-side ADB mapping automatically")
         } else {
-            logger.w("[VNC] ! Android host TCP $port is not listening, so an exact USB ADB forward target cannot be advertised yet")
-            logger.i("[VNC] • USB local endpoint after a valid forward will be: 127.0.0.1:$effectiveLocalPort")
-            logger.i("[VNC] • After DroidSpaces publishes VNC on Android host port <hostPort>, use: adb forward tcp:$effectiveLocalPort tcp:<hostPort>")
+            logger.w("[VNC] ! Android-side VNC TCP $port is not confirmed, so no exact ADB target is advertised")
+            logger.i("[VNC] • When DroidSpaces publishes VNC on Android as <hostPort>, run:")
+            logger.i("[VNC]   adb forward tcp:$effectiveLocalPort tcp:<hostPort>")
+            logger.i("[VNC] • Then connect the VNC client to:")
+            logger.i("[VNC]   127.0.0.1:$effectiveLocalPort")
         }
 
+        logger.i(LogLayout.SPACER)
+        logger.i("[VNC] Authentication")
         if (password != null) {
+            logger.i("[VNC] • Mode: VNC password")
             logger.i("[VNC] • Password: $password")
-            logger.i("[VNC] • Password visibility: kept only in this in-memory active-session log")
+            logger.i("[VNC] • Plaintext lifetime: this in-memory active-session log only")
         } else {
-            logger.i("[VNC] • Password: already configured inside the container")
-            logger.i("[VNC] • Password plaintext: unavailable to the Manager on this start")
+            logger.i("[VNC] • Mode: None")
+            logger.i("[VNC] • Password: none")
+            logger.w("[VNC] ! Any client that can reach this VNC port may connect")
         }
 
-        val overrides = effectiveNonDefaultSettings(runtime.settings)
+        logger.i(LogLayout.SPACER)
+        logger.i("[VNC] Advanced settings")
+        val overrides = effectiveNonDefaultSettings(runtime.settings, passwordEnabled = password != null)
         if (overrides.isEmpty()) {
-            logger.i("[VNC] • Advanced overrides: none; TigerVNC defaults/Manager defaults are in use")
+            logger.i("[VNC] • Overrides: none")
         } else {
-            logger.i("[VNC] • Effective non-default VNC settings:")
-            overrides.forEach { value -> logger.i("[VNC]   • $value") }
+            overrides.forEach { value -> logger.i("[VNC] • $value") }
         }
 
+        logger.i(LogLayout.SPACER)
         logger.i(ACTIVE_SUMMARY_END)
-        logger.i("[VNC] ✓ Connection information pinned until this VNC/container session ends")
     }
 
     /**
@@ -167,24 +190,27 @@ object VncConnectionGuide {
     ) {
         if (logger == null) return
         val effectiveLocalPort = if (VncSettings.isValidPort(localPort)) localPort else port
-        logger.i("")
+        logger.i(LogLayout.SPACER)
+        logger.i("[VNC] USB / ADB recovery")
         if (onlyIfTroubleshooting) {
-            logger.w("[VNC] ! If this VNC start failed after you previously created an ADB forward, remove the old PC mapping first")
+            logger.w("[VNC] ! A previous PC-side ADB mapping may need to be removed before retrying")
         } else {
-            logger.w("[VNC] ! For a later VNC restart over USB, recreate the ADB mapping only after VNC is ready")
+            logger.w("[VNC] ! Recreate a PC-side ADB mapping only after the VNC server is ready")
         }
-        logger.i("[VNC] • Remove old PC mapping: adb forward --remove tcp:$effectiveLocalPort")
-        logger.i("[VNC] • Start VNC again and wait until the Manager reports VNC ready")
-        logger.i("[VNC] • Recreate the mapping only if Android host TCP $port is published and listening")
-        logger.i("[VNC] • Mapping command: adb forward tcp:$effectiveLocalPort tcp:$port")
-        logger.i("[VNC] • USB client endpoint: 127.0.0.1:$effectiveLocalPort")
-        logger.w("[VNC] ! adb forward --remove changes only the PC-side ADB mapping; it does not stop TigerVNC")
+        logger.i("[VNC] • Remove the old PC mapping:")
+        logger.i("[VNC]   adb forward --remove tcp:$effectiveLocalPort")
+        logger.i("[VNC] • Start VNC again and wait for the ready confirmation")
+        logger.i("[VNC] • If Android host TCP $port is published and listening, recreate it with:")
+        logger.i("[VNC]   adb forward tcp:$effectiveLocalPort tcp:$port")
+        logger.i("[VNC] • USB client endpoint:")
+        logger.i("[VNC]   127.0.0.1:$effectiveLocalPort")
+        logger.w("[VNC] ! Removing an ADB forward changes only the PC-side mapping; it does not stop TigerVNC")
     }
 
     private data class RuntimeConnectionSnapshot(
         val netMode: String?,
         val containerIpv4: List<String>,
-        val preferredLan: String?,
+        val preferredHost: HostIpv4?,
         val androidHostPortListening: Boolean,
         val settings: VncLaunchSettings
     )
@@ -194,15 +220,16 @@ object VncConnectionGuide {
         val address: String
     )
 
-    private fun preferredLanAddress(): String? {
+    private fun preferredHostAddress(excludedAddresses: Set<String>): HostIpv4? {
         val addresses = androidHostIpv4Addresses()
+            .filterNot { it.address in excludedAddresses }
         if (addresses.isEmpty()) return null
 
         return addresses.minWithOrNull(
             compareBy<HostIpv4> { lanPriority(it) }
                 .thenBy { it.interfaceName }
                 .thenBy { it.address }
-        )?.address
+        )
     }
 
     private fun containerIpv4Addresses(containerName: String): List<String> {
@@ -249,10 +276,12 @@ object VncConnectionGuide {
             iface.startsWith("wlan") -> 0
             iface.startsWith("wifi") -> 1
             iface.startsWith("eth") -> 2
-            ip.startsWith("192.168.") -> 3
-            ip.startsWith("10.") -> 4
-            isPrivate172(ip) -> 5
-            else -> 6
+            iface.startsWith("rmnet") -> 3
+            iface.startsWith("br") || iface.startsWith("veth") || iface.startsWith("docker") -> 8
+            ip.startsWith("192.168.") -> 4
+            ip.startsWith("10.") -> 5
+            isPrivate172(ip) -> 6
+            else -> 7
         }
     }
 
@@ -272,7 +301,10 @@ object VncConnectionGuide {
         }
     }
 
-    private fun effectiveNonDefaultSettings(settings: VncLaunchSettings): List<String> {
+    private fun effectiveNonDefaultSettings(
+        settings: VncLaunchSettings,
+        passwordEnabled: Boolean
+    ): List<String> {
         val defaults = VncLaunchSettings()
         val out = mutableListOf<String>()
         fun changed(value: Any?, default: Any?, label: String, display: String = value.toString()) {
@@ -288,7 +320,13 @@ object VncConnectionGuide {
         changed(settings.localhostOnly, defaults.localhostOnly, "Localhost only", onOff(settings.localhostOnly))
         changed(settings.useIPv4, defaults.useIPv4, "IPv4", onOff(settings.useIPv4))
         changed(settings.useIPv6, defaults.useIPv6, "IPv6", onOff(settings.useIPv6))
-        changed(settings.securityTypes, defaults.securityTypes, "SecurityTypes", settings.securityTypes)
+        if (settings.securityTypes != defaults.securityTypes) {
+            out += if (passwordEnabled) {
+                "SecurityTypes: ${settings.securityTypes}"
+            } else {
+                "SecurityTypes: ${settings.securityTypes} (saved; passwordless Start uses None)"
+            }
+        }
         changed(settings.alwaysShared, defaults.alwaysShared, "Always shared", onOff(settings.alwaysShared))
         changed(settings.neverShared, defaults.neverShared, "Never shared", onOff(settings.neverShared))
         changed(settings.disconnectClients, defaults.disconnectClients, "Disconnect clients", onOff(settings.disconnectClients))
@@ -336,6 +374,8 @@ object VncConnectionGuide {
         value.lineSequence().map(String::trim).filter(String::isNotEmpty).joinToString(" | ")
 
     private fun onOff(value: Boolean): String = if (value) "On" else "Off"
+
+    private fun confirmed(value: Boolean): String = if (value) "confirmed listening" else "not confirmed"
 
     private fun isPrivate172(address: String): Boolean {
         val parts = address.split('.')
