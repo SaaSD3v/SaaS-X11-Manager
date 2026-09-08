@@ -70,14 +70,15 @@ fun HomeScreen(
                 pendingAccessContainer = null
                 pendingUserContainer = container
             },
-            onConfirm = { mode, password ->
+            onConfirm = { mode, vncPort, adbLocalPort, password ->
                 val runtimeMode = RuntimeAccessPolicy.normalize(mode)
                 VncSettings.setAccessMode(context, container.name, runtimeMode)
                 pendingAccessContainer = null
                 viewModel.startSession(
                     container = container,
                     accessMode = runtimeMode,
-                    vncPort = port,
+                    vncPort = vncPort,
+                    vncAdbLocalPort = adbLocalPort,
                     vncPassword = password
                 )
             }
