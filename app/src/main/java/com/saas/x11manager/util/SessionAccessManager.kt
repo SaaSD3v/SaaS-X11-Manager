@@ -19,6 +19,7 @@ object SessionAccessManager {
         session: GraphicSession,
         accessMode: SessionAccessMode,
         vncPort: Int,
+        vncAdbLocalPort: Int = vncPort,
         vncPassword: String? = null,
         logger: ContainerLogger? = null
     ): Boolean = startMutex.withLock {
@@ -28,6 +29,7 @@ object SessionAccessManager {
             session = session,
             accessMode = RuntimeAccessPolicy.normalize(accessMode),
             vncPort = vncPort,
+            vncAdbLocalPort = vncAdbLocalPort,
             vncPassword = vncPassword,
             logger = logger
         )
@@ -39,13 +41,18 @@ object SessionAccessManager {
         session: GraphicSession,
         accessMode: SessionAccessMode,
         vncPort: Int,
+        vncAdbLocalPort: Int,
         vncPassword: String?,
         logger: ContainerLogger?
     ): Boolean {
         logger?.i("--- Graphic Access Start ---")
         logger?.i("[CTX] Access method: ${accessMode.label}")
         logger?.i("[CTX] Session: ${session.label}")
-        if (accessMode.requiresVnc) logger?.i("[CTX] VNC port: $vncPort")
+        if (accessMode.requiresVnc) {
+            logger?.i("[VNC] Preparing standalone VNC transport")
+            logger?.i("[VNC] • Server port: $vncPort")
+            logger?.i("[VNC] • ADB local port: $vncAdbLocalPort")
+        }
 
         val userPreparation = GraphicSessionUserManager.prepareForStart(
             containerName = containerName,
@@ -102,7 +109,8 @@ object SessionAccessManager {
                     logger?.e("[-] ${session.label} did not become active on ${slot.describe()}")
                     false
                 } else {
-                    logger?.i("[+] Integrated X11 ready on ${slot.describe()}")
+                    logger?.i("[X11] ✓ Integrated X11 ready on ${slot.describe()}")
+                    logger?.i("[SESSION] ✓ ${session.label} is active through Integrated X11")
                     true
                 }
             }
@@ -125,12 +133,17 @@ object SessionAccessManager {
                         VncConnectionGuide.logAfterSuccessfulStart(
                             containerName = containerName,
                             port = vncPort,
+                            adbLocalPort = vncAdbLocalPort,
+                            displayName = result.displayName,
+                            desktopUser = userPreparation.selection.userName,
+                            session = session,
                             password = vncPassword,
                             logger = logger
                         )
                     } else {
                         VncConnectionGuide.logAdbForwardRestartRecovery(
                             port = vncPort,
+                            localPort = vncAdbLocalPort,
                             logger = logger,
                             onlyIfTroubleshooting = true
                         )
