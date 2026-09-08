@@ -13,6 +13,7 @@ object TigerVncCommandOptions {
         "password",
         "passwordfile",
         "rfbauth",
+        "securitytypes",
         "display"
     )
 
