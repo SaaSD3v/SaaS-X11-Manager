@@ -76,15 +76,16 @@ class VncAdbForwardGuidePolicyTest {
     }
 
     @Test
-    fun failedVncStartPrintsRecoveryAndThenRollsBackOnlyItsMonitorReservation() {
+    fun failedVncStartPrintsRecoveryWhileTheManagerRemainsFixedToX0() {
         val access = source("app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt")
 
+        val fixedX11Preparation = access.indexOf("ensureFixedIntegratedX11StoppedForVnc")
         val recoveryIndex = access.indexOf("VncConnectionGuide.logAdbForwardRestartRecovery")
-        val rollbackIndex = access.indexOf("VncX11MonitorReservation.rollbackAfterFailedVncStart")
 
-        assertTrue(recoveryIndex >= 0)
+        assertTrue(fixedX11Preparation >= 0)
+        assertTrue(recoveryIndex > fixedX11Preparation)
         assertTrue(access.contains("localPort = vncAdbLocalPort"))
         assertTrue(access.contains("onlyIfTroubleshooting = true"))
-        assertTrue(rollbackIndex > recoveryIndex)
+        assertTrue(access.contains("Constants.X11_DISPLAY"))
     }
 }
