@@ -279,7 +279,12 @@ class HomeViewModel : ViewModel() {
         if (!tryBeginOperation(container.name)) return
         viewModelScope.launch {
             val logs = logsFor(container.name)
+            // Keep the active VNC connection block visible while Stop is actually
+            // running. Other historical lines are cleared so the terminal remains
+            // focused on the current lifecycle operation.
+            val pinnedAtStopStart = VncConnectionGuide.retainPinnedSummary(logs)
             logs.clear()
+            logs.addAll(pinnedAtStopStart)
             showLogViewerFor = container.name
             val logger = ViewModelLogger { level, message -> appendLog(logs, level, message) }
             try {
@@ -293,9 +298,10 @@ class HomeViewModel : ViewModel() {
                     logger.i("[VNC] Stopping VNC desktop and server runtime")
                     val vncStopped = VncServerManager.stopManagedVnc(container.name, logger)
                     if (vncStopped) {
-                        logger.i("[VNC] ✓ VNC runtime stopped and active connection details cleared")
+                        removePinnedVncSummary(logs)
+                        logger.i("[VNC] ✓ VNC runtime stopped; active connection details released")
                     } else {
-                        logger.w("[VNC] ! VNC runtime cleanup could not be fully confirmed")
+                        logger.w("[VNC] ! VNC runtime cleanup could not be fully confirmed; active connection details retained")
                     }
                 }
                 val stopped = X11SessionManager.stopX11Session(container.name, logger)
