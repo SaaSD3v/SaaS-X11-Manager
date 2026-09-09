@@ -6,6 +6,7 @@ import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.Build
 import android.view.Window
+import android.view.View
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
@@ -20,6 +21,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlin.math.roundToInt
 
 /** Clicks the real production screen, including its persistence and activity recreation. */
 @RunWith(AndroidJUnit4::class)
@@ -214,7 +216,20 @@ class AppearanceInteractionTest {
                 compose.waitUntil(10_000) {
                     runCatching { backgroundPixel() == expected.background.toArgb() }.getOrDefault(false)
                 }
-                AppearanceEvidence.screenshot("wallpaper-$name-dynamic")
+                reveal("Dynamic Color")
+                compose.waitForIdle()
+                val row = compose.onNodeWithText("Dynamic Color").fetchSemanticsNode().boundsInRoot
+                val origin = IntArray(2)
+                compose.runOnIdle {
+                    compose.activity.findViewById<View>(android.R.id.content).getLocationOnScreen(origin)
+                }
+                // Sample the filled left side of the checked Switch track. The
+                // row has 16dp horizontal padding and a 52dp track; its white
+                // thumb is on the right. This verifies the Android compositor,
+                // independently of Compose's offscreen captureToImage result.
+                val x = origin[0] + (row.right - 58 * context.resources.displayMetrics.density).roundToInt()
+                val y = origin[1] + row.center.y.roundToInt()
+                AppearanceEvidence.screenshot("wallpaper-$name-dynamic", Triple(x, y, expected.primary.toArgb()))
                 choose("Dynamic Color")
                 assertEquals(staticBackground, backgroundPixel())
                 choose("Dynamic Color")

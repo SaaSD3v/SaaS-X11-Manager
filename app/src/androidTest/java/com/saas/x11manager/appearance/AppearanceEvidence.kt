@@ -2,6 +2,7 @@ package com.saas.x11manager.appearance
 
 import android.graphics.Bitmap
 import android.os.Build
+import android.os.SystemClock
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
@@ -18,12 +19,32 @@ internal object AppearanceEvidence {
     val context get() = instrumentation.targetContext
     val directory get() = File(context.getExternalFilesDir(null), "appearance-audit").apply { mkdirs() }
 
-    fun screenshot(name: String) {
-        val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot()) { "Android screenshot failed" }
-        File(directory, "api-${Build.VERSION.SDK_INT}-$name.png").outputStream().use {
-            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+    fun screenshot(name: String, expectedPixel: Triple<Int, Int, Int>? = null) {
+        // Compose can be idle while SurfaceFlinger still presents the previous
+        // Activity snapshot during a configuration/splash transition.
+        runCatching { instrumentation.uiAutomation.waitForIdle(100, 3000) }
+        Thread.sleep(300)
+        val deadline = SystemClock.elapsedRealtime() + 10_000
+        while (true) {
+            val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot()) { "Android screenshot failed" }
+            val actual = expectedPixel?.let { (x, y, _) -> bitmap.getPixel(x, y) }
+            val ready = expectedPixel == null || actual == expectedPixel.third
+            if (ready || SystemClock.elapsedRealtime() >= deadline) {
+                try {
+                    File(directory, "api-${Build.VERSION.SDK_INT}-$name.png").outputStream().use {
+                        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+                    }
+                    if (expectedPixel != null) File(directory, "api-${Build.VERSION.SDK_INT}-$name-pixel.json")
+                        .writeText(JSONObject().put("x", expectedPixel.first).put("y", expectedPixel.second)
+                            .put("expected", "%08x".format(expectedPixel.third))
+                            .put("displayed", "%08x".format(actual)).toString())
+                    check(ready) { "$name: Android still displays ${actual?.toUInt()?.toString(16)}, expected ${expectedPixel?.third?.toUInt()?.toString(16)}" }
+                    return
+                } finally { bitmap.recycle() }
+            }
+            bitmap.recycle()
+            Thread.sleep(100)
         }
-        bitmap.recycle()
     }
 
     fun shell(command: String): String = instrumentation.uiAutomation.executeShellCommand(command).use {
