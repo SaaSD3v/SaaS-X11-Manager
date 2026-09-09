@@ -63,7 +63,7 @@ jobs:
             mkdir -p appearance-results
             adb shell settings put system font_scale 1.0
             adb shell cmd uimode night no
-            ./gradlew :app:connectedDebugAndroidTest -Pandroid.injected.build.abi=x86_64 -Pandroid.testInstrumentationRunnerArguments.package=com.saas.x11manager.appearance > appearance-results/instrumentation.log 2>&1; result=$?; adb pull /sdcard/Android/data/com.saas.x11manager/files/appearance-audit appearance-results/; adb logcat -d -s AndroidRuntime > appearance-results/android-crashes.log; cat appearance-results/instrumentation.log; exit $result
+            ./gradlew :app:connectedDebugAndroidTest -Pandroid.injected.build.abi=x86_64 -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true -Pandroid.testInstrumentationRunnerArguments.package=com.saas.x11manager.appearance > appearance-results/instrumentation.log 2>&1; result=$?; adb pull /sdcard/Android/data/com.saas.x11manager/files/appearance-audit appearance-results/ || result=1; test -f appearance-results/appearance-audit/theme-matrix.jsonl || result=1; adb logcat -d -s AndroidRuntime > appearance-results/android-crashes.log; cat appearance-results/instrumentation.log; exit $result
       - name: Publish screenshots and test reports
         if: always()
         uses: actions/upload-artifact@v4

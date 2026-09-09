@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.core.graphics.ColorUtils
 import androidx.test.platform.app.InstrumentationRegistry
 import com.saas.x11manager.ui.theme.ManagerAppearanceSettings
+import com.saas.x11manager.ui.theme.readableOn
 import org.json.JSONObject
 import java.io.File
 
@@ -41,11 +42,16 @@ internal object AppearanceEvidence {
             "primary_button" to (colors.onPrimary to colors.primary),
             "secondary_button" to (colors.onSecondary to colors.secondary),
             "tertiary_button" to (colors.onTertiary to colors.tertiary),
+            "primary_container" to (colors.onPrimaryContainer to colors.primaryContainer.compositeOver(colors.surface)),
+            "secondary_container" to (colors.onSecondaryContainer to colors.secondaryContainer.compositeOver(colors.surface)),
+            "tertiary_container" to (colors.onTertiaryContainer to colors.tertiaryContainer.compositeOver(colors.surface)),
             "accent_text" to (colors.primary to colors.surfaceContainer),
             "selected_tab" to (colors.primary to colors.primary.copy(alpha = 0.12f).compositeOver(colors.surfaceContainer)),
-            "inactive_tab" to (colors.onSurfaceVariant.copy(alpha = 0.6f) to colors.surfaceContainer),
-            "log_warning" to (colors.tertiary.copy(alpha = 0.9f) to colors.surfaceContainerHighest),
-            "log_error" to (colors.error.copy(alpha = 0.9f) to colors.surfaceContainerHighest)
+            "inactive_tab" to (colors.onSurfaceVariant to colors.surfaceContainer),
+            "container_start" to (colors.primary to colors.primaryContainer.copy(alpha = 0.4f).compositeOver(colors.surfaceContainerHigh)),
+            "container_status" to (colors.onSurfaceVariant to colors.onSurfaceVariant.copy(alpha = 0.1f).compositeOver(colors.surfaceContainer)),
+            "log_warning" to (colors.tertiary.copy(alpha = 0.9f).readableOn(colors.surfaceContainerHighest) to colors.surfaceContainerHighest),
+            "log_error" to (colors.error.copy(alpha = 0.9f).readableOn(colors.surfaceContainerHighest) to colors.surfaceContainerHighest)
         )
         pairs.forEach { (label, pair) -> ratios.put(label, contrast(pair.first, pair.second)) }
         val data = JSONObject().put("case", name).put("api", Build.VERSION.SDK_INT)
@@ -56,5 +62,9 @@ internal object AppearanceEvidence {
             .put("surface", "%08x".format(colors.surface.toArgb()))
             .put("ratios", ratios)
         File(directory, "theme-matrix.jsonl").appendText(data.toString() + "\n")
+        pairs.forEach { (label, pair) ->
+            val ratio = contrast(pair.first, pair.second)
+            org.junit.Assert.assertTrue("$name: $label contrast is $ratio, expected at least 4.5:1", ratio >= 4.5)
+        }
     }
 }

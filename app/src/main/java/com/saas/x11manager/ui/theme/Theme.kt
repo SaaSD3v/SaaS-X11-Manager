@@ -33,15 +33,15 @@ private fun darkColorSchemeFor(palette: ThemePalette): ColorScheme {
     return darkColorScheme(
         primary = p,
         onPrimary = Color(0xFF000000).blend(p, 0.08f),
-        primaryContainer = p.blend(Color.Black, 0.40f),
+        primaryContainer = p.blend(Color.Black, 0.40f).readableOn(p.blend(Color.White, 0.75f)),
         onPrimaryContainer = p.blend(Color.White, 0.75f),
         secondary = s,
         onSecondary = Color(0xFF000000).blend(s, 0.08f),
-        secondaryContainer = s.blend(Color.Black, 0.40f),
+        secondaryContainer = s.blend(Color.Black, 0.40f).readableOn(s.blend(Color.White, 0.75f)),
         onSecondaryContainer = s.blend(Color.White, 0.75f),
         tertiary = t,
         onTertiary = Color(0xFF000000).blend(t, 0.08f),
-        tertiaryContainer = t.blend(Color.Black, 0.40f),
+        tertiaryContainer = t.blend(Color.Black, 0.40f).readableOn(t.blend(Color.White, 0.75f)),
         onTertiaryContainer = t.blend(Color.White, 0.75f),
         background = base.blend(p, 0.15f),
         onBackground = Color(0xFFE2E2E6),
@@ -67,17 +67,20 @@ private fun lightColorSchemeFor(palette: ThemePalette): ColorScheme {
     val s = palette.secondaryLight
     val t = palette.tertiaryLight
     val base = Color(0xFFFFFBFF)
+    // Pastel seeds still tint the surfaces, but foreground accents need to remain
+    // readable on the darkest light surface as well as underneath white labels.
+    val highestSurface = Color(0xFFE4E1E6).blend(p, 0.14f)
 
     return lightColorScheme(
-        primary = p,
+        primary = p.readableOn(highestSurface),
         onPrimary = Color.White,
         primaryContainer = p.blend(Color.White, 0.55f),
         onPrimaryContainer = p.blend(Color.Black, 0.55f),
-        secondary = s,
+        secondary = s.readableOn(highestSurface),
         onSecondary = Color.White,
         secondaryContainer = s.blend(Color.White, 0.55f),
         onSecondaryContainer = s.blend(Color.Black, 0.55f),
-        tertiary = t,
+        tertiary = t.readableOn(highestSurface),
         onTertiary = Color.White,
         tertiaryContainer = t.blend(Color.White, 0.55f),
         onTertiaryContainer = t.blend(Color.Black, 0.55f),
@@ -89,7 +92,7 @@ private fun lightColorSchemeFor(palette: ThemePalette): ColorScheme {
         onSurfaceVariant = Color(0xFF46464A),
         surfaceContainer = Color(0xFFF0EDF1).blend(p, 0.10f),
         surfaceContainerHigh = Color(0xFFEAE7EB).blend(p, 0.12f),
-        surfaceContainerHighest = Color(0xFFE4E1E6).blend(p, 0.14f),
+        surfaceContainerHighest = highestSurface,
         surfaceContainerLow = Color(0xFFF6F3F7).blend(p, 0.08f),
         surfaceContainerLowest = base.blend(p, 0.04f),
         outline = Color(0xFF767680).blend(p, 0.22f),

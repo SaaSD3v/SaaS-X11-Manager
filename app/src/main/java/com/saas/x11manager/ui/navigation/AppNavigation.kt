@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -247,13 +248,14 @@ private fun MainBottomBar(
                         val isSelected = selectedTab == tab
                         val contentColor by animateColorAsState(
                             targetValue = if (isSelected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
                             label = "IconColor"
                         )
 
                         Surface(
                             onClick = { onTabSelected(tab) },
                             modifier = Modifier
+                                .testTag("main-tab-${tab.name}")
                                 .weight(1f)
                                 .fillMaxHeight(),
                             color = Color.Transparent,

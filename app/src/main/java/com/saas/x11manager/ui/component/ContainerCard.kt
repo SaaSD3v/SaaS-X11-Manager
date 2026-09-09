@@ -85,7 +85,7 @@ fun ContainerCard(
                         contentDescription = null,
                         modifier = Modifier.size(24.dp),
                         tint = if (container.isRunning) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
                         text = container.name,
@@ -110,8 +110,8 @@ fun ContainerCard(
 
                     val (statusText, statusColor) = when (container.status) {
                         ContainerStatus.RUNNING -> "RUNNING" to MaterialTheme.colorScheme.primary
-                        ContainerStatus.STOPPED -> "STOPPED" to MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                        ContainerStatus.UNKNOWN -> "UNKNOWN" to MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        ContainerStatus.STOPPED -> "STOPPED" to MaterialTheme.colorScheme.onSurfaceVariant
+                        ContainerStatus.UNKNOWN -> "UNKNOWN" to MaterialTheme.colorScheme.onSurfaceVariant
                     }
                     StatusPill(label = statusText, color = statusColor)
                 }
@@ -123,7 +123,7 @@ fun ContainerCard(
                 Text(
                     "PID: ${container.pid}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 

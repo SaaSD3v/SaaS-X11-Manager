@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.ui.theme.JetBrainsMono
+import com.saas.x11manager.ui.theme.readableOn
 import com.saas.x11manager.util.AnsiColorParser
 import com.saas.x11manager.util.Constants
 
@@ -120,9 +121,10 @@ fun TerminalConsole(
         }
     }
 
-    val defaultTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f)
-    val errorColor = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
-    val warnColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.9f)
+    val logBackground = MaterialTheme.colorScheme.surfaceContainerHighest
+    val defaultTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f).readableOn(logBackground)
+    val errorColor = MaterialTheme.colorScheme.error.copy(alpha = 0.9f).readableOn(logBackground)
+    val warnColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.9f).readableOn(logBackground)
 
     ShimmerAnimation(
         modifier = if (maxHeight != null) modifier.heightIn(max = maxHeight) else modifier,
@@ -164,7 +166,7 @@ fun TerminalConsole(
                                 Text(
                                     text = "Lifecycle events will appear here as soon as they are emitted.",
                                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMono),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.68f)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.readableOn(logBackground)
                                 )
                             } else {
                                 Text(
@@ -179,7 +181,7 @@ fun TerminalConsole(
                                 Text(
                                     text = "Run a start, stop, monitor or maintenance action to create a lifecycle log.",
                                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMono),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.58f)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.readableOn(logBackground)
                                 )
                             }
                         }

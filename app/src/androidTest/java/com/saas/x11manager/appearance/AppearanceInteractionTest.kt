@@ -1,7 +1,13 @@
 package com.saas.x11manager.appearance
 
+import android.Manifest
+import android.app.WallpaperManager
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.os.Build
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -22,7 +28,7 @@ class AppearanceInteractionTest {
 
     @Before fun openConfiguration() {
         compose.waitForIdle()
-        compose.onAllNodesWithText("Config").onLast().performClick()
+        compose.onNodeWithTag("main-tab-Config").performClick()
         choose("Reset appearance defaults")
     }
 
@@ -44,6 +50,7 @@ class AppearanceInteractionTest {
 
     @Test fun themeDynamicAmoledPaletteAndResetControlsPersistTheirActualSelections() {
         choose("Light")
+        compose.onNodeWithText("Light").assertIsSelected()
         assertEquals(ManagerThemeMode.LIGHT, current().themeMode)
         capture("main-light-default", "Manager configuration")
 
@@ -51,25 +58,29 @@ class AppearanceInteractionTest {
         if (Build.VERSION.SDK_INT >= 31) {
             choose("Dynamic Color")
             assertFalse(current().dynamicColor)
+            compose.onNodeWithText("Dynamic Color").assertIsOff()
             capture("main-light-static")
             choose("Dynamic Color")
             assertTrue(current().dynamicColor)
+            compose.onNodeWithText("Dynamic Color").assertIsOn()
             capture("main-light-dynamic")
             choose("Dynamic Color")
         } else {
-            compose.onNodeWithText("Dynamic Color").assertIsNotEnabled()
+            compose.onNodeWithText("Dynamic Color").assertIsNotEnabled().assertIsOff()
             capture("main-dynamic-unavailable")
         }
 
         ThemePalette.entries.forEach { palette ->
             choose(palette.displayName)
             assertEquals(palette, current().palette)
+            compose.onNodeWithText(palette.displayName).assertIsSelected()
         }
         capture("main-palette-selection", "Static palette")
 
         choose("Dark")
         choose("AMOLED black")
         assertTrue(current().amoledMode)
+        compose.onNodeWithText("AMOLED black").assertIsOn()
         capture("main-dark-amoled")
         if (Build.VERSION.SDK_INT >= 31) {
             choose("Dynamic Color")
@@ -122,5 +133,68 @@ class AppearanceInteractionTest {
             AppearanceEvidence.shell("settings put system font_scale 1.0")
             AppearanceEvidence.shell("cmd uimode night no")
         }
+    }
+
+    @Test fun mainScreensRenderWithStaticDynamicAndAmoledThemes() {
+        fun visitScreens(name: String) {
+            for (tab in listOf("Home", "Display", "Requirements", "Config")) {
+                compose.onNodeWithTag("main-tab-$tab").performClick()
+                compose.waitForIdle()
+                compose.onNodeWithTag("main-tab-$tab").assertIsDisplayed()
+                AppearanceEvidence.screenshot("screen-$name-${tab.lowercase()}")
+            }
+        }
+        choose("Light")
+        if (Build.VERSION.SDK_INT >= 31) choose("Dynamic Color")
+        visitScreens("light-static")
+        choose("Dark")
+        visitScreens("dark-static")
+        choose("AMOLED black")
+        visitScreens("dark-amoled")
+        if (Build.VERSION.SDK_INT >= 31) {
+            choose("Dynamic Color")
+            visitScreens("dark-dynamic-amoled")
+            choose("Light")
+            visitScreens("light-dynamic")
+        }
+    }
+
+    @Test fun wallpaperChangesUpdateTheRealActivityAndRestoreTheStaticPalette() {
+        if (Build.VERSION.SDK_INT < 31) return
+        choose("Light")
+        choose("Dynamic Color")
+        choose("Ocean")
+        fun backgroundPixel(): Int {
+            reveal("Manager configuration")
+            compose.waitForIdle()
+            // This point is inside the list's empty horizontal padding, over the
+            // production theme background rather than any text or card.
+            return compose.onNodeWithTag("appearance-settings").captureToImage().toPixelMap()[1, 1].toArgb()
+        }
+        val staticBackground = backgroundPixel()
+        choose("Dynamic Color")
+        val automation = AppearanceEvidence.instrumentation.uiAutomation
+        automation.adoptShellPermissionIdentity(Manifest.permission.SET_WALLPAPER)
+        try {
+            val manager = WallpaperManager.getInstance(context)
+            for ((name, color) in listOf("green" to android.graphics.Color.rgb(20, 130, 60),
+                "purple" to android.graphics.Color.rgb(130, 30, 190))) {
+                val previousPrimary = dynamicLightColorScheme(context).primary
+                val bitmap = Bitmap.createBitmap(200, 200, Bitmap.Config.ARGB_8888).apply { eraseColor(color) }
+                try { manager.setBitmap(bitmap) } finally { bitmap.recycle() }
+                compose.waitUntil(20_000) { dynamicLightColorScheme(context).primary != previousPrimary }
+                // MainActivity owns setContent in onCreate, so this also exercises
+                // Android's real recreation after a wallpaper overlay change.
+                compose.waitForIdle()
+                val expected = dynamicLightColorScheme(context)
+                compose.waitUntil(10_000) {
+                    runCatching { backgroundPixel() == expected.background.toArgb() }.getOrDefault(false)
+                }
+                AppearanceEvidence.screenshot("wallpaper-$name-dynamic")
+                choose("Dynamic Color")
+                assertEquals(staticBackground, backgroundPixel())
+                choose("Dynamic Color")
+            }
+        } finally { automation.dropShellPermissionIdentity() }
     }
 }

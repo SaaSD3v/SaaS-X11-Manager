@@ -2,7 +2,8 @@ package com.saas.x11manager.ui.screen
 
 import android.os.Build
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -17,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.ui.theme.ManagerAppearanceSettings
@@ -29,6 +31,7 @@ fun ConfigScreen(
     onSettingsChange: (ManagerAppearanceSettings) -> Unit,
     onReset: () -> Unit
 ) {
+    val dynamicAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -85,8 +88,8 @@ fun ConfigScreen(
                     } else {
                         "Requires Android 12 or newer; static palette is used on this device"
                     },
-                    checked = settings.dynamicColor,
-                    enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
+                    checked = settings.dynamicColor && dynamicAvailable,
+                    enabled = dynamicAvailable,
                     onCheckedChange = { onSettingsChange(settings.copy(dynamicColor = it)) }
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
@@ -187,7 +190,8 @@ private fun ChoiceRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .heightIn(min = 48.dp)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -211,7 +215,7 @@ private fun ToggleRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = enabled) { onCheckedChange(!checked) }
+            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -228,7 +232,7 @@ private fun ToggleRow(
             )
         }
         Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 
@@ -241,7 +245,8 @@ private fun PaletteRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .heightIn(min = 48.dp)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

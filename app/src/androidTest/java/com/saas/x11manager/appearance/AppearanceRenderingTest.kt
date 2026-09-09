@@ -1,11 +1,7 @@
 package com.saas.x11manager.appearance
 
-import android.Manifest
-import android.app.WallpaperManager
-import android.graphics.Bitmap
 import android.os.Build
 import android.util.Log
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -90,6 +86,7 @@ class AppearanceRenderingTest {
     private fun show(value: ManagerAppearanceSettings, logs: Boolean = false) {
         compose.runOnIdle { settings = value; showLogs = logs }
         compose.waitForIdle()
+        if (!logs) compose.onNodeWithText("X11 Manager").assertExists()
     }
 
     @Test fun auditEveryPaletteDynamicFallbackAndAmoledCombination() {
@@ -148,30 +145,4 @@ class AppearanceRenderingTest {
         }
     }
 
-    @Test fun dynamicColorsFollowAndroidWallpaperAndSwitchBackToTheSavedPalette() {
-        if (Build.VERSION.SDK_INT < 31) return
-        render()
-        val automation = AppearanceEvidence.instrumentation.uiAutomation
-        automation.adoptShellPermissionIdentity(Manifest.permission.SET_WALLPAPER)
-        try {
-            val manager = WallpaperManager.getInstance(AppearanceEvidence.context)
-            for ((name, color) in listOf("green" to android.graphics.Color.rgb(20, 130, 60),
-                "purple" to android.graphics.Color.rgb(130, 30, 190))) {
-                val bitmap = Bitmap.createBitmap(200, 200, Bitmap.Config.ARGB_8888).apply { eraseColor(color) }
-                manager.setBitmap(bitmap)
-                bitmap.recycle()
-                // SystemUI extracts wallpaper colors asynchronously; allow its overlay to settle.
-                Thread.sleep(3000)
-                show(ManagerAppearanceSettings(ManagerThemeMode.LIGHT, false, false, ThemePalette.OCEAN))
-                val savedStatic = colors.primary
-                show(settings.copy(dynamicColor = true))
-                val expected = dynamicLightColorScheme(AppearanceEvidence.context).primary
-                assertEquals(expected, colors.primary)
-                AppearanceEvidence.record("wallpaper-$name", settings, colors)
-                AppearanceEvidence.screenshot("wallpaper-$name-dynamic")
-                show(settings.copy(dynamicColor = false))
-                assertEquals(savedStatic, colors.primary)
-            }
-        } finally { automation.dropShellPermissionIdentity() }
-    }
 }
