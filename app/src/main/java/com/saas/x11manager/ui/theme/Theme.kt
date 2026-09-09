@@ -28,7 +28,7 @@ private fun darkColorSchemeFor(palette: ThemePalette): ColorScheme {
     val p = palette.primaryDark
     val s = palette.secondaryDark
     val t = palette.tertiaryDark
-    val base = Color(0xFF121212)
+    val base = Color(0xFF101114)
 
     return darkColorScheme(
         primary = p,
@@ -43,17 +43,19 @@ private fun darkColorSchemeFor(palette: ThemePalette): ColorScheme {
         onTertiary = Color(0xFF000000).blend(t, 0.08f),
         tertiaryContainer = t.blend(Color.Black, 0.40f).readableOn(t.blend(Color.White, 0.75f)),
         onTertiaryContainer = t.blend(Color.White, 0.75f),
-        background = base.blend(p, 0.15f),
+        background = base.blend(p, 0.025f),
         onBackground = Color(0xFFE2E2E6),
-        surface = base.blend(p, 0.15f),
+        surface = base.blend(p, 0.025f),
         onSurface = Color(0xFFE2E2E6),
-        surfaceVariant = Color(0xFF2B2B2F).blend(p, 0.25f),
+        surfaceVariant = Color(0xFF2D2E34).blend(p, 0.05f),
         onSurfaceVariant = Color(0xFFC6C6CA),
-        surfaceContainer = Color(0xFF1E1E22).blend(p, 0.20f),
-        surfaceContainerHigh = Color(0xFF282830).blend(p, 0.22f),
-        surfaceContainerHighest = Color(0xFF333338).blend(p, 0.25f),
-        surfaceContainerLow = Color(0xFF1A1A1E).blend(p, 0.18f),
-        surfaceContainerLowest = Color(0xFF0F0F13).blend(p, 0.15f),
+        surfaceContainer = Color(0xFF191A1E).blend(p, 0.035f),
+        surfaceContainerHigh = Color(0xFF232428).blend(p, 0.04f),
+        surfaceContainerHighest = Color(0xFF2E2F34).blend(p, 0.05f),
+        surfaceContainerLow = Color(0xFF15161A).blend(p, 0.03f),
+        surfaceContainerLowest = Color(0xFF0B0C10).blend(p, 0.02f),
+        surfaceDim = base.blend(p, 0.025f),
+        surfaceBright = Color(0xFF38393E).blend(p, 0.05f),
         outline = Color(0xFF8E8E93).blend(p, 0.35f),
         outlineVariant = Color(0xFF46464A).blend(p, 0.30f),
         inverseSurface = Color(0xFFE2E2E6),
@@ -128,6 +130,8 @@ private object AmoledColorCache {
             surfaceContainerLowest = AMOLED_BLACK,
             surfaceContainerHigh = AMOLED_BLACK,
             surfaceContainerHighest = AMOLED_BLACK,
+            surfaceDim = AMOLED_BLACK,
+            surfaceBright = AMOLED_BLACK,
             primaryContainer = dynamicScheme.primaryContainer.fastBlend(AMOLED_BLACK, 0.7f),
             secondaryContainer = dynamicScheme.secondaryContainer.fastBlend(AMOLED_BLACK, 0.7f),
             tertiaryContainer = dynamicScheme.tertiaryContainer.fastBlend(AMOLED_BLACK, 0.7f)
@@ -149,6 +153,8 @@ private object AmoledColorCache {
             surfaceContainerLowest = AMOLED_BLACK,
             surfaceContainerHigh = AMOLED_BLACK,
             surfaceContainerHighest = AMOLED_BLACK,
+            surfaceDim = AMOLED_BLACK,
+            surfaceBright = AMOLED_BLACK,
             outlineVariant = p.copy(alpha = 0.25f),
             primaryContainer = p.copy(alpha = 0.2f),
             onPrimaryContainer = p.blend(Color.White, 0.85f)

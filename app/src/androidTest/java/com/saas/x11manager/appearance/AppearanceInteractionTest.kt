@@ -5,12 +5,14 @@ import android.app.WallpaperManager
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.Build
+import android.view.Window
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.core.view.WindowInsetsControllerCompat
 import com.saas.x11manager.MainActivity
 import com.saas.x11manager.ui.theme.*
 import org.junit.Assert.*
@@ -30,6 +32,23 @@ class AppearanceInteractionTest {
         compose.waitForIdle()
         compose.onNodeWithTag("main-tab-Config").performClick()
         choose("Reset appearance defaults")
+        assertWindowChrome()
+    }
+
+    private fun assertWindowChrome() {
+        compose.runOnIdle {
+            assertNull("A native action bar must not cover the Compose header", compose.activity.actionBar)
+            assertFalse(compose.activity.window.hasFeature(Window.FEATURE_ACTION_BAR))
+            val dark = when (current().themeMode) {
+                ManagerThemeMode.DARK -> true
+                ManagerThemeMode.LIGHT -> false
+                ManagerThemeMode.SYSTEM -> context.resources.configuration.uiMode and
+                    Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+            }
+            val bars = WindowInsetsControllerCompat(compose.activity.window, compose.activity.window.decorView)
+            assertEquals("Status bar icons must follow the app theme", !dark, bars.isAppearanceLightStatusBars)
+            assertEquals("Navigation bar icons must follow the app theme", !dark, bars.isAppearanceLightNavigationBars)
+        }
     }
 
     private fun choose(label: String) {
@@ -45,6 +64,7 @@ class AppearanceInteractionTest {
     private fun capture(name: String, anchor: String = "Color source") {
         reveal(anchor)
         compose.waitForIdle()
+        assertWindowChrome()
         AppearanceEvidence.screenshot(name)
     }
 
@@ -141,6 +161,7 @@ class AppearanceInteractionTest {
                 compose.onNodeWithTag("main-tab-$tab").performClick()
                 compose.waitForIdle()
                 compose.onNodeWithTag("main-tab-$tab").assertIsDisplayed()
+                assertWindowChrome()
                 AppearanceEvidence.screenshot("screen-$name-${tab.lowercase()}")
             }
         }
@@ -160,7 +181,10 @@ class AppearanceInteractionTest {
     }
 
     @Test fun wallpaperChangesUpdateTheRealActivityAndRestoreTheStaticPalette() {
-        if (Build.VERSION.SDK_INT < 31) return
+        // API 31's AOSP SystemUI has no Monet overlay generator (getOverlay is
+        // a stub). API 32 and 34 exercise actual wallpaper extraction; API 31
+        // still tests both color sources against its available Android palette.
+        org.junit.Assume.assumeTrue("Wallpaper extraction requires the emulator's Monet implementation", Build.VERSION.SDK_INT >= 32)
         choose("Light")
         choose("Dynamic Color")
         choose("Ocean")

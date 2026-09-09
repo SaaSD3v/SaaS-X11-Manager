@@ -34,8 +34,10 @@ internal object AppearanceEvidence {
         foreground.compositeOver(background).toArgb(), background.toArgb()
     )
 
-    fun record(name: String, settings: ManagerAppearanceSettings, colors: ColorScheme) {
+    fun record(name: String, settings: ManagerAppearanceSettings, colors: ColorScheme): List<String> {
         val ratios = JSONObject()
+        val selectedBackground = colors.primary.copy(alpha = 0.12f).compositeOver(colors.surfaceContainer)
+        val startBackground = colors.primaryContainer.copy(alpha = 0.4f).compositeOver(colors.surfaceContainerHigh)
         val pairs = mapOf(
             "body" to (colors.onSurface to colors.surface),
             "secondary_text" to (colors.onSurfaceVariant to colors.surfaceContainer),
@@ -46,9 +48,9 @@ internal object AppearanceEvidence {
             "secondary_container" to (colors.onSecondaryContainer to colors.secondaryContainer.compositeOver(colors.surface)),
             "tertiary_container" to (colors.onTertiaryContainer to colors.tertiaryContainer.compositeOver(colors.surface)),
             "accent_text" to (colors.primary to colors.surfaceContainer),
-            "selected_tab" to (colors.primary to colors.primary.copy(alpha = 0.12f).compositeOver(colors.surfaceContainer)),
+            "selected_tab" to (colors.primary.readableOn(selectedBackground) to selectedBackground),
             "inactive_tab" to (colors.onSurfaceVariant to colors.surfaceContainer),
-            "container_start" to (colors.primary to colors.primaryContainer.copy(alpha = 0.4f).compositeOver(colors.surfaceContainerHigh)),
+            "container_start" to (colors.primary.readableOn(startBackground) to startBackground),
             "container_status" to (colors.onSurfaceVariant to colors.onSurfaceVariant.copy(alpha = 0.1f).compositeOver(colors.surfaceContainer)),
             "log_warning" to (colors.tertiary.copy(alpha = 0.9f).readableOn(colors.surfaceContainerHighest) to colors.surfaceContainerHighest),
             "log_error" to (colors.error.copy(alpha = 0.9f).readableOn(colors.surfaceContainerHighest) to colors.surfaceContainerHighest)
@@ -62,9 +64,9 @@ internal object AppearanceEvidence {
             .put("surface", "%08x".format(colors.surface.toArgb()))
             .put("ratios", ratios)
         File(directory, "theme-matrix.jsonl").appendText(data.toString() + "\n")
-        pairs.forEach { (label, pair) ->
+        return pairs.mapNotNull { (label, pair) ->
             val ratio = contrast(pair.first, pair.second)
-            org.junit.Assert.assertTrue("$name: $label contrast is $ratio, expected at least 4.5:1", ratio >= 4.5)
+            if (ratio < 4.5) "$name: $label contrast is $ratio, expected at least 4.5:1" else null
         }
     }
 }

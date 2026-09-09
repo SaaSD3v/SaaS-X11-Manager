@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.lifecycle.ViewModelProvider
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -50,6 +51,10 @@ class MainActivity : ComponentActivity() {
     private var appearanceSettings by mutableStateOf(ManagerAppearanceSettings())
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Apply postSplashScreenTheme before the platform creates the window.
+        // Otherwise Android 12+ retains the launch theme and adds a native title
+        // bar over our Compose app bar, independent of the chosen appearance.
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         appearanceSettings = ManagerAppearancePreferences.load(this)
         handleLogIntent(intent)

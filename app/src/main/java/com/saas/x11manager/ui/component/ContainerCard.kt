@@ -20,9 +20,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.util.AnimationUtils
+import com.saas.x11manager.ui.theme.readableOn
 import com.saas.x11manager.util.ContainerInfo
 import com.saas.x11manager.util.ContainerStatus
 
@@ -175,6 +177,10 @@ fun ContainerCard(
                         }
                     } else {
                         val isStartEnabled = !isOperationRunning
+                        val startContentColor = MaterialTheme.colorScheme.primary.readableOn(
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                .compositeOver(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        )
                         Surface(
                             onClick = actions.onStartX11,
                             enabled = isStartEnabled,
@@ -196,14 +202,14 @@ fun ContainerCard(
                                     Icons.Default.PlayArrow,
                                     null,
                                     modifier = Modifier.size(20.dp),
-                                    tint = if (isStartEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                    tint = if (isStartEnabled) startContentColor else MaterialTheme.colorScheme.outlineVariant
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(
                                     actions.startLabel,
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isStartEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                    color = if (isStartEnabled) startContentColor else MaterialTheme.colorScheme.outlineVariant
                                 )
                             }
                         }

@@ -91,6 +91,7 @@ class AppearanceRenderingTest {
 
     @Test fun auditEveryPaletteDynamicFallbackAndAmoledCombination() {
         render()
+        val contrastFailures = mutableListOf<String>()
         for (mode in listOf(ManagerThemeMode.LIGHT, ManagerThemeMode.DARK)) {
             for (dynamic in listOf(false, true)) {
                 for (amoled in listOf(false, true)) {
@@ -99,10 +100,12 @@ class AppearanceRenderingTest {
                         val value = ManagerAppearanceSettings(mode, dynamic, amoled, palette)
                         show(value)
                         val name = "${mode.name.lowercase()}-${if (dynamic) "dynamic" else "static"}-${if (amoled) "amoled" else "normal"}-${palette.name.lowercase()}"
-                        AppearanceEvidence.record(name, value, colors)
+                        contrastFailures += AppearanceEvidence.record(name, value, colors)
                         if (mode == ManagerThemeMode.DARK && amoled) {
                             assertEquals(Color.Black.toArgb(), colors.background.toArgb())
                             assertEquals(Color.Black.toArgb(), colors.surfaceContainer.toArgb())
+                            assertEquals(Color.Black.toArgb(), colors.surfaceBright.toArgb())
+                            assertEquals(Color.Black.toArgb(), colors.surfaceDim.toArgb())
                         }
                         if (dynamic && Build.VERSION.SDK_INT >= 31) {
                             if (dynamicPrimary == null) dynamicPrimary = colors.primary.toArgb()
@@ -116,6 +119,7 @@ class AppearanceRenderingTest {
                 }
             }
         }
+        assertTrue(contrastFailures.joinToString("\n"), contrastFailures.isEmpty())
         // Android 8 must use the chosen static scheme regardless of the saved dynamic preference.
         if (Build.VERSION.SDK_INT < 31) {
             show(ManagerAppearanceSettings(ManagerThemeMode.LIGHT, false, false, ThemePalette.OCEAN))

@@ -21,6 +21,7 @@ import com.saas.x11manager.ui.screen.ManagedDisplayViewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -35,6 +36,7 @@ import com.saas.x11manager.ui.screen.HomeViewModel
 import com.saas.x11manager.ui.screen.ManagedDisplayScreen
 import com.saas.x11manager.ui.screen.RequirementsScreen
 import com.saas.x11manager.ui.theme.ManagerAppearanceSettings
+import com.saas.x11manager.ui.theme.readableOn
 import kotlinx.coroutines.launch
 
 enum class TabItem(val title: String, val icon: ImageVector) {
@@ -200,6 +202,10 @@ private fun MainBottomBar(
 ) {
     val tabs = TabItem.entries
     val selectedIndex = tabs.indexOf(selectedTab)
+    val selectedContentColor = MaterialTheme.colorScheme.primary.readableOn(
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+            .compositeOver(MaterialTheme.colorScheme.surfaceContainer)
+    )
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -247,7 +253,7 @@ private fun MainBottomBar(
                     tabs.forEach { tab ->
                         val isSelected = selectedTab == tab
                         val contentColor by animateColorAsState(
-                            targetValue = if (isSelected) MaterialTheme.colorScheme.primary
+                            targetValue = if (isSelected) selectedContentColor
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                             label = "IconColor"
                         )
