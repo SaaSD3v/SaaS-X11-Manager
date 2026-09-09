@@ -1,5 +1,7 @@
 package com.saas.x11manager.appearance
 
+import android.os.Build
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.fillMaxSize
@@ -88,16 +90,31 @@ class SettingsEditorsAppearanceTest {
         }
         // Verify the shared footer still performs the editor's existing save action.
         compose.runOnIdle { visible = true; largeText = false }
-        compose.onNodeWithText("VNC port").performTextReplacement("5904")
-        compose.onNodeWithText("Save").performClick()
-        assertEquals(5904, VncSettings.getPort(context, container))
-        VncSettings.resetGeneral(context, container)
+        val previousImeSetting = AppearanceEvidence.shell("settings get secure show_ime_with_hard_keyboard").trim()
+        try {
+            AppearanceEvidence.shell("settings put secure show_ime_with_hard_keyboard 1")
+            compose.onNodeWithText("VNC port").performClick().performTextReplacement("5904")
+            compose.waitForIdle()
+            AppearanceEvidence.screenshot("editor-general-keyboard")
+            compose.onNodeWithText("Save").assertIsDisplayed().performClick()
+            assertEquals(5904, VncSettings.getPort(context, container))
+        } finally {
+            VncSettings.resetGeneral(context, container)
+            if (previousImeSetting == "null") AppearanceEvidence.shell("settings delete secure show_ime_with_hard_keyboard")
+            else AppearanceEvidence.shell("settings put secure show_ime_with_hard_keyboard $previousImeSetting")
+        }
     }
 
     private fun assertEditorBackground() {
         compose.waitForIdle()
-        val image = compose.onNodeWithTag("settings-dialog").captureToImage().toPixelMap()
-        assertEquals("Settings must not add a tonal tint over the selected background", expectedBackground,
-            image[1, image.height / 2].toArgb())
+        val dialog = compose.onNodeWithTag("settings-dialog")
+        if (Build.VERSION.SDK_INT >= 28) {
+            val image = dialog.captureToImage().toPixelMap()
+            assertEquals("Settings must not add a tonal tint over the selected background", expectedBackground,
+                image[1, image.height / 2].toArgb())
+        } else {
+            AppearanceEvidence.screenshot("editor-background", Triple(1,
+                (dialog.fetchSemanticsNode().boundsInRoot.height / 2).toInt(), expectedBackground))
+        }
     }
 }

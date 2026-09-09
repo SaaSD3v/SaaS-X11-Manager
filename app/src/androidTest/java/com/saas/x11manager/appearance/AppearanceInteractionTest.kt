@@ -154,6 +154,8 @@ class AppearanceInteractionTest {
             reveal("Reset appearance defaults")
             compose.onNodeWithText("Reset appearance defaults").assertIsDisplayed()
             compose.onAllNodesWithText("Config").onLast().assertIsDisplayed()
+            compose.onNodeWithTag("main-tab-Display").performClick()
+            inspectX11Editor("large-text-amoled")
         } finally {
             AppearanceEvidence.shell("settings put system font_scale 1.0")
             AppearanceEvidence.shell("cmd uimode night no")
@@ -191,12 +193,21 @@ class AppearanceInteractionTest {
         val expectedBackground = mainImage[1, mainImage.height / 2].toArgb()
         compose.onNodeWithText("Configuration").performClick()
         compose.onNodeWithText("X11 Configuration").assertIsDisplayed()
-        val editor = compose.onNodeWithTag("settings-dialog").captureToImage().toPixelMap()
-        assertEquals("The X11 editor must use the same background as the Manager", expectedBackground,
-            editor[1, editor.height / 2].toArgb())
-        assertEquals(mainImage.width, editor.width)
+        val dialog = compose.onNodeWithTag("settings-dialog")
+        assertTrue("The editor must span the display width (allowing pixel rounding)",
+            kotlin.math.abs(mainImage.width - dialog.fetchSemanticsNode().boundsInRoot.width) <= 1f)
+        if (Build.VERSION.SDK_INT >= 28) {
+            val editor = dialog.captureToImage().toPixelMap()
+            assertEquals("The X11 editor must use the same background as the Manager", expectedBackground,
+                editor[1, editor.height / 2].toArgb())
+        } else {
+            // Compose cannot capture a Dialog root before API 28; verify the
+            // actual full-screen Android composition instead on Android 8.
+            AppearanceEvidence.screenshot("x11-$name-background", Triple(1, mainImage.height / 2, expectedBackground))
+        }
         AppearanceEvidence.screenshot("x11-$name-display")
         compose.onNodeWithTag("x11-choice-Resolution mode").performClick()
+        AppearanceEvidence.screenshot("x11-$name-resolution-menu")
         compose.onNodeWithText("exact").performClick()
         compose.onNodeWithText("Exact resolution").assertIsDisplayed()
         AppearanceEvidence.screenshot("x11-$name-resolution")
