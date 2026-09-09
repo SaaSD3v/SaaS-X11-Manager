@@ -149,9 +149,10 @@ fun HomeScreen(
                     contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    if (viewModel.logOperation("__all__").available) {
+                    val allOperation = viewModel.logOperation("__all__")
+                    if (allOperation.running) {
                         item(key = "all-operation-logs") {
-                            OperationResultCard(viewModel.logOperation("__all__")) {
+                            OperationResultCard(allOperation) {
                                 viewModel.openSavedLogs("__all__")
                             }
                         }
@@ -188,9 +189,10 @@ fun HomeScreen(
                                 }
                             )
                         )
-                        if (viewModel.logOperation(container.name).available) {
+                        val operation = viewModel.logOperation(container.name)
+                        if (operation.running) {
                             Spacer(Modifier.height(8.dp))
-                            OperationResultCard(viewModel.logOperation(container.name)) {
+                            OperationResultCard(operation) {
                                 viewModel.openSavedLogs(container.name)
                             }
                         }
