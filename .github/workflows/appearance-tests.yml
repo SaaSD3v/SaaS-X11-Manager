@@ -1,0 +1,75 @@
+name: Android appearance tests
+
+on:
+  push:
+    branches: [X11APP]
+    paths:
+      - 'app/src/main/java/com/saas/x11manager/ui/**'
+      - 'app/src/main/java/com/saas/x11manager/MainActivity.kt'
+      - 'app/src/main/res/**'
+      - 'app/src/androidTest/**'
+      - 'app/build.gradle.kts'
+      - '.github/workflows/appearance-tests.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: appearance-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  appearance:
+    name: Appearance on Android API ${{ matrix.api }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 31, 34]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: actions/cache@v4
+        with:
+          path: embedded-lorie/build/.cxx
+          key: ${{ runner.os }}-appearance-native-${{ hashFiles('embedded-lorie/build.gradle', 'third_party/termux-x11/lorie/src/main/cpp/**') }}
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          chmod +x gradlew
+      - name: Build instrumentation APKs
+        run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest -Pandroid.injected.build.abi=x86_64
+      - name: Exercise themes and capture Android screens
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-boot-timeout: 300
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          script: |
+            mkdir -p appearance-results
+            adb shell settings put system font_scale 1.0
+            adb shell cmd uimode night no
+            ./gradlew :app:connectedDebugAndroidTest -Pandroid.injected.build.abi=x86_64 -Pandroid.testInstrumentationRunnerArguments.package=com.saas.x11manager.appearance > appearance-results/instrumentation.log 2>&1; result=$?; adb pull /sdcard/Android/data/com.saas.x11manager/files/appearance-audit appearance-results/; adb logcat -d -s AndroidRuntime > appearance-results/android-crashes.log; cat appearance-results/instrumentation.log; exit $result
+      - name: Publish screenshots and test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: appearance-api-${{ matrix.api }}-${{ github.sha }}
+          path: |
+            appearance-results/
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/

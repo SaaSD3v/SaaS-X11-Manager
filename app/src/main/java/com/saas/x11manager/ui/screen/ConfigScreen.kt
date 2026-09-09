@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.saas.x11manager.ui.theme.ManagerAppearanceSettings
@@ -31,6 +32,7 @@ fun ConfigScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .testTag("appearance-settings")
             .padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 8.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
