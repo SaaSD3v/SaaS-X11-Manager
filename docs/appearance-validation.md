@@ -27,6 +27,12 @@ uses production container cards and log dialogs with sample data.
   preserving the saved preference. Selection and switch semantics expose the
   same state that is drawn on screen.
 
+- X11 configuration still used an elevated, tinted dialog with a different header,
+  cards and switches. X11, general and TigerVNC settings now use the same full-size
+  editor, safe system/keyboard insets and explicit window icon colors. Their cards
+  and toggle rows are shared with the Manager configuration and compatibility page.
+  Static menus now use the chosen palette tint, and AMOLED elevation remains black.
+
 ## Regression checks
 
 - 48 combinations per platform: six palettes, light/dark, dynamic on/off and
@@ -34,6 +40,12 @@ uses production container cards and log dialogs with sample data.
 - At least 4.5:1 for the text/color pairs in `theme-matrix.jsonl`, measured with
   Android ColorUtils after transparency is composited over the actual background.
 - Home, Display, Requirements and Config screenshots across appearance modes.
+- Open the real X11 editor through Display in each appearance mode, inspect all
+  sections, operate the resolution menu and verify saved switch changes. Assert
+  its rendered background matches the Manager rather than a tonal overlay.
+- General settings, TigerVNC sections and compatibility settings across five theme
+  cases, including enlarged text. Verify Cancel preserves VNC values and Save
+  still persists the edited port using isolated test preferences.
 - System theme changes, 130% system font size, persistence across Activity
   recreation, reset defaults and selection/switch states.
 - No native action bar; status/navigation icon brightness follows the selected

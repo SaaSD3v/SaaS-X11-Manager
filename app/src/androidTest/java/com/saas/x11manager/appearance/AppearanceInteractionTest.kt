@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.os.Build
 import android.view.Window
 import android.view.View
+import android.view.WindowManager
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
@@ -14,6 +15,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.core.view.WindowInsetsControllerCompat
+import com.termux.x11.EmbeddedDisplayHost
 import com.saas.x11manager.MainActivity
 import com.saas.x11manager.ui.theme.*
 import org.junit.Assert.*
@@ -31,6 +33,7 @@ class AppearanceInteractionTest {
     private fun current() = ManagerAppearancePreferences.load(context)
 
     @Before fun openConfiguration() {
+        compose.runOnIdle { compose.activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
         compose.waitForIdle()
         compose.onNodeWithTag("main-tab-Config").performClick()
         choose("Reset appearance defaults")
@@ -165,6 +168,7 @@ class AppearanceInteractionTest {
                 compose.onNodeWithTag("main-tab-$tab").assertIsDisplayed()
                 assertWindowChrome()
                 AppearanceEvidence.screenshot("screen-$name-${tab.lowercase()}")
+                if (tab == "Display") inspectX11Editor(name)
             }
         }
         choose("Light")
@@ -180,6 +184,37 @@ class AppearanceInteractionTest {
             choose("Light")
             visitScreens("light-dynamic")
         }
+    }
+
+    private fun inspectX11Editor(name: String) {
+        val mainImage = compose.onRoot().captureToImage().toPixelMap()
+        val expectedBackground = mainImage[1, mainImage.height / 2].toArgb()
+        compose.onNodeWithText("Configuration").performClick()
+        compose.onNodeWithText("X11 Configuration").assertIsDisplayed()
+        val editor = compose.onNodeWithTag("settings-dialog").captureToImage().toPixelMap()
+        assertEquals("The X11 editor must use the same background as the Manager", expectedBackground,
+            editor[1, editor.height / 2].toArgb())
+        assertEquals(mainImage.width, editor.width)
+        AppearanceEvidence.screenshot("x11-$name-display")
+        compose.onNodeWithTag("x11-choice-Resolution mode").performClick()
+        compose.onNodeWithText("exact").performClick()
+        compose.onNodeWithText("Exact resolution").assertIsDisplayed()
+        AppearanceEvidence.screenshot("x11-$name-resolution")
+        compose.onNodeWithTag("x11-choice-Resolution mode").performClick()
+        compose.onNodeWithText("native").performClick()
+        val store = EmbeddedDisplayHost.getPrefs(context).get()
+        compose.onNodeWithTag("settings-list").performScrollToNode(hasText("Stretch display"))
+        val before = store.getBoolean("displayStretch", false)
+        compose.onNodeWithText("Stretch display").performClick()
+        assertEquals(!before, store.getBoolean("displayStretch", false))
+        compose.onNodeWithText("Stretch display").performClick()
+        for (section in listOf("Input", "Keyboard", "X11")) {
+            compose.onNodeWithTag("settings-list").performScrollToNode(hasText(section))
+            compose.onNodeWithText(section).assertIsDisplayed()
+            AppearanceEvidence.screenshot("x11-$name-${section.lowercase()}")
+        }
+        compose.onNodeWithContentDescription("Close").performClick()
+        compose.onNodeWithTag("main-tab-Display").assertIsDisplayed()
     }
 
     @Test fun wallpaperChangesUpdateTheRealActivityAndRestoreTheStaticPalette() {

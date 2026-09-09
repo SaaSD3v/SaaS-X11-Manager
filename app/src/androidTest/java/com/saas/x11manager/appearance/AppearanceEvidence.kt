@@ -1,6 +1,7 @@
 package com.saas.x11manager.appearance
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.SystemClock
 import androidx.compose.material3.ColorScheme
@@ -26,7 +27,13 @@ internal object AppearanceEvidence {
         Thread.sleep(300)
         val deadline = SystemClock.elapsedRealtime() + 10_000
         while (true) {
-            val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot()) { "Android screenshot failed" }
+            // Use Android's display capture directly. UiAutomation's bitmap
+            // capture can lose app layers on the API 34 software GPU emulator.
+            val bitmap = instrumentation.uiAutomation.executeShellCommand("screencap -p").use { descriptor ->
+                android.os.ParcelFileDescriptor.AutoCloseInputStream(descriptor).use {
+                    requireNotNull(BitmapFactory.decodeStream(it)) { "Android screenshot failed" }
+                }
+            }
             val actual = expectedPixel?.let { (x, y, _) -> bitmap.getPixel(x, y) }
             val ready = expectedPixel == null || actual == expectedPixel.third
             if (ready || SystemClock.elapsedRealtime() >= deadline) {

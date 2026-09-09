@@ -60,6 +60,7 @@ private fun darkColorSchemeFor(palette: ThemePalette): ColorScheme {
         outlineVariant = Color(0xFF46464A).blend(p, 0.30f),
         inverseSurface = Color(0xFFE2E2E6),
         inverseOnSurface = Color(0xFF303034),
+        surfaceTint = p,
         inversePrimary = palette.primaryLight
     )
 }
@@ -101,6 +102,7 @@ private fun lightColorSchemeFor(palette: ThemePalette): ColorScheme {
         outlineVariant = Color(0xFFC6C6CA).blend(p, 0.18f),
         inverseSurface = Color(0xFF303034),
         inverseOnSurface = Color(0xFFF2F0F4),
+        surfaceTint = p.readableOn(highestSurface),
         inversePrimary = palette.primaryDark
     )
 }
@@ -122,6 +124,7 @@ private object AmoledColorCache {
 
     fun createAmoledScheme(dynamicScheme: ColorScheme): ColorScheme {
         return dynamicScheme.copy(
+            surfaceTint = AMOLED_BLACK,
             background = AMOLED_BLACK,
             surface = AMOLED_BLACK,
             surfaceVariant = AMOLED_BLACK,
@@ -145,6 +148,7 @@ private object AmoledColorCache {
         val baseScheme = darkColorSchemeFor(palette)
         val p = palette.primaryDark
         val scheme = baseScheme.copy(
+            surfaceTint = AMOLED_BLACK,
             background = AMOLED_BLACK,
             surface = AMOLED_BLACK,
             surfaceVariant = AMOLED_BLACK,

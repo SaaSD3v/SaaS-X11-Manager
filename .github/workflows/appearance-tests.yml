@@ -61,6 +61,9 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
           script: |
             mkdir -p appearance-results
+            adb shell settings put system screen_off_timeout 1800000
+            adb shell svc power stayon true
+            adb shell input keyevent KEYCODE_WAKEUP
             adb shell settings put system font_scale 1.0
             adb shell cmd uimode night no
             ./gradlew :app:connectedDebugAndroidTest -Pandroid.injected.build.abi=x86_64 -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true -Pandroid.testInstrumentationRunnerArguments.package=com.saas.x11manager.appearance > appearance-results/instrumentation.log 2>&1; result=$?; adb pull /sdcard/Android/data/com.saas.x11manager/files/appearance-audit appearance-results/ || result=1; test -f appearance-results/appearance-audit/theme-matrix.jsonl || result=1; adb logcat -d -s AndroidRuntime > appearance-results/android-crashes.log; cat appearance-results/instrumentation.log; exit $result

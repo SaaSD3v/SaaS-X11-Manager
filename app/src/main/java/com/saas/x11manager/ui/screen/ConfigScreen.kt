@@ -1,9 +1,7 @@
 package com.saas.x11manager.ui.screen
 
 import android.os.Build
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,6 +19,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.saas.x11manager.ui.component.SettingsSection
+import com.saas.x11manager.ui.component.SettingsToggleRow
 import com.saas.x11manager.ui.theme.ManagerAppearanceSettings
 import com.saas.x11manager.ui.theme.ManagerThemeMode
 import com.saas.x11manager.ui.theme.ThemePalette
@@ -55,7 +55,7 @@ fun ConfigScreen(
         }
 
         item {
-            ConfigSection(
+            SettingsSection(
                 title = "Theme mode",
                 subtitle = "Choose how the Manager follows light and dark appearance",
                 icon = { Icon(Icons.Default.DarkMode, contentDescription = null) }
@@ -76,12 +76,12 @@ fun ConfigScreen(
         }
 
         item {
-            ConfigSection(
+            SettingsSection(
                 title = "Color source",
                 subtitle = "Control Material You and OLED behavior",
                 icon = { Icon(Icons.Default.Wallpaper, contentDescription = null) }
             ) {
-                ToggleRow(
+                SettingsToggleRow(
                     title = "Dynamic Color",
                     subtitle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                         "Use Android wallpaper-derived Material You colors"
@@ -93,7 +93,7 @@ fun ConfigScreen(
                     onCheckedChange = { onSettingsChange(settings.copy(dynamicColor = it)) }
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                ToggleRow(
+                SettingsToggleRow(
                     title = "AMOLED black",
                     subtitle = "Use pure black surfaces while the effective theme is dark",
                     checked = settings.amoledMode,
@@ -103,7 +103,7 @@ fun ConfigScreen(
         }
 
         item {
-            ConfigSection(
+            SettingsSection(
                 title = "Static palette",
                 subtitle = if (settings.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     "Saved for use when Dynamic Color is disabled"
@@ -137,50 +137,6 @@ fun ConfigScreen(
 }
 
 @Composable
-private fun ConfigSection(
-    title: String,
-    subtitle: String,
-    icon: @Composable () -> Unit,
-    content: @Composable ColumnScope.() -> Unit
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        tonalElevation = 0.dp,
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-        )
-    ) {
-        Column(modifier = Modifier.padding(vertical = 4.dp)) {
-            Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(9.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest
-                ) {
-                    Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { icon() }
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-            content()
-        }
-    }
-}
-
-@Composable
 private fun ChoiceRow(
     title: String,
     subtitle: String,
@@ -201,38 +157,6 @@ private fun ChoiceRow(
             Text(title, style = MaterialTheme.typography.bodyLarge)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-    }
-}
-
-@Composable
-private fun ToggleRow(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    enabled: Boolean = true,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 
