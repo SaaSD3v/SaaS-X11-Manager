@@ -96,10 +96,6 @@ object SessionAccessManager {
             }
             vncReservedSlot = reservation.getOrNull()
 
-            // VNC is a clean standalone start mode. If this container already had
-            // Integrated X11 running, stop only that monitor/session while keeping
-            // its lease. The user can turn it back on from Screen afterwards and
-            // run VNC + Integrated X11 independently.
             if (!ensureIntegratedMonitorStoppedForVnc(containerName, vncReservedSlot, logger)) {
                 return false
             }
@@ -195,14 +191,11 @@ object SessionAccessManager {
         return true
     }
 
+    /** Native test branch: there is exactly one Android audio provider. */
     private suspend fun prepareAudioBeforeGraphicalStart(
         containerName: String,
         logger: ContainerLogger?
     ) {
-        PulseAudioRuntimeSanitizer.prepare(
-            containerName = containerName,
-            logger = logger
-        )
         PulseAudioFixManager.prepareBeforeGraphicalStart(
             containerName = containerName,
             logger = logger
@@ -222,25 +215,14 @@ object SessionAccessManager {
         )
     }
 
+    /** HOST and NAT both finalize through the same embedded runtime. */
     private suspend fun finalizeAudioAfterContainerReady(
         containerName: String,
         logger: ContainerLogger?
     ) {
-        val mode = ContainerManager.getContainerInfo(containerName)
-            ?.netMode
-            ?.trim()
-            ?.lowercase()
-
-        if (mode == "nat") {
-            PulseAudioNatScriptTransport.finalizeAfterContainerReady(
-                containerName = containerName,
-                logger = logger
-            )
-        } else {
-            PulseAudioUnifiedTransport.finalizeAfterContainerReady(
-                containerName = containerName,
-                logger = logger
-            )
-        }
+        PulseAudioFixManager.finalizeAfterContainerReady(
+            containerName = containerName,
+            logger = logger
+        )
     }
 }
