@@ -25,7 +25,7 @@ class X11OnlyStopLogPolicyTest {
         ).readText()
 
         assertTrue(source.contains("--- Stopping Container X11 Session ---"))
-        assertTrue(source.contains("[CTX] Container: $containerName".replace("$containerName", "\$containerName")))
+        assertTrue(source.contains("[CTX] Container: \$containerName"))
         assertTrue(source.contains("[+] Container stop confirmed"))
         assertTrue(source.contains("[CTX] Runtime policy: "))
     }
