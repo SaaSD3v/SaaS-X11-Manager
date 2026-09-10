@@ -51,18 +51,18 @@ jobs:
           grep -q 'NativeAudioRuntime.ensureCore' app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt
           grep -q 'NativeAudioRuntime.configureContainer' app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt
 
-      - name: Build tests and release APKs
+      - name: Build tests, release and diagnostic debug APKs
         env:
           SAAS_PULSE_INTEGRATION_REQUIRED: "0"
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew testReleaseUnitTest assembleRelease \
+          ./gradlew testReleaseUnitTest assembleRelease assembleDebug \
             -PVERSION_NAME=1.0.0-native-audio-test \
             -PVERSION_CODE=${{ github.run_number }} \
             --stacktrace 2>&1 | tee native-audio-gradle.log
 
-      - name: Verify embedded PulseAudio in every APK ABI
+      - name: Verify embedded PulseAudio in every release APK ABI
         run: |
           set -euo pipefail
           mapfile -t apks < <(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | sort)
@@ -78,6 +78,29 @@ jobs:
           )
           for apk in "${apks[@]}"; do
             echo "Checking $(basename "$apk")"
+            listing=$(unzip -Z1 "$apk")
+            for name in "${required[@]}"; do
+              count=$(printf '%s\n' "$listing" | grep -c "/$name$" || true)
+              test "$count" -ge 1 || { echo "::error::$name missing from $apk"; exit 1; }
+            done
+          done
+
+      - name: Verify diagnostic debug APKs carry the same runtime
+        run: |
+          set -euo pipefail
+          mapfile -t apks < <(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | sort)
+          test "${#apks[@]}" -eq 5
+          required=(
+            libsaas_pulseaudio_exec.so
+            libsaas_pactl_exec.so
+            libsaas_pacat_exec.so
+            module-aaudio-sink.so
+            module-sles-sink.so
+            module-native-protocol-unix.so
+            module-native-protocol-tcp.so
+          )
+          for apk in "${apks[@]}"; do
+            echo "Checking diagnostic $(basename "$apk")"
             listing=$(unzip -Z1 "$apk")
             for name in "${required[@]}"; do
               count=$(printf '%s\n' "$listing" | grep -c "/$name$" || true)
@@ -101,6 +124,7 @@ jobs:
           if-no-files-found: warn
           path: |
             app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/debug/*.apk
             app/build/test-results/testReleaseUnitTest/**
             app/build/reports/tests/testReleaseUnitTest/**
             app/build/generated/nativeAudio/jniLibs/**/NATIVE-AUDIO-MANIFEST.txt
