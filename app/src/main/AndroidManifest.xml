@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:node="remove" />
@@ -14,12 +15,13 @@
         android:name=".X11Application"
         android:allowBackup="true"
         android:enableOnBackInvokedCallback="true"
+        android:extractNativeLibs="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.X11Manager"
-        tools:replace="android:allowBackup,android:enableOnBackInvokedCallback">
+        tools:replace="android:allowBackup,android:enableOnBackInvokedCallback,android:extractNativeLibs">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -38,6 +40,16 @@
                 android:value="User-started Linux container installation, verification and graphical runtime control with live progress logs" />
         </service>
         <receiver android:name=".operations.OperationNotificationReceiver" android:exported="false" />
+
+        <!-- The only Android audio host in this experimental branch. PulseAudio
+             runs as this app UID in a dedicated process and exits when no Linux
+             container remains registered as an audio consumer. -->
+        <service
+            android:name=".audio.NativeAudioRuntimeService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:process=":audio"
+            android:foregroundServiceType="mediaPlayback" />
 
         <!-- The Lorie renderer is hosted directly in the Display Compose tab.
              Keep only the broadcast bridge needed by CmdEntryPoint; standalone
