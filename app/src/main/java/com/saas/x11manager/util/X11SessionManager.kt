@@ -350,20 +350,64 @@ object X11SessionManager {
         containerName: String,
         logger: ContainerLogger? = null
     ): Boolean = withContext(Dispatchers.IO) {
+        logger?.i("--- Stopping Container X11 Session ---")
+        logger?.i("[CTX] Container: $containerName")
+        logger?.i("[CTX] Assigned display before stop: ${Constants.X11_DISPLAY}")
+
         val info = ContainerManager.getContainerInfo(containerName)
-        if (!ContainerManager.stopContainer(containerName, logger)) return@withContext false
+        if (!ContainerManager.stopContainer(containerName, logger)) {
+            logger?.e("[-] Container stop was not confirmed; X0 ownership will not be released")
+            return@withContext false
+        }
+        logger?.i("[+] Container stop confirmed")
+
+        val remaining = ContainerManager.listContainers()
         // Legacy configurations can share X0. Stopping one container must preserve
         // another live owner, and a foreign X11 bind must never stop this server.
-        if (FixedX11Ownership.canReleaseAfterStop(info, ContainerManager.listContainers())) {
-            return@withContext stopIntegratedServer(logger)
+        if (FixedX11Ownership.canReleaseAfterStop(info, remaining)) {
+            val released = stopIntegratedServer(logger)
+            if (released) {
+                logger?.i("[X11] ✓ Integrated X11 ${Constants.X11_DISPLAY} released")
+            } else {
+                logger?.e("[X11] ✗ Integrated X11 ${Constants.X11_DISPLAY} cleanup was not confirmed")
+            }
+            return@withContext released
         }
+
+        val remainingOwner = remaining.firstOrNull(FixedX11Ownership::ownsServer)?.name
+        logger?.i(
+            "[CTX] Runtime policy: " +
+                if (remainingOwner != null) {
+                    "X0 retained for active owner $remainingOwner"
+                } else {
+                    "X0 ownership not released by this container"
+                }
+        )
         true
     }
 
     suspend fun stopAll(logger: ContainerLogger? = null) = withContext(Dispatchers.IO) {
-        ContainerManager.listContainers()
-            .filter { it.isRunning }
-            .forEach { ContainerManager.stopContainer(it.name, logger) }
-        stopIntegratedServer(logger)
+        logger?.i("--- Stopping All ---")
+        val running = ContainerManager.listContainers().filter { it.isRunning }
+        if (running.isEmpty()) {
+            logger?.i("[CONTAINER] ✓ No running containers to stop")
+        } else {
+            running.forEach { container ->
+                logger?.i("[CONTAINER] Stopping container: ${container.name}")
+                val stopped = ContainerManager.stopContainer(container.name, logger)
+                if (stopped) {
+                    logger?.i("[CONTAINER] ✓ Container stopped: ${container.name}")
+                } else {
+                    logger?.e("[CONTAINER] ✗ Container stop was not confirmed: ${container.name}")
+                }
+            }
+        }
+
+        val x11Stopped = stopIntegratedServer(logger)
+        if (x11Stopped) {
+            logger?.i("[MANAGER] ✓ All running containers stopped; X0 released")
+        } else {
+            logger?.e("[MANAGER] ✗ X0 cleanup was not fully confirmed")
+        }
     }
 }
