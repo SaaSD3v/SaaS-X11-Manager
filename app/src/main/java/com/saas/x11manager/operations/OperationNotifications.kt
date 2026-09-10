@@ -23,6 +23,8 @@ object OperationNotifications {
     const val GENERATION = "operation_generation"
     const val OPEN = "com.saas.x11manager.OPEN_OPERATION_LOG"
     private const val CHANNEL = "operation_progress"
+    private const val GROUP_KEY = "com.saas.x11manager.OPERATION_LOGS"
+    private const val GROUP_SUMMARY_ID = 4098
 
     fun createChannel(context: Context) {
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -72,6 +74,8 @@ object OperationNotifications {
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setCategory(if (operation.running) NotificationCompat.CATEGORY_PROGRESS else NotificationCompat.CATEGORY_STATUS)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .setGroup(GROUP_KEY)
+            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_SUMMARY)
             // Package managers do not expose one reliable total across all phases.
             .setProgress(0, 0, operation.running)
             .addAction(0, "View logs", open)
@@ -79,16 +83,72 @@ object OperationNotifications {
             .build()
     }
 
+    private fun buildGroupSummary(context: Context, operations: List<LogOperation>): Notification {
+        val runningCount = operations.count { it.running }
+        val completedCount = operations.size - runningCount
+        val text = when {
+            runningCount > 0 && completedCount > 0 -> "$runningCount active • $completedCount saved"
+            runningCount > 0 -> if (runningCount == 1) "1 active operation" else "$runningCount active operations"
+            operations.size == 1 -> "1 saved operation"
+            else -> "${operations.size} saved operations"
+        }
+        val openApp = PendingIntent.getActivity(
+            context,
+            GROUP_SUMMARY_ID,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        return NotificationCompat.Builder(context, CHANNEL)
+            .setSmallIcon(R.drawable.ic_operation_log)
+            .setContentTitle("X11 Manager operations")
+            .setContentText(text)
+            .setSubText("Operation logs")
+            .setContentIntent(openApp)
+            .setOnlyAlertOnce(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setCategory(if (runningCount > 0) NotificationCompat.CATEGORY_PROGRESS else NotificationCompat.CATEGORY_STATUS)
+            .setGroup(GROUP_KEY)
+            .setGroupSummary(true)
+            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_SUMMARY)
+            .setNumber(operations.size)
+            .setOngoing(runningCount > 0)
+            .build()
+    }
+
+    private fun notificationsAllowed(context: Context): Boolean =
+        Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
+
+    private fun syncGroupSummary(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val visible = X11Application.instance.operationLogs.records.values
+            .filter { it.notified }
+            .sortedByDescending { it.updatedAt }
+
+        if (visible.isEmpty()) {
+            manager.cancel(GROUP_SUMMARY_ID)
+            return
+        }
+        if (!notificationsAllowed(context)) return
+        manager.notify(GROUP_SUMMARY_ID, buildGroupSummary(context, visible))
+    }
+
     fun post(context: Context, operation: LogOperation) {
-        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context,
-                Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+        if (!notificationsAllowed(context)) return
         context.getSystemService(NotificationManager::class.java)
             .notify(operation.notificationId, build(context, operation))
+        syncGroupSummary(context)
     }
 
     fun dismiss(context: Context, operation: LogOperation) {
         operation.notified = false
         context.getSystemService(NotificationManager::class.java).cancel(operation.notificationId)
+        syncGroupSummary(context)
     }
 }
 
