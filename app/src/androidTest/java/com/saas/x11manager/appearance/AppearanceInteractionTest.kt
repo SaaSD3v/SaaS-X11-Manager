@@ -259,8 +259,21 @@ class AppearanceInteractionTest {
                 "purple" to android.graphics.Color.rgb(130, 30, 190))) {
                 val previousPrimary = dynamicLightColorScheme(context).primary
                 val bitmap = Bitmap.createBitmap(200, 200, Bitmap.Config.ARGB_8888).apply { eraseColor(color) }
-                try { manager.setBitmap(bitmap) } finally { bitmap.recycle() }
-                compose.waitUntil(20_000) { dynamicLightColorScheme(context).primary != previousPrimary }
+                // Android 14 can defer consecutive wallpaper color events until
+                // screen-off. Exercise that real system transition before expecting
+                // new resources; otherwise the test waits on a deliberately queued overlay.
+                val power = context.getSystemService(android.os.PowerManager::class.java)
+                AppearanceEvidence.shell("input keyevent KEYCODE_SLEEP")
+                try {
+                    compose.waitUntil(5_000) { !power.isInteractive }
+                    manager.setBitmap(bitmap)
+                    compose.waitUntil(20_000) { dynamicLightColorScheme(context).primary != previousPrimary }
+                } finally {
+                    bitmap.recycle()
+                    AppearanceEvidence.shell("input keyevent KEYCODE_WAKEUP")
+                    AppearanceEvidence.shell("wm dismiss-keyguard")
+                }
+                compose.waitUntil(5_000) { power.isInteractive }
                 // MainActivity owns setContent in onCreate, so this also exercises
                 // Android's real recreation after a wallpaper overlay change.
                 compose.waitForIdle()

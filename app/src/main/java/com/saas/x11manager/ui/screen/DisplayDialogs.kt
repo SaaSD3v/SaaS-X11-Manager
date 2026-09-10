@@ -1,5 +1,7 @@
 package com.saas.x11manager.ui.screen
 
+import androidx.compose.foundation.border
+
 import android.content.SharedPreferences
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -471,7 +473,8 @@ private fun ChoiceSetting(
 
             DropdownMenu(
                 expanded = expanded,
-                onDismissRequest = { expanded = false }
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(4.dp))
             ) {
                 choices.forEach { choice ->
                     DropdownMenuItem(
