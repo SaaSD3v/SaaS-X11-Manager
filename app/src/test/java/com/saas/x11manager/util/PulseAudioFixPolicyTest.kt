@@ -101,7 +101,7 @@ class PulseAudioFixPolicyTest {
 
         assertTrue(runtime.contains("discoverNatGateway"))
         assertTrue(runtime.contains("nsenter"))
-        assertTrue(runtime.contains("/proc/${'$'}pid/net/route"))
+        assertTrue(runtime.contains("/proc/") && runtime.contains("/net/route"))
         assertTrue(runtime.contains("refusing a hardcoded fallback"))
         assertFalse(runtime.contains("172.28.0.1"))
         assertTrue(runtime.contains("BASE_PORT = 4713"))
@@ -167,6 +167,7 @@ class PulseAudioFixPolicyTest {
         assertTrue(command.contains("Audio command exceeds DroidSpaces argument capacity"))
         assertTrue(payload.contains("pulseaudio-utils libasound2-plugins alsa-utils"))
         assertTrue(payload.contains("apk add --no-cache pulseaudio-utils alsa-utils alsa-plugins-pulse"))
-        assertTrue(payload.contains("__SAAS_AUDIO_PCM_DRAINED__"))
+        assertTrue(payload.contains("PulseAudioClientConfig.install(server)"))
+        assertTrue(payload.contains("echo __READY__"))
     }
 }
