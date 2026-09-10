@@ -9,9 +9,13 @@ import kotlinx.coroutines.withContext
 abstract class ContainerLogger {
     var verbose: Boolean = false
     abstract fun logImmediate(level: Int, msg: String)
-    open suspend fun i(msg: String) { withContext(Dispatchers.Main.immediate) { logImmediate(Log.INFO, msg) } }
-    open suspend fun w(msg: String) { withContext(Dispatchers.Main.immediate) { logImmediate(Log.WARN, msg) } }
-    open suspend fun e(msg: String) { withContext(Dispatchers.Main.immediate) { logImmediate(Log.ERROR, msg) } }
+
+    // Logging must never turn a runtime/control helper into a suspend boundary.
+    // ViewModelLogger already coalesces delivery onto Main asynchronously, so
+    // these semantic helpers can safely be called from native/process code.
+    open fun i(msg: String) { logImmediate(Log.INFO, msg) }
+    open fun w(msg: String) { logImmediate(Log.WARN, msg) }
+    open fun e(msg: String) { logImmediate(Log.ERROR, msg) }
 }
 
 /**
@@ -60,15 +64,15 @@ class ViewModelLogger(
         enqueueReduced(reduce(level, msg))
     }
 
-    override suspend fun i(msg: String) {
+    override fun i(msg: String) {
         enqueueReduced(reduce(Log.INFO, msg))
     }
 
-    override suspend fun w(msg: String) {
+    override fun w(msg: String) {
         enqueueReduced(reduce(Log.WARN, msg))
     }
 
-    override suspend fun e(msg: String) {
+    override fun e(msg: String) {
         enqueueReduced(reduce(Log.ERROR, msg))
     }
 
