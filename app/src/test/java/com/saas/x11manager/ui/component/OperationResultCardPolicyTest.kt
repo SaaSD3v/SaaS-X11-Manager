@@ -34,11 +34,11 @@ class OperationResultCardPolicyTest {
         val screen = source("app/src/main/java/com/saas/x11manager/ui/screen/ManagedDisplayScreen.kt")
 
         // Saved logs remain exposed by the normal toolbar affordance.
-        assertTrue(screen.contains("hasLogs = model.selectedLogOperation?.available == true"))
-        assertTrue(screen.contains("contentDescription = \"X11 logs\""))
+        assertTrue(screen.contains("onShowLogs = displayViewModel::openLogs"))
+        assertTrue(screen.contains("contentDescription = \"Monitor logs\""))
 
         // The same shared card can stay mounted in the screen because the
         // component itself now owns the transient-only contract.
-        assertTrue(screen.contains("OperationResultCard(operation)"))
+        assertTrue(screen.contains("OperationResultCard(displayViewModel.logOperation, displayViewModel::openLogs)"))
     }
 }
