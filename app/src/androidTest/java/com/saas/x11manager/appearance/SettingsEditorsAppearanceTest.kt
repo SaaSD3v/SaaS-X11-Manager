@@ -94,6 +94,7 @@ class SettingsEditorsAppearanceTest {
         try {
             AppearanceEvidence.shell("settings put secure show_ime_with_hard_keyboard 1")
             compose.onNodeWithText("VNC port").performClick().performTextReplacement("5904")
+            compose.waitUntil(15_000) { AppearanceEvidence.settingsKeyboardVisible() }
             compose.waitForIdle()
             AppearanceEvidence.screenshot("editor-general-keyboard")
             compose.onNodeWithText("Save").assertIsDisplayed().performClick()
@@ -107,6 +108,7 @@ class SettingsEditorsAppearanceTest {
 
     private fun assertEditorBackground() {
         compose.waitForIdle()
+        AppearanceEvidence.assertSettingsWindow(settings.themeMode == ManagerThemeMode.LIGHT)
         val dialog = compose.onNodeWithTag("settings-dialog")
         if (Build.VERSION.SDK_INT >= 28) {
             val image = dialog.captureToImage().toPixelMap()

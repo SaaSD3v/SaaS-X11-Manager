@@ -29,7 +29,8 @@ uses production container cards and log dialogs with sample data.
 
 - X11 configuration still used an elevated, tinted dialog with a different header,
   cards and switches. X11, general and TigerVNC settings now use the same full-size
-  editor, safe system/keyboard insets and explicit window icon colors. Their cards
+  editor, safe system/keyboard insets and explicit window icon colors. Full-size
+  editors do not dim the Activity behind the system bars. Their cards
   and toggle rows are shared with the Manager configuration and compatibility page.
   Static menus now use the chosen palette tint, and AMOLED elevation remains black.
 

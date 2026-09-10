@@ -146,6 +146,10 @@ class AppearanceInteractionTest {
 
             AppearanceEvidence.shell("settings put system font_scale 1.3")
             compose.waitUntil(15_000) { context.resources.configuration.fontScale > 1.2f }
+            // Application resources update before the Activity is replaced on
+            // API 31. Recreate with the settled configuration before opening a
+            // child window, so an old Activity cannot race the dialog click.
+            compose.activityRule.scenario.recreate()
             compose.waitForIdle()
             capture("main-large-text", "Manager configuration")
             choose("Dark")
@@ -193,6 +197,7 @@ class AppearanceInteractionTest {
         val expectedBackground = mainImage[1, mainImage.height / 2].toArgb()
         compose.onNodeWithText("Configuration").performClick()
         compose.onNodeWithText("X11 Configuration").assertIsDisplayed()
+        AppearanceEvidence.assertSettingsWindow(current().themeMode == ManagerThemeMode.LIGHT)
         val dialog = compose.onNodeWithTag("settings-dialog")
         assertTrue("The editor must span the display width (allowing pixel rounding)",
             kotlin.math.abs(mainImage.width - dialog.fetchSemanticsNode().boundsInRoot.width) <= 1f)
@@ -207,6 +212,7 @@ class AppearanceInteractionTest {
         }
         AppearanceEvidence.screenshot("x11-$name-display")
         compose.onNodeWithTag("x11-choice-Resolution mode").performClick()
+        compose.waitForIdle()
         AppearanceEvidence.screenshot("x11-$name-resolution-menu")
         compose.onNodeWithText("exact").performClick()
         compose.onNodeWithText("Exact resolution").assertIsDisplayed()

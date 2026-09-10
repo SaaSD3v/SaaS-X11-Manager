@@ -1,6 +1,7 @@
 package com.saas.x11manager.ui.component
 
 import android.os.Build
+import android.view.WindowManager
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.toggleable
@@ -48,6 +49,12 @@ internal fun SettingsDialog(
             // Dialogs own a separate Window and do not inherit the Activity's
             // edge-to-edge icon appearance when the app overrides system night mode.
             (view.parent as? DialogWindowProvider)?.window?.let { window ->
+                // These editors cover the screen. A floating dialog's default
+                // dim layer would still darken the Activity behind the system
+                // bars, leaving gray strips and forced white icons in light mode.
+                window.setDimAmount(0f)
+                window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
                 window.statusBarColor = android.graphics.Color.TRANSPARENT
                 window.navigationBarColor = android.graphics.Color.TRANSPARENT
                 if (Build.VERSION.SDK_INT >= 29) {

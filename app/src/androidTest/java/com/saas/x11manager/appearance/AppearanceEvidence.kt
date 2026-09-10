@@ -4,15 +4,24 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.SystemClock
+import android.view.View
+import android.view.WindowInsetsController
+import android.view.WindowManager
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.graphics.ColorUtils
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.matcher.RootMatchers.isDialog
+import androidx.test.espresso.matcher.ViewMatchers.isRoot
 import com.saas.x11manager.ui.theme.ManagerAppearanceSettings
 import com.saas.x11manager.ui.theme.readableOn
 import org.json.JSONObject
+import org.junit.Assert.assertEquals
 import java.io.File
 
 internal object AppearanceEvidence {
@@ -56,6 +65,40 @@ internal object AppearanceEvidence {
 
     fun shell(command: String): String = instrumentation.uiAutomation.executeShellCommand(command).use {
         android.os.ParcelFileDescriptor.AutoCloseInputStream(it).bufferedReader().readText()
+    }
+
+    fun assertSettingsWindow(light: Boolean) {
+        onView(isRoot()).inRoot(isDialog()).check { view, error ->
+            if (error != null) throw error
+            val root = requireNotNull(view).rootView
+            val flags = (root.layoutParams as WindowManager.LayoutParams).flags
+            assertEquals("Full-size settings must not dim the system bars", 0,
+                flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            val lightStatus: Boolean
+            val lightNavigation: Boolean
+            if (Build.VERSION.SDK_INT >= 30) {
+                val appearance = requireNotNull(root.windowInsetsController).systemBarsAppearance
+                lightStatus = appearance and WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS != 0
+                lightNavigation = appearance and WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS != 0
+            } else {
+                @Suppress("DEPRECATION")
+                val appearance = root.systemUiVisibility
+                lightStatus = appearance and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR != 0
+                lightNavigation = appearance and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR != 0
+            }
+            assertEquals("Settings status icons must follow the app theme", light, lightStatus)
+            assertEquals("Settings navigation icons must follow the app theme", light, lightNavigation)
+        }
+    }
+
+    fun settingsKeyboardVisible(): Boolean {
+        var visible = false
+        onView(isRoot()).inRoot(isDialog()).check { view, error ->
+            if (error != null) throw error
+            visible = ViewCompat.getRootWindowInsets(requireNotNull(view))
+                ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+        }
+        return visible
     }
 
     fun contrast(foreground: Color, background: Color): Double = ColorUtils.calculateContrast(
