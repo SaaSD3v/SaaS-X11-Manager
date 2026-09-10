@@ -13,10 +13,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.ViewModelProvider
+import com.saas.x11manager.X11Application
+import com.saas.x11manager.operations.*
+import com.saas.x11manager.ui.screen.EditContainerViewModel
+import com.saas.x11manager.ui.screen.ManagedDisplayViewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,6 +36,7 @@ import com.saas.x11manager.ui.screen.HomeViewModel
 import com.saas.x11manager.ui.screen.ManagedDisplayScreen
 import com.saas.x11manager.ui.screen.RequirementsScreen
 import com.saas.x11manager.ui.theme.ManagerAppearanceSettings
+import com.saas.x11manager.ui.theme.readableOn
 import kotlinx.coroutines.launch
 
 enum class TabItem(val title: String, val icon: ImageVector) {
@@ -52,6 +60,38 @@ fun AppNavigation(
     val scope = rememberCoroutineScope()
     var displayScreenOpen by remember { mutableStateOf(false) }
     var fixesScreenContainer by remember { mutableStateOf<String?>(null) }
+
+    val operationStore = X11Application.instance.operationLogs
+    val openLogRequest = operationStore.openRequest
+    LaunchedEffect(openLogRequest) {
+        val request = openLogRequest ?: return@LaunchedEffect
+        operationStore.awaitLoaded()
+        fixesScreenContainer = null
+        viewModel.onEditNavigated()
+        displayScreenOpen = false
+        when (request.owner.area) {
+            OperationArea.HOME -> {
+                pagerState.scrollToPage(0)
+                viewModel.openSavedLogs(request.owner.target)
+            }
+            OperationArea.SETUP -> {
+                val editor = ViewModelProvider(X11Application.instance)
+                    .get("edit:${request.owner.target}", EditContainerViewModel::class.java)
+                editor.load(request.owner.target, X11Application.instance.cacheDir)
+                editor.openInstallTerminal()
+                viewModel.navigateToEditContainer(request.owner.target)
+            }
+            OperationArea.MONITOR -> {
+                val monitor = ViewModelProvider(X11Application.instance)[ManagedDisplayViewModel::class.java]
+                monitor.openLogs()
+                displayScreenOpen = true
+            }
+        }
+        operationStore.get(request.owner).takeUnless { it.running }?.let {
+            OperationNotifications.dismiss(X11Application.instance, it)
+        }
+        operationStore.consumeOpen(request)
+    }
 
     val navigateToEdit = viewModel.navigateToEdit
 
@@ -160,6 +200,10 @@ private fun MainBottomBar(
 ) {
     val tabs = TabItem.entries
     val selectedIndex = tabs.indexOf(selectedTab)
+    val selectedContentColor = MaterialTheme.colorScheme.primary.readableOn(
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+            .compositeOver(MaterialTheme.colorScheme.surfaceContainer)
+    )
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -207,14 +251,15 @@ private fun MainBottomBar(
                     tabs.forEach { tab ->
                         val isSelected = selectedTab == tab
                         val contentColor by animateColorAsState(
-                            targetValue = if (isSelected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            targetValue = if (isSelected) selectedContentColor
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
                             label = "IconColor"
                         )
 
                         Surface(
                             onClick = { onTabSelected(tab) },
                             modifier = Modifier
+                                .testTag("main-tab-${tab.name}")
                                 .weight(1f)
                                 .fillMaxHeight(),
                             color = Color.Transparent,

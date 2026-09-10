@@ -1,0 +1,333 @@
+package com.saas.x11manager.appearance
+
+import android.Manifest
+import android.app.WallpaperManager
+import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.os.Build
+import android.view.Window
+import android.view.View
+import android.view.WindowManager
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.core.view.WindowInsetsControllerCompat
+import com.termux.x11.EmbeddedDisplayHost
+import com.saas.x11manager.MainActivity
+import com.saas.x11manager.ui.theme.*
+import org.junit.Assert.*
+import org.junit.Before
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import kotlin.math.roundToInt
+
+/** Clicks the real production screen, including its persistence and activity recreation. */
+@RunWith(AndroidJUnit4::class)
+class AppearanceInteractionTest {
+    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+    private val context get() = AppearanceEvidence.context
+    private fun current() = ManagerAppearancePreferences.load(context)
+
+    @Before fun openConfiguration() {
+        compose.runOnIdle { compose.activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+        compose.waitForIdle()
+        compose.onNodeWithTag("main-tab-Config").performClick()
+        choose("Reset appearance defaults")
+        assertWindowChrome()
+    }
+
+    private fun assertWindowChrome() {
+        compose.runOnIdle {
+            assertNull("A native action bar must not cover the Compose header", compose.activity.actionBar)
+            assertFalse(compose.activity.window.hasFeature(Window.FEATURE_ACTION_BAR))
+            val dark = when (current().themeMode) {
+                ManagerThemeMode.DARK -> true
+                ManagerThemeMode.LIGHT -> false
+                ManagerThemeMode.SYSTEM -> context.resources.configuration.uiMode and
+                    Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+            }
+            val bars = WindowInsetsControllerCompat(compose.activity.window, compose.activity.window.decorView)
+            assertEquals("Status bar icons must follow the app theme", !dark, bars.isAppearanceLightStatusBars)
+            assertEquals("Navigation bar icons must follow the app theme", !dark, bars.isAppearanceLightNavigationBars)
+        }
+    }
+
+    private fun choose(label: String) {
+        reveal(label)
+        compose.onNodeWithText(label).performClick()
+        compose.waitForIdle()
+    }
+
+    private fun reveal(label: String) {
+        compose.onNodeWithTag("appearance-settings").performScrollToNode(hasText(label))
+    }
+
+    private fun capture(name: String, anchor: String = "Color source") {
+        reveal(anchor)
+        compose.waitForIdle()
+        assertWindowChrome()
+        AppearanceEvidence.screenshot(name)
+    }
+
+    @Test fun themeDynamicAmoledPaletteAndResetControlsPersistTheirActualSelections() {
+        choose("Light")
+        compose.onNodeWithText("Light").assertIsSelected()
+        assertEquals(ManagerThemeMode.LIGHT, current().themeMode)
+        capture("main-light-default", "Manager configuration")
+
+        reveal("Dynamic Color")
+        if (Build.VERSION.SDK_INT >= 31) {
+            choose("Dynamic Color")
+            assertFalse(current().dynamicColor)
+            compose.onNodeWithText("Dynamic Color").assertIsOff()
+            capture("main-light-static")
+            choose("Dynamic Color")
+            assertTrue(current().dynamicColor)
+            compose.onNodeWithText("Dynamic Color").assertIsOn()
+            capture("main-light-dynamic")
+            choose("Dynamic Color")
+        } else {
+            compose.onNodeWithText("Dynamic Color").assertIsNotEnabled().assertIsOff()
+            capture("main-dynamic-unavailable")
+        }
+
+        ThemePalette.entries.forEach { palette ->
+            choose(palette.displayName)
+            assertEquals(palette, current().palette)
+            compose.onNodeWithText(palette.displayName).assertIsSelected()
+        }
+        capture("main-palette-selection", "Static palette")
+
+        choose("Dark")
+        choose("AMOLED black")
+        assertTrue(current().amoledMode)
+        compose.onNodeWithText("AMOLED black").assertIsOn()
+        capture("main-dark-amoled")
+        if (Build.VERSION.SDK_INT >= 31) {
+            choose("Dynamic Color")
+            capture("main-dark-dynamic-amoled")
+        }
+        val saved = current()
+        compose.activityRule.scenario.recreate()
+        compose.waitForIdle()
+        assertEquals(saved, current())
+        compose.onAllNodesWithText("Config").onLast().assertIsDisplayed()
+        capture("main-restored-appearance")
+
+        choose("AMOLED black")
+        assertFalse(current().amoledMode)
+        capture("main-dark-without-amoled")
+        choose("System")
+        assertEquals(ManagerThemeMode.SYSTEM, current().themeMode)
+        choose("Reset appearance defaults")
+        assertEquals(ManagerAppearanceSettings(), current())
+        capture("main-reset-defaults", "Manager configuration")
+    }
+
+    @Test fun systemThemeAndLargeTextKeepTheControlsAndNavigationReachable() {
+        try {
+            choose("System")
+            AppearanceEvidence.shell("cmd uimode night yes")
+            compose.waitUntil(15_000) {
+                context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+            }
+            compose.waitForIdle()
+            capture("main-system-dark")
+            AppearanceEvidence.shell("cmd uimode night no")
+            compose.waitUntil(15_000) {
+                context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_NO
+            }
+            compose.waitForIdle()
+            capture("main-system-light")
+
+            AppearanceEvidence.shell("settings put system font_scale 1.3")
+            compose.waitUntil(15_000) { context.resources.configuration.fontScale > 1.2f }
+            // Application resources update before the Activity is replaced on
+            // API 31. Recreate with the settled configuration before opening a
+            // child window, so an old Activity cannot race the dialog click.
+            compose.activityRule.scenario.recreate()
+            compose.waitForIdle()
+            capture("main-large-text", "Manager configuration")
+            choose("Dark")
+            choose("AMOLED black")
+            capture("main-large-text-amoled")
+            reveal("Reset appearance defaults")
+            compose.onNodeWithText("Reset appearance defaults").assertIsDisplayed()
+            compose.onAllNodesWithText("Config").onLast().assertIsDisplayed()
+            compose.onNodeWithTag("main-tab-Display").performClick()
+            inspectX11Editor("large-text-amoled")
+        } finally {
+            AppearanceEvidence.shell("settings put system font_scale 1.0")
+            AppearanceEvidence.shell("cmd uimode night no")
+        }
+    }
+
+    @Test fun mainScreensRenderWithStaticDynamicAndAmoledThemes() {
+        fun visitScreens(name: String) {
+            for (tab in listOf("Home", "Display", "Requirements", "Config")) {
+                compose.onNodeWithTag("main-tab-$tab").performClick()
+                compose.waitForIdle()
+                compose.onNodeWithTag("main-tab-$tab").assertIsDisplayed()
+                assertWindowChrome()
+                AppearanceEvidence.screenshot("screen-$name-${tab.lowercase()}")
+                if (tab == "Display") inspectX11Editor(name)
+            }
+        }
+        choose("Light")
+        if (Build.VERSION.SDK_INT >= 31) choose("Dynamic Color")
+        visitScreens("light-static")
+        choose("Dark")
+        visitScreens("dark-static")
+        choose("AMOLED black")
+        visitScreens("dark-amoled")
+        if (Build.VERSION.SDK_INT >= 31) {
+            choose("Dynamic Color")
+            visitScreens("dark-dynamic-amoled")
+            choose("Light")
+            visitScreens("light-dynamic")
+        }
+    }
+
+    @Test fun fixedWorkspaceKeepsItsControlsAndLogsAcrossThemes() {
+        choose("Light")
+        if (Build.VERSION.SDK_INT >= 31) choose("Dynamic Color")
+        for (name in listOf("light", "dark", "amoled")) {
+            when (name) {
+                "dark" -> choose("Dark")
+                "amoled" -> choose("AMOLED black")
+            }
+            compose.onNodeWithTag("main-tab-Display").performClick()
+            compose.onNodeWithText("Screen").performClick()
+            compose.waitForIdle()
+            compose.onNodeWithText("X11 display").assertIsDisplayed()
+            compose.onNodeWithText("Monitor 1 stopped").assertIsDisplayed()
+            compose.onNodeWithText("Start").assertIsNotEnabled()
+            assertWindowChrome()
+            AppearanceEvidence.screenshot("fixed-workspace-$name")
+            compose.onNodeWithContentDescription("Monitor logs").performClick()
+            compose.onNodeWithContentDescription("Minimize logs").assertIsDisplayed()
+            AppearanceEvidence.screenshot("fixed-workspace-$name-logs")
+            compose.onNodeWithContentDescription("Close").performClick()
+            compose.onNodeWithContentDescription("X11 configuration").performClick()
+            compose.onNodeWithTag("settings-dialog").assertIsDisplayed()
+            AppearanceEvidence.assertSettingsWindow(name == "light")
+            compose.onNodeWithContentDescription("Close").performClick()
+            compose.onNodeWithContentDescription("Close screen").performClick()
+            compose.onNodeWithTag("main-tab-Config").performClick()
+        }
+    }
+
+    private fun inspectX11Editor(name: String) {
+        val mainImage = compose.onRoot().captureToImage().toPixelMap()
+        val expectedBackground = mainImage[1, mainImage.height / 2].toArgb()
+        compose.onNodeWithText("Configuration").performClick()
+        compose.onNodeWithText("X11 Configuration").assertIsDisplayed()
+        AppearanceEvidence.assertSettingsWindow(current().themeMode == ManagerThemeMode.LIGHT)
+        val dialog = compose.onNodeWithTag("settings-dialog")
+        assertTrue("The editor must span the display width (allowing pixel rounding)",
+            kotlin.math.abs(mainImage.width - dialog.fetchSemanticsNode().boundsInRoot.width) <= 1f)
+        if (Build.VERSION.SDK_INT >= 28) {
+            val editor = dialog.captureToImage().toPixelMap()
+            assertEquals("The X11 editor must use the same background as the Manager", expectedBackground,
+                editor[1, editor.height / 2].toArgb())
+        } else {
+            // Compose cannot capture a Dialog root before API 28; verify the
+            // actual full-screen Android composition instead on Android 8.
+            AppearanceEvidence.screenshot("x11-$name-background", Triple(1, mainImage.height / 2, expectedBackground))
+        }
+        AppearanceEvidence.screenshot("x11-$name-display")
+        compose.onNodeWithTag("x11-choice-Resolution mode").performClick()
+        compose.waitForIdle()
+        AppearanceEvidence.screenshot("x11-$name-resolution-menu")
+        compose.onNodeWithText("exact").performClick()
+        compose.onNodeWithText("Exact resolution").assertIsDisplayed()
+        AppearanceEvidence.screenshot("x11-$name-resolution")
+        compose.onNodeWithTag("x11-choice-Resolution mode").performClick()
+        compose.onNodeWithText("native").performClick()
+        val store = EmbeddedDisplayHost.getPrefs(context).get()
+        compose.onNodeWithTag("settings-list").performScrollToNode(hasText("Stretch display"))
+        val before = store.getBoolean("displayStretch", false)
+        compose.onNodeWithText("Stretch display").performClick()
+        assertEquals(!before, store.getBoolean("displayStretch", false))
+        compose.onNodeWithText("Stretch display").performClick()
+        for (section in listOf("Input", "Keyboard", "X11")) {
+            compose.onNodeWithTag("settings-list").performScrollToNode(hasText(section))
+            compose.onNodeWithText(section).assertIsDisplayed()
+            AppearanceEvidence.screenshot("x11-$name-${section.lowercase()}")
+        }
+        compose.onNodeWithContentDescription("Close").performClick()
+        compose.onNodeWithTag("main-tab-Display").assertIsDisplayed()
+    }
+
+    @Test fun wallpaperChangesUpdateTheRealActivityAndRestoreTheStaticPalette() {
+        // API 31's AOSP SystemUI has no Monet overlay generator (getOverlay is
+        // a stub). API 32 and 34 exercise actual wallpaper extraction; API 31
+        // still tests both color sources against its available Android palette.
+        org.junit.Assume.assumeTrue("Wallpaper extraction requires the emulator's Monet implementation", Build.VERSION.SDK_INT >= 32)
+        choose("Light")
+        choose("Dynamic Color")
+        choose("Ocean")
+        fun backgroundPixel(): Int {
+            reveal("Manager configuration")
+            compose.waitForIdle()
+            // This point is inside the list's empty horizontal padding, over the
+            // production theme background rather than any text or card.
+            return compose.onNodeWithTag("appearance-settings").captureToImage().toPixelMap()[1, 1].toArgb()
+        }
+        val staticBackground = backgroundPixel()
+        choose("Dynamic Color")
+        val automation = AppearanceEvidence.instrumentation.uiAutomation
+        automation.adoptShellPermissionIdentity(Manifest.permission.SET_WALLPAPER)
+        try {
+            val manager = WallpaperManager.getInstance(context)
+            for ((name, color) in listOf("green" to android.graphics.Color.rgb(20, 130, 60),
+                "purple" to android.graphics.Color.rgb(130, 30, 190))) {
+                val previousPrimary = dynamicLightColorScheme(context).primary
+                val bitmap = Bitmap.createBitmap(200, 200, Bitmap.Config.ARGB_8888).apply { eraseColor(color) }
+                // Android 14 can defer consecutive wallpaper color events until
+                // screen-off. Exercise that real system transition before expecting
+                // new resources; otherwise the test waits on a deliberately queued overlay.
+                val power = context.getSystemService(android.os.PowerManager::class.java)
+                AppearanceEvidence.shell("input keyevent KEYCODE_SLEEP")
+                try {
+                    compose.waitUntil(5_000) { !power.isInteractive }
+                    manager.setBitmap(bitmap)
+                    compose.waitUntil(20_000) { dynamicLightColorScheme(context).primary != previousPrimary }
+                } finally {
+                    bitmap.recycle()
+                    AppearanceEvidence.shell("input keyevent KEYCODE_WAKEUP")
+                    AppearanceEvidence.shell("wm dismiss-keyguard")
+                }
+                compose.waitUntil(5_000) { power.isInteractive }
+                // MainActivity owns setContent in onCreate, so this also exercises
+                // Android's real recreation after a wallpaper overlay change.
+                compose.waitForIdle()
+                val expected = dynamicLightColorScheme(context)
+                compose.waitUntil(10_000) {
+                    runCatching { backgroundPixel() == expected.background.toArgb() }.getOrDefault(false)
+                }
+                reveal("Dynamic Color")
+                compose.waitForIdle()
+                val row = compose.onNodeWithText("Dynamic Color").fetchSemanticsNode().boundsInRoot
+                val origin = IntArray(2)
+                compose.runOnIdle {
+                    compose.activity.findViewById<View>(android.R.id.content).getLocationOnScreen(origin)
+                }
+                // Sample the filled left side of the checked Switch track. The
+                // row has 16dp horizontal padding and a 52dp track; its white
+                // thumb is on the right. This verifies the Android compositor,
+                // independently of Compose's offscreen captureToImage result.
+                val x = origin[0] + (row.right - 58 * context.resources.displayMetrics.density).roundToInt()
+                val y = origin[1] + row.center.y.roundToInt()
+                AppearanceEvidence.screenshot("wallpaper-$name-dynamic", Triple(x, y, expected.primary.toArgb()))
+                choose("Dynamic Color")
+                assertEquals(staticBackground, backgroundPixel())
+                choose("Dynamic Color")
+            }
+        } finally { automation.dropShellPermissionIdentity() }
+    }
+}

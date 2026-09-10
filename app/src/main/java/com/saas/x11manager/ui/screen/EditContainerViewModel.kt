@@ -1,6 +1,13 @@
 package com.saas.x11manager.ui.screen
 
 import android.util.Log
+import com.saas.x11manager.X11Application
+import com.saas.x11manager.operations.*
+import com.saas.x11manager.util.AlpineInstallProfile
+import com.saas.x11manager.util.AlpineInstallProfileOverride
+import com.saas.x11manager.util.AptInstallRecommendationOverride
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -47,6 +54,9 @@ enum class ConfigurationWizardStage {
 }
 
 class EditContainerViewModel : ViewModel() {
+    val otherRuntimeOperationRunning get() = X11Application.instance.operationLogs.records.values.any {
+        it.owner.area != OperationArea.SETUP && it.running
+    }
 
     var name by mutableStateOf("")
     var hostname by mutableStateOf("")
@@ -65,7 +75,16 @@ class EditContainerViewModel : ViewModel() {
     val jwmInstalled: Boolean get() = isSessionInstalled(GraphicSession.JWM)
 
     var logs by mutableStateOf<List<Pair<Int, String>>>(emptyList())
-    val installLogs = mutableStateListOf<Pair<Int, String>>()
+    private val emptyInstallLogs = mutableStateListOf<Pair<Int, String>>()
+    var sessionLogOperation by mutableStateOf<LogOperation?>(null)
+        private set
+    val installLogs get() = sessionLogOperation?.logs ?: emptyInstallLogs
+
+    companion object {
+        // Existing package-plan overrides are shared by session. Serialize their lifetime
+        // so two minimized installers cannot change each other's package choices.
+        private val installationMutex = Mutex()
+    }
 
     var isSaving by mutableStateOf(false)
     var saveError by mutableStateOf<String?>(null)
@@ -117,10 +136,17 @@ class EditContainerViewModel : ViewModel() {
         if (loaded && this.containerName == containerName) return
         this.containerName = containerName
         this.cacheDir = cacheDir
+        sessionLogOperation = X11Application.instance.operationLogs.get(OperationOwner(OperationArea.SETUP, containerName))
         loaded = true
         containerCapabilities = null
 
         viewModelScope.launch {
+            X11Application.instance.operationLogs.awaitLoaded()
+            sessionLogOperation?.let { operation ->
+                sessionOperationTitle = operation.title
+                installResult = operation.result.takeIf { it.isNotBlank() }
+                installResultSession = GraphicSession.entries.firstOrNull { it.name == operation.detail }
+            }
             val info = ContainerManager.getContainerInfo(containerName) ?: return@launch
             name = info.name
             hostname = info.hostname
@@ -148,9 +174,6 @@ class EditContainerViewModel : ViewModel() {
             }
 
             logs = emptyList()
-            installLogs.clear()
-            installResult = null
-            installResultSession = null
             wizardError = null
             pendingWizardProtocol = if (graphicSession == GraphicSession.NONE) {
                 GraphicProtocol.X11
@@ -360,7 +383,11 @@ class EditContainerViewModel : ViewModel() {
             GraphicSessionWizard.isExperimental(capabilities, session)
         } == true
 
-    fun configureWizardSession(session: GraphicSession) {
+    internal fun configureWizardSession(
+        session: GraphicSession,
+        installRecommendedPackages: Boolean? = null,
+        alpineProfile: AlpineInstallProfile? = null
+    ) {
         if (isPreparingWizard || isInstallingSession || isSaving) return
         val selectedInit = pendingWizardInitSystem ?: initSystem
         val capabilities = containerCapabilities
@@ -380,7 +407,7 @@ class EditContainerViewModel : ViewModel() {
         }
         wizardStage = ConfigurationWizardStage.HIDDEN
         pendingWizardSession = session
-        installSessionWithInit(session, selectedInit)
+        installSessionWithInit(session, selectedInit, installRecommendedPackages, alpineProfile)
     }
 
     fun selectInitSystem(system: InitSystem) {
@@ -403,8 +430,13 @@ class EditContainerViewModel : ViewModel() {
 
     fun installSession(session: GraphicSession) = installSessionWithInit(session, initSystem)
 
-    private fun installSessionWithInit(session: GraphicSession, selectedInitSystem: InitSystem) {
-        if (isInstallingSession || isSaving) return
+    private fun installSessionWithInit(
+        session: GraphicSession,
+        selectedInitSystem: InitSystem,
+        installRecommendedPackages: Boolean? = null,
+        alpineProfile: AlpineInstallProfile? = null
+    ) {
+        if (isInstallingSession || isSaving || otherRuntimeOperationRunning) return
         if (session !in GraphicSessionRegistry.installableSessions) return
 
         val cd = cacheDir ?: run {
@@ -417,70 +449,83 @@ class EditContainerViewModel : ViewModel() {
         val detectedPlatform = containerCapabilities?.platform
 
         viewModelScope.launch {
-            try {
-                val installed = when {
-                    session.protocol == GraphicProtocol.WAYLAND -> WaylandGraphicSessionInstaller.install(
-                        containerName, detectedPlatform, session, selectedInitSystem, cd, logger
-                    )
-                    usesLegacyInstaller(session) -> GraphicSessionInstaller.install(
-                        containerName, detectedPlatform, session, selectedInitSystem, cd, logger
-                    )
-                    else -> AdditionalGraphicSessionInstaller.install(
-                        containerName, detectedPlatform, session, selectedInitSystem, cd, logger
-                    )
-                }
-
-                if (installed) {
-                    initSystem = selectedInitSystem
-                    graphicSession = session
-                    savedGraphicSession = session
-                    installedSessions[session] = true
-
-                    val markerSaved = withContext(Dispatchers.IO) {
-                        ContainerSettingsManager.setGraphicSessionInstalled(
-                            containerName, session, true, cd
+            installationMutex.withLock {
+                installRecommendedPackages?.let { AptInstallRecommendationOverride.set(session, it) }
+                alpineProfile?.let { AlpineInstallProfileOverride.set(session, it) }
+                try {
+                    val installed = when {
+                        session.protocol == GraphicProtocol.WAYLAND -> WaylandGraphicSessionInstaller.install(
+                            containerName, detectedPlatform, session, selectedInitSystem, cd, logger
+                        )
+                        usesLegacyInstaller(session) -> GraphicSessionInstaller.install(
+                            containerName, detectedPlatform, session, selectedInitSystem, cd, logger
+                        )
+                        else -> AdditionalGraphicSessionInstaller.install(
+                            containerName, detectedPlatform, session, selectedInitSystem, cd, logger
                         )
                     }
-                    if (!markerSaved) {
-                        logger.w("[!] ${session.label} is installed, but its installed marker could not be saved")
-                    }
 
-                    logger.i("")
-                    val (statusBeforeFinalStop, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
-                    val stopAccepted = if (statusBeforeFinalStop == ContainerStatus.STOPPED) {
-                        logger.i("[+] Container already stopped after installation")
-                        true
-                    } else {
-                        logger.i("[*] Stopping container after installation...")
-                        ContainerManager.stopContainer(containerName, logger)
-                    }
-                    val (statusAfterStop, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
-                    status = statusAfterStop
-                    if (stopAccepted || statusAfterStop == ContainerStatus.STOPPED) {
-                        logger.i("[+] Container stopped")
-                    } else {
-                        logger.w("[!] ${session.label} was installed, but the container could not be confirmed stopped")
-                    }
+                    if (installed) {
+                        initSystem = selectedInitSystem
+                        graphicSession = session
+                        savedGraphicSession = session
+                        installedSessions[session] = true
 
-                    logger.i("")
-                    logger.i("[+] ${session.label} installation completed successfully")
-                    logger.i("[+] Protocol: ${session.protocol.label}")
-                    logger.i("[+] Init system: ${selectedInitSystem.name.lowercase()}")
-                    logger.i("[+] Runtime access is selected from Home when Start is pressed")
-                    logger.i("[+] Integrated X11 and standalone VNC are available as independent start modes")
-                    installResult = "OK: ${session.label} installed"
+                        val markerSaved = withContext(Dispatchers.IO) {
+                            ContainerSettingsManager.setGraphicSessionInstalled(
+                                containerName, session, true, cd
+                            )
+                        }
+                        if (!markerSaved) {
+                            logger.w("[!] ${session.label} is installed, but its installed marker could not be saved")
+                        }
+
+                        logger.i("")
+                        val (statusBeforeFinalStop, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
+                        val stopAccepted = if (statusBeforeFinalStop == ContainerStatus.STOPPED) {
+                            logger.i("[+] Container already stopped after installation")
+                            true
+                        } else {
+                            logger.i("[*] Stopping container after installation...")
+                            ContainerManager.stopContainer(containerName, logger)
+                        }
+                        val (statusAfterStop, _) = ContainerManager.getContainerRuntimeStatePublic(containerName)
+                        status = statusAfterStop
+                        if (stopAccepted || statusAfterStop == ContainerStatus.STOPPED) {
+                            logger.i("[+] Container stopped")
+                        } else {
+                            logger.w("[!] ${session.label} was installed, but the container could not be confirmed stopped")
+                        }
+
+                        logger.i("")
+                        logger.i("[+] ${session.label} installation completed successfully")
+                        logger.i("[+] Protocol: ${session.protocol.label}")
+                        logger.i("[+] Init system: ${selectedInitSystem.name.lowercase()}")
+                        logger.i("[+] Runtime access is selected from Home when Start is pressed")
+                        logger.i("[+] Integrated X11 and standalone VNC are available as independent start modes")
+                        installResult = "OK: ${session.label} installed"
+                        canStartGraphicSessionFromInstall = false
+                        quickStartCompleted = false
+                    } else {
+                        installResult = "Error: ${session.label} installation failed"
+                        canStartGraphicSessionFromInstall = false
+                    }
+                } catch (e: Exception) {
+                    logger.flush()
+                    logOperationException(e, "${session.label} installation failed")
                     canStartGraphicSessionFromInstall = false
-                    quickStartCompleted = false
-                } else {
-                    installResult = "Error: ${session.label} installation failed"
-                    canStartGraphicSessionFromInstall = false
+                } finally {
+                    try { refreshRuntimeStatus() } catch (error: Exception) {
+                        logger.w("[!] Final container state could not be refreshed: ${error.message}")
+                    } finally {
+                        AptInstallRecommendationOverride.clear(session)
+                        AlpineInstallProfileOverride.clear(session)
+                        logger.flush()
+                        sessionLogOperation?.finish(installResult?.startsWith("OK:") == true,
+                            installResult ?: "Installation was not confirmed — view logs")
+                        isInstallingSession = false
+                    }
                 }
-            } catch (e: Exception) {
-                logOperationException(e, "${session.label} installation failed")
-                canStartGraphicSessionFromInstall = false
-            } finally {
-                refreshRuntimeStatus()
-                isInstallingSession = false
             }
         }
     }
@@ -495,7 +540,7 @@ class EditContainerViewModel : ViewModel() {
     fun quickStartX11() = quickStartGraphicSession()
 
     fun verifySession(session: GraphicSession) {
-        if (isInstallingSession || isSaving) return
+        if (isInstallingSession || isSaving || otherRuntimeOperationRunning) return
         if (session !in GraphicSessionRegistry.installableSessions) return
 
         beginSessionOperation("Verifying ${session.label}", session)
@@ -504,35 +549,44 @@ class EditContainerViewModel : ViewModel() {
         val detectedPlatform = containerCapabilities?.platform
 
         viewModelScope.launch {
-            try {
-                val verified = when {
-                    session.protocol == GraphicProtocol.WAYLAND -> WaylandGraphicSessionInstaller.verify(
-                        containerName, detectedPlatform, session, selectedInitSystem, logger
-                    )
-                    usesLegacyInstaller(session) -> GraphicSessionInstaller.verify(
-                        containerName, detectedPlatform, session, selectedInitSystem, logger
-                    )
-                    else -> AdditionalGraphicSessionInstaller.verify(
-                        containerName, detectedPlatform, session, selectedInitSystem, logger
-                    )
-                }
-
-                if (verified) {
-                    installedSessions[session] = true
-                    cacheDir?.let { cd ->
-                        withContext(Dispatchers.IO) {
-                            ContainerSettingsManager.setGraphicSessionInstalled(containerName, session, true, cd)
-                        }
+            installationMutex.withLock {
+                try {
+                    val verified = when {
+                        session.protocol == GraphicProtocol.WAYLAND -> WaylandGraphicSessionInstaller.verify(
+                            containerName, detectedPlatform, session, selectedInitSystem, logger
+                        )
+                        usesLegacyInstaller(session) -> GraphicSessionInstaller.verify(
+                            containerName, detectedPlatform, session, selectedInitSystem, logger
+                        )
+                        else -> AdditionalGraphicSessionInstaller.verify(
+                            containerName, detectedPlatform, session, selectedInitSystem, logger
+                        )
                     }
-                    installResult = "OK: ${session.label} verified"
-                } else {
-                    installResult = "Error: ${session.label} verification failed"
+
+                    if (verified) {
+                        installedSessions[session] = true
+                        cacheDir?.let { cd ->
+                            withContext(Dispatchers.IO) {
+                                ContainerSettingsManager.setGraphicSessionInstalled(containerName, session, true, cd)
+                            }
+                        }
+                        installResult = "OK: ${session.label} verified"
+                    } else {
+                        installResult = "Error: ${session.label} verification failed"
+                    }
+                } catch (e: Exception) {
+                    logger.flush()
+                    logOperationException(e, "${session.label} verification failed")
+                } finally {
+                    try { refreshRuntimeStatus() } catch (error: Exception) {
+                        logger.w("[!] Final container state could not be refreshed: ${error.message}")
+                    } finally {
+                        logger.flush()
+                        sessionLogOperation?.finish(installResult?.startsWith("OK:") == true,
+                            installResult ?: "Verification was not confirmed — view logs")
+                        isInstallingSession = false
+                    }
                 }
-            } catch (e: Exception) {
-                logOperationException(e, "${session.label} verification failed")
-            } finally {
-                refreshRuntimeStatus()
-                isInstallingSession = false
             }
         }
     }
@@ -551,7 +605,7 @@ class EditContainerViewModel : ViewModel() {
     fun verifyJwm() = verifySession(GraphicSession.JWM)
 
     private fun beginSessionOperation(title: String, session: GraphicSession) {
-        installLogs.clear()
+        sessionLogOperation?.begin(title, session.name)
         installResult = null
         installResultSession = session
         sessionOperationTitle = title
@@ -562,13 +616,14 @@ class EditContainerViewModel : ViewModel() {
     }
 
     private fun operationLogger(): ViewModelLogger = ViewModelLogger { level, message ->
-        installLogs.add(level to message)
+        sessionLogOperation?.append(level, message)
     }
 
     private fun showOperationSetupError(title: String, message: String, session: GraphicSession) {
-        installLogs.clear()
-        installLogs.add(Log.ERROR to "[-] FAIL")
-        installLogs.add(Log.ERROR to "[-] $message")
+        sessionLogOperation?.begin(title, session.name)
+        sessionLogOperation?.append(Log.ERROR, "[-] FAIL")
+        sessionLogOperation?.append(Log.ERROR, "[-] $message")
+        sessionLogOperation?.finish(false, "Error: $message")
         installResult = "Error: $message"
         installResultSession = session
         sessionOperationTitle = title
@@ -578,8 +633,8 @@ class EditContainerViewModel : ViewModel() {
 
     private fun logOperationException(e: Exception, fallback: String) {
         val message = e.message ?: fallback
-        installLogs.add(Log.ERROR to "[-] FAIL")
-        installLogs.add(Log.ERROR to "[-] $message")
+        sessionLogOperation?.append(Log.ERROR, "[-] FAIL")
+        sessionLogOperation?.append(Log.ERROR, "[-] $message")
         installResult = "Error: $message"
     }
 
@@ -592,8 +647,18 @@ class EditContainerViewModel : ViewModel() {
         if (!isInstallingSession) showInstallTerminal = false
     }
 
+    fun minimizeInstallTerminal() {
+        val operation = sessionLogOperation ?: return
+        if (X11Application.instance.operationLogs.minimize(operation)) showInstallTerminal = false
+    }
+
+    fun openInstallTerminal() { showInstallTerminal = true }
+
     fun clearInstallLogs() {
-        if (!isInstallingSession) installLogs.clear()
+        if (!isInstallingSession) {
+            installLogs.clear()
+            sessionLogOperation?.changed(immediate = true)
+        }
     }
 
     fun save() {

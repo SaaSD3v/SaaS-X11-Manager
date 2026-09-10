@@ -754,8 +754,8 @@ object PulseAudioFixManager {
     }
 
     private fun cookieEscaped(runtime: TermuxRuntime): String? {
-        val command = "od -An -v -tu1 ${shellQuote(HOST_COOKIE)} 2>/dev/null | awk '{ for (i=1; i<=NF; i++) printf \"\\\\0%03o\", ${'$'}i }'"
-        return runAsTermuxOutput(runtime, command).joinToString("").trim().takeIf { it.isNotEmpty() }
+        val command = PulseAudioCookieTransport.encodeCommand(HOST_COOKIE)
+        return PulseAudioCookieTransport.fromOutput(runAsTermuxOutput(runtime, command))
     }
 
     private fun verifyContainerClient(containerName: String, server: String): Boolean {
@@ -773,7 +773,7 @@ object PulseAudioFixManager {
             printf '%s\n' "${'$'}info" | grep -Fq "Server String: ${'$'}server" || exit 77
             printf '%s\n' "${'$'}info" | grep -Eq '^Default Sink: (AAudio_sink|OpenSL_ES_sink)$' || exit 78
         """.trimIndent()
-        val command = "${Constants.DS_BINARY_PATH} --name=${shellQuote(containerName)} run /bin/sh -lc ${shellQuote(payload)}"
+        val command = PulseAudioContainerCommand.build(containerName, payload)
         return try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
     }
 
@@ -785,7 +785,7 @@ object PulseAudioFixManager {
     ): Boolean {
         val escaped = cookieEscaped(runtime) ?: return false
         val payload = buildClientPayload(server, escaped)
-        val command = "${Constants.DS_BINARY_PATH} --name=${shellQuote(containerName)} run /bin/sh -lc ${shellQuote(payload)}"
+        val command = PulseAudioContainerCommand.build(containerName, payload)
         return try {
             val result = Shell.cmd(command).exec()
             result.out.forEach { line ->

@@ -25,14 +25,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.saas.x11manager.X11Application
+import com.saas.x11manager.ui.component.OperationResultCard
 import com.saas.x11manager.ui.component.TerminalDialog
 import com.saas.x11manager.util.Constants
 import com.saas.x11manager.util.ContainerInfo
-import com.saas.x11manager.util.ViewModelLogger
 import com.saas.x11manager.util.X11ServerStatus
 import com.saas.x11manager.util.X11SessionManager
 import com.termux.x11.EmbeddedDisplayHost
-import kotlinx.coroutines.launch
 
 /**
  * Current X11APP display workspace adapted to the X11-0nly contract.
@@ -46,20 +46,20 @@ import kotlinx.coroutines.launch
 @Composable
 fun ManagedDisplayScreen(
     viewModel: HomeViewModel,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    displayViewModel: ManagedDisplayViewModel = androidx.lifecycle.viewmodel.compose.viewModel(viewModelStoreOwner = X11Application.instance)
 ) {
     val serverStatus by viewModel.x11ServerStatus.collectAsState()
     val serverPid by viewModel.x11ServerPid.collectAsState()
     val containers by viewModel.containers.collectAsState()
     val context = LocalContext.current
     val activity = remember(context) { context.findManagedDisplayActivity() }
-    val scope = rememberCoroutineScope()
     val prefs = remember(context) { EmbeddedDisplayHost.getPrefs(context) }
     val store = remember(prefs) { prefs.get() }
     val xkbSeedContainer = containers.firstOrNull { it.isRunning } ?: containers.firstOrNull()
 
-    var busy by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf<String?>(null) }
+    val busy = displayViewModel.busy
+    val message = displayViewModel.message
     var connected by remember { mutableStateOf(false) }
     var ownerName by remember { mutableStateOf<String?>(null) }
     var showConfiguration by remember { mutableStateOf(false) }
@@ -70,10 +70,6 @@ fun ManagedDisplayScreen(
     }
     var additionalKeysVisible by remember { mutableStateOf(false) }
     var extraKeysConfig by remember { mutableStateOf(store.getString("extra_keys_config", null)) }
-
-    val monitorLogs = remember { mutableStateListOf<Pair<Int, String>>() }
-    var showMonitorLogs by remember { mutableStateOf(false) }
-    var monitorLogTitle by remember { mutableStateOf("Monitor 1 logs") }
 
     fun publishAdditionalKeysVisible() {
         store.edit()
@@ -104,78 +100,6 @@ fun ManagedDisplayScreen(
         onClose()
     }
 
-    fun operationLogger(): ViewModelLogger = ViewModelLogger { level, line ->
-        scope.launch { monitorLogs.add(level to line) }
-    }
-
-    fun toggleServer() {
-        if (busy) return
-        monitorLogs.clear()
-        monitorLogTitle = if (serverStatus == X11ServerStatus.Running) {
-            "Stopping Monitor 1"
-        } else {
-            "Starting Monitor 1"
-        }
-        showMonitorLogs = true
-        val logger = operationLogger()
-
-        scope.launch {
-            busy = true
-            message = null
-            try {
-                if (serverStatus == X11ServerStatus.Running) {
-                    logger.i("--- Stopping X11 monitor ---")
-                    logger.i("[*] Monitor: 1")
-                    logger.i("[*] Display: ${Constants.X11_DISPLAY}")
-                    serverPid?.let { logger.i("[*] PID: $it") }
-                    ownerName?.let { logger.i("[*] Container remains running: $it") }
-
-                    val owner = ownerName ?: X11SessionManager.getOwnerContainerName()
-                    if (owner != null) {
-                        val sessionStopped = X11SessionManager.stopContainerGraphicSession(owner, logger)
-                        if (!sessionStopped) {
-                            logger.w("[!] Continuing with X11 server stop; container is still running")
-                        }
-                    }
-
-                    val stopped = X11SessionManager.stopIntegratedServer(logger)
-                    if (!stopped) {
-                        message = "Monitor 1 could not be stopped"
-                        logger.e("[-] Monitor 1 (${Constants.X11_DISPLAY}) stop failed")
-                    } else {
-                        connected = false
-                        logger.i("[+] Monitor 1 (${Constants.X11_DISPLAY}) inactive")
-                        owner?.let { logger.i("[+] Container '$it' was left running") }
-                        if (fullscreen) setFullscreen(false)
-                    }
-                } else {
-                    logger.i("--- Starting X11 monitor ---")
-                    logger.i("[*] Monitor: 1")
-                    logger.i("[*] Display: ${Constants.X11_DISPLAY}")
-                    logger.i("[*] Process: ${Constants.X11_SERVER_PROCESS}")
-                    logger.i("[*] Runtime: ${Constants.INTEGRATED_X11_RUNTIME_DIR}")
-                    logger.i("[*] Socket: ${Constants.X11_SOCK_FILE}")
-
-                    val started = X11SessionManager.startIntegratedServer(
-                        containerName = xkbSeedContainer?.name,
-                        logger = logger
-                    )
-                    if (started.isSuccess) {
-                        logger.i("[+] Monitor 1 (${Constants.X11_DISPLAY}) ready (PID=${started.getOrNull()})")
-                    } else {
-                        message = started.exceptionOrNull()?.message
-                            ?: "Monitor 1 could not start"
-                        logger.e("[-] ${message ?: "X11 start failed"}")
-                    }
-                }
-            } finally {
-                busy = false
-                viewModel.refreshRuntimeState()
-                ownerName = X11SessionManager.getOwnerContainerName()
-            }
-        }
-    }
-
     LaunchedEffect(store) {
         ensureManagedX11Defaults(context, store)
         additionalKeysEnabled = store.getBoolean(PREF_SHOW_ADDITIONAL_KEYS, false)
@@ -192,6 +116,7 @@ fun ManagedDisplayScreen(
     }
 
     LaunchedEffect(serverStatus, containers) {
+        if (serverStatus != X11ServerStatus.Running) connected = false
         ownerName = X11SessionManager.getOwnerContainerName()
     }
 
@@ -268,12 +193,13 @@ fun ManagedDisplayScreen(
         )
     }
 
-    if (showMonitorLogs) {
+    if (displayViewModel.showMonitorLogs) {
         TerminalDialog(
-            title = monitorLogTitle,
-            logs = monitorLogs,
-            onDismiss = { if (!busy) showMonitorLogs = false },
-            onClear = { if (!busy) monitorLogs.clear() },
+            title = displayViewModel.logOperation.title,
+            logs = displayViewModel.logOperation.logs,
+            onDismiss = displayViewModel::dismissLogs,
+            onMinimize = displayViewModel::minimizeLogs,
+            onClear = displayViewModel::clearLogs,
             isBlocking = busy
         )
     }
@@ -299,7 +225,7 @@ fun ManagedDisplayScreen(
                     additionalKeysEnabled = additionalKeysEnabled,
                     additionalKeysVisible = additionalKeysVisible,
                     onClose = ::closeScreen,
-                    onShowLogs = { showMonitorLogs = true },
+                    onShowLogs = displayViewModel::openLogs,
                     onToggleAdditionalKeys = ::toggleAdditionalKeys,
                     onFullscreen = { setFullscreen(true) },
                     onConfiguration = { showConfiguration = true }
@@ -309,12 +235,15 @@ fun ManagedDisplayScreen(
                     serverStatus = serverStatus,
                     serverPid = serverPid,
                     ownerName = ownerName,
-                    busy = busy,
+                    busy = busy || viewModel.hasRunningOperations,
                     canStartStopped = xkbSeedContainer != null,
-                    onToggle = ::toggleServer
+                    onToggle = { displayViewModel.toggleServer(xkbSeedContainer?.name) }
                 )
             }
 
+            if (!fullscreen) {
+                OperationResultCard(displayViewModel.logOperation, displayViewModel::openLogs)
+            }
             message?.let { DisplayErrorMessage(it) }
 
             Box(
@@ -479,13 +408,13 @@ private fun FixedMonitorDeck(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Monitors",
+                text = "X11 display",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f)
             )
             Text(
-                text = if (serverStatus == X11ServerStatus.Running) "1 active" else "0 active",
+                text = if (serverStatus == X11ServerStatus.Running) "Active" else "Inactive",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -520,7 +449,7 @@ private fun FixedMonitorCard(
     val running = serverStatus == X11ServerStatus.Running
 
     Surface(
-        modifier = Modifier.width(204.dp),
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 0.dp,

@@ -1,6 +1,7 @@
 package com.saas.x11manager
 
 import android.os.Build
+import android.content.Intent
 import android.os.Bundle
 import android.view.KeyEvent
 import android.window.OnBackInvokedCallback
@@ -8,7 +9,8 @@ import android.window.OnBackInvokedDispatcher
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
-import androidx.activity.viewModels
+import androidx.lifecycle.ViewModelProvider
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,9 +37,13 @@ import com.saas.x11manager.ui.theme.ManagerAppearanceSettings
 import com.saas.x11manager.ui.theme.ManagerThemeMode
 import com.saas.x11manager.ui.theme.X11ManagerTheme
 import com.termux.x11.EmbeddedDisplayHost
+import com.saas.x11manager.operations.OperationNotifications
+import com.saas.x11manager.operations.OperationOwner
 
 class MainActivity : ComponentActivity() {
-    private val viewModel: HomeViewModel by viewModels()
+    private val viewModel: HomeViewModel by lazy {
+        ViewModelProvider(X11Application.instance)[HomeViewModel::class.java]
+    }
 
     private lateinit var fallbackBackCallback: OnBackPressedCallback
     private var platformBackCallback: OnBackInvokedCallback? = null
@@ -45,8 +51,13 @@ class MainActivity : ComponentActivity() {
     private var appearanceSettings by mutableStateOf(ManagerAppearanceSettings())
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Apply postSplashScreenTheme before the platform creates the window.
+        // Otherwise Android 12+ retains the launch theme and adds a native title
+        // bar over our Compose app bar, independent of the chosen appearance.
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         appearanceSettings = ManagerAppearancePreferences.load(this)
+        handleLogIntent(intent)
 
         fallbackBackCallback = object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -186,6 +197,19 @@ class MainActivity : ComponentActivity() {
         val store = EmbeddedDisplayHost.getPrefs(this).get()
         store.edit().putBoolean(PREF_FULLSCREEN, false).apply()
         publishLoriePreferenceChange(this, PREF_FULLSCREEN)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleLogIntent(intent)
+    }
+
+    private fun handleLogIntent(intent: Intent?) {
+        if (intent?.action != OperationNotifications.OPEN) return
+        val owner = OperationOwner.parse(intent.getStringExtra(OperationNotifications.OWNER).orEmpty()) ?: return
+        X11Application.instance.operationLogs.requestOpen(owner)
+        intent.action = null // Rotation must not reopen a dialog that was minimized again.
     }
 
     override fun onResume() {

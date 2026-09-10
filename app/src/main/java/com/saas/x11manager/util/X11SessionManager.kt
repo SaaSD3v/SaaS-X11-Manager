@@ -4,12 +4,18 @@ import com.saas.x11manager.X11Application
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 enum class X11ServerStatus { Running, Stopped }
 
 /** Owns the Manager's fixed integrated X11 server on display :0. */
 object X11SessionManager {
+
+    // One fixed transport: serialize process/socket mutations, including recovery.
+    // Desktop handshakes run outside this lock so their bounded restart can acquire it.
+    private val serverMutex = Mutex()
 
     private data class ServerLease(val pid: Int, val reused: Boolean)
 
@@ -135,7 +141,7 @@ object X11SessionManager {
 
     suspend fun getOwnerContainerName(): String? = withContext(Dispatchers.IO) {
         ContainerManager.listContainers()
-            .firstOrNull { it.isRunning && ContainerConfigManager.usesManagedX11(it.bindMounts) }
+            .firstOrNull(FixedX11Ownership::ownsServer)
             ?.name
     }
 
@@ -152,7 +158,7 @@ object X11SessionManager {
     private suspend fun startServer(
         containerName: String?,
         logger: ContainerLogger?
-    ): Result<ServerLease> = withContext(Dispatchers.IO) {
+    ): Result<ServerLease> = serverMutex.withLock { withContext(Dispatchers.IO) {
         try {
             val existingPids = liveServerPids()
             if (socketReady() && existingPids.isNotEmpty()) {
@@ -201,14 +207,14 @@ object X11SessionManager {
         } catch (e: Exception) {
             Result.failure(e)
         }
-    }
+    } }
 
     suspend fun startIntegratedServer(
         containerName: String? = null,
         logger: ContainerLogger? = null
     ): Result<Int> = startServer(containerName, logger).map { it.pid }
 
-    suspend fun stopIntegratedServer(logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
+    suspend fun stopIntegratedServer(logger: ContainerLogger? = null): Boolean = serverMutex.withLock { withContext(Dispatchers.IO) {
         try {
             val pids = liveServerPids()
             killPids(pids)
@@ -225,7 +231,7 @@ object X11SessionManager {
             logger?.e("[-] Could not stop Integrated X11: ${e.message}")
             false
         }
-    }
+    } }
 
     private suspend fun waitForRuntime(containerName: String): Pair<ContainerStatus, Int?> {
         val deadline = System.nanoTime() + 5_000_000_000L
@@ -257,13 +263,7 @@ object X11SessionManager {
     }
 
     private suspend fun conflictingContainer(containerName: String): String? =
-        ContainerManager.listContainers()
-            .firstOrNull {
-                it.isRunning &&
-                    it.name != containerName &&
-                    ContainerConfigManager.hasAnyX11SocketBind(it.bindMounts)
-            }
-            ?.name
+        FixedX11Ownership.otherOwner(ContainerManager.listContainers(), containerName)
 
     suspend fun startX11Session(
         containerName: String,
@@ -351,9 +351,12 @@ object X11SessionManager {
         logger: ContainerLogger? = null
     ): Boolean = withContext(Dispatchers.IO) {
         val info = ContainerManager.getContainerInfo(containerName)
-        val ownsX0 = info?.isRunning == true && ContainerConfigManager.hasAnyX11SocketBind(info.bindMounts)
         if (!ContainerManager.stopContainer(containerName, logger)) return@withContext false
-        if (ownsX0) stopIntegratedServer(logger)
+        // Legacy configurations can share X0. Stopping one container must preserve
+        // another live owner, and a foreign X11 bind must never stop this server.
+        if (FixedX11Ownership.canReleaseAfterStop(info, ContainerManager.listContainers())) {
+            return@withContext stopIntegratedServer(logger)
+        }
         true
     }
 

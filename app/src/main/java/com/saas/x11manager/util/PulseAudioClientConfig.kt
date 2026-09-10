@@ -4,6 +4,34 @@ package com.saas.x11manager.util
 internal object PulseAudioClientConfig {
     private const val STATE = "/etc/saas-x11-manager/audio"
     private const val OWNER = "SaaS X11 Manager Audio Configuration"
+    private const val FAILURE = "__SAAS_AUDIO_FAILURE__:"
+
+    fun isFailureMarker(line: String): Boolean = line.trim().startsWith(FAILURE)
+
+    fun failureTrap(): String = """
+        saas_audio_step=packages
+        trap 'saas_audio_exit=${'$'}?; if [ "${'$'}saas_audio_exit" -ne 0 ]; then printf "$FAILURE%s:%s\n" "${'$'}saas_audio_step" "${'$'}saas_audio_exit" >&2; fi' EXIT
+        export LC_ALL=C
+    """.trimIndent()
+
+    fun failureSummary(exitCode: Int, output: List<String>): String {
+        val failure = output.lastOrNull(::isFailureMarker)
+            ?.trim()?.removePrefix(FAILURE)?.split(':', limit = 2)
+        val step = when (failure?.firstOrNull()) {
+            "packages" -> "audio client dependencies"
+            "cookie" -> "authentication cookie transfer"
+            "client-config" -> "persistent client configuration"
+            "root-client" -> "root audio client configuration"
+            "user-client" -> "desktop user audio configuration"
+            "client-auth" -> "client authentication"
+            "pcm-playback" -> "PCM playback"
+            else -> if (output.any { it.contains("daemon: bad request") })
+                "DroidSpaces rejected the audio command before execution"
+            else "container command"
+        }
+        val code = failure?.getOrNull(1)?.toIntOrNull() ?: exitCode
+        return "$step (exit $code)"
+    }
 
     // Init services do not read /etc/profile. Run this after HOME/USER have been
     // selected and before dropping privileges or exec'ing the desktop.
@@ -14,6 +42,7 @@ internal object PulseAudioClientConfig {
     """.trimIndent() + "\n"
 
     fun install(server: String): String = """
+        saas_audio_step=client-config
         export LC_ALL=C
         mkdir -p $STATE /etc/profile.d || exit 90
         chmod 755 /etc/saas-x11-manager $STATE || exit 90
@@ -95,12 +124,14 @@ internal object PulseAudioClientConfig {
 
         # Configure root and the actual graphical account. An account created by
         # the next launcher is handled by the same helper after user creation.
+        saas_audio_step=root-client
         (
             export HOME=/root USER=root
             . $STATE/prepare-session.sh
         ) || exit 94
         selected=${'$'}(sed -n 's/^user=//p' /etc/saas-x11-manager/session-user 2>/dev/null | head -n 1)
         if [ -n "${'$'}selected" ] && [ "${'$'}selected" != root ] && id "${'$'}selected" >/dev/null 2>&1; then
+            saas_audio_step=user-client
             selected_home=${'$'}(awk -F: -v u="${'$'}selected" '${'$'}1 == u { print ${'$'}6; exit }' /etc/passwd)
             case "${'$'}selected_home" in /*) ;; *) exit 94 ;; esac
             (
@@ -111,9 +142,11 @@ internal object PulseAudioClientConfig {
             printf '%s\n' "${'$'}selected_info"
             printf '%s\n' "${'$'}selected_info" | grep -Fxq 'Server String: $server' || exit 95
         fi
+        saas_audio_step=client-auth
         HOME=/root
         . /etc/profile.d/saas-x11-audio.sh
         LC_ALL=C timeout 5 pactl info || exit 95
+        saas_audio_step=pcm-playback
         ${playbackProbe(server, "/root/.config/pulse/saas-audio.cookie", "$STATE/client.conf").prependIndent("        ")} || exit 96
         printf '%s\n' __SAAS_AUDIO_PCM_DRAINED__
     """.trimIndent()

@@ -1,21 +1,23 @@
 package com.saas.x11manager.ui.screen
 
+import androidx.compose.foundation.border
+
 import android.content.SharedPreferences
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.platform.testTag
+import com.saas.x11manager.ui.component.SettingsDialog
+import com.saas.x11manager.ui.component.SettingsSection
+import com.saas.x11manager.ui.component.SettingsToggleRow
 
 @Composable
 internal fun X11ConfigurationDialog(
@@ -111,337 +113,303 @@ internal fun X11ConfigurationDialog(
         mutableStateOf(store.getBoolean("clipboardEnable", true))
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+    SettingsDialog(
+        title = "X11 Configuration",
+        subtitle = "Display and embedded X11 settings",
+        icon = Icons.Default.Tune,
+        onDismiss = onDismiss
     ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth(0.95f)
-                .fillMaxHeight(0.92f),
-            shape = RoundedCornerShape(26.dp),
-            tonalElevation = 6.dp
+        LazyColumn(
+            modifier = Modifier.weight(1f).testTag("settings-list"),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Column(Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 18.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Tune, contentDescription = null)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
+            item {
+                ConfigSection("Display", Icons.Default.DisplaySettings) {
+                    ChoiceSetting(
+                        "Resolution mode",
+                        resolutionMode,
+                        listOf("native", "scaled", "exact", "custom")
+                    ) {
+                        resolutionMode = it
+                        putString("displayResolutionMode", it)
+                    }
+
+                    if (resolutionMode == "scaled") {
                         Text(
-                            "X11 Configuration",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
+                            "Scale: $displayScale%",
+                            style = MaterialTheme.typography.bodyMedium
                         )
-                        Text(
-                            "Display and embedded X11 settings",
-                            style = MaterialTheme.typography.bodySmall
+                        Slider(
+                            value = displayScale.toFloat(),
+                            onValueChange = { displayScale = it.toInt() },
+                            onValueChangeFinished = {
+                                putInt("displayScale", displayScale)
+                            },
+                            valueRange = 30f..300f,
+                            steps = 26
                         )
                     }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
+
+                    if (resolutionMode == "exact") {
+                        OutlinedTextField(
+                            value = exactResolution,
+                            onValueChange = { exactResolution = it },
+                            label = { Text("Exact resolution") },
+                            singleLine = true,
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = {
+                                        putString("displayResolutionExact", exactResolution)
+                                    }
+                                ) {
+                                    Icon(Icons.Default.Check, contentDescription = "Apply")
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    if (resolutionMode == "custom") {
+                        OutlinedTextField(
+                            value = customResolution,
+                            onValueChange = { customResolution = it },
+                            label = { Text("Custom resolution") },
+                            singleLine = true,
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = {
+                                        putString("displayResolutionCustom", customResolution)
+                                    }
+                                ) {
+                                    Icon(Icons.Default.Check, contentDescription = "Apply")
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    ChoiceSetting(
+                        "Filtering",
+                        filtering,
+                        listOf("nearest", "bilinear")
+                    ) {
+                        filtering = it
+                        putString("displayFilteringMode", it)
+                    }
+
+                    ChoiceSetting(
+                        "Orientation",
+                        orientation,
+                        listOf(
+                            "auto",
+                            "portrait",
+                            "landscape",
+                            "reverse portrait",
+                            "reverse landscape"
+                        )
+                    ) {
+                        orientation = it
+                        putString("forceOrientation", it)
+                    }
+
+                    SwitchSetting(
+                        "Adjust resolution to orientation",
+                        adjustResolution
+                    ) {
+                        adjustResolution = it
+                        putBoolean("adjustResolution", it)
+                    }
+
+                    SwitchSetting("Stretch display", displayStretch) {
+                        displayStretch = it
+                        putBoolean("displayStretch", it)
+                    }
+
+                    SwitchSetting("Use display cutout area", useDisplayCutoutArea) {
+                        useDisplayCutoutArea = it
+                        putBoolean("hideCutout", it)
+                    }
+
+                    ChoiceSetting(
+                        "Screen idle timeout",
+                        idleTimeout,
+                        listOf("never", "1", "5", "10", "20", "60", "system"),
+                        labels = mapOf(
+                            "never" to "Never",
+                            "1" to "1 minute",
+                            "5" to "5 minutes",
+                            "10" to "10 minutes",
+                            "20" to "20 minutes",
+                            "60" to "1 hour",
+                            "system" to "System"
+                        )
+                    ) {
+                        idleTimeout = it
+                        putString("screenIdleTimeout", it)
                     }
                 }
+            }
 
-                HorizontalDivider()
+            item {
+                ConfigSection("Input", Icons.Default.Mouse) {
+                    ChoiceSetting(
+                        "Touch mode",
+                        touchMode,
+                        listOf("1", "2", "3"),
+                        labels = mapOf(
+                            "1" to "Trackpad",
+                            "2" to "Simulated touchscreen",
+                            "3" to "Direct touch"
+                        )
+                    ) {
+                        touchMode = it
+                        putString("touchMode", it)
+                    }
 
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    item {
-                        ConfigSection("Display", Icons.Default.DisplaySettings) {
-                            ChoiceSetting(
-                                "Resolution mode",
-                                resolutionMode,
-                                listOf("native", "scaled", "exact", "custom")
-                            ) {
-                                resolutionMode = it
-                                putString("displayResolutionMode", it)
-                            }
+                    SwitchSetting("Scale touchpad", scaleTouchpad) {
+                        scaleTouchpad = it
+                        putBoolean("scaleTouchpad", it)
+                    }
 
-                            if (resolutionMode == "scaled") {
-                                Text(
-                                    "Scale: $displayScale%",
-                                    style = MaterialTheme.typography.bodyMedium
+                    SwitchSetting("Pointer capture", pointerCapture) {
+                        pointerCapture = it
+                        putBoolean("pointerCapture", it)
+                    }
+
+                    if (pointerCapture) {
+                        ChoiceSetting(
+                            "Captured pointer transform",
+                            capturedPointerTransform,
+                            listOf("at", "no", "cc", "ud", "c"),
+                            labels = mapOf(
+                                "at" to "Automatic",
+                                "no" to "None",
+                                "cc" to "Counter-clockwise",
+                                "ud" to "Upside down",
+                                "c" to "Clockwise"
+                            )
+                        ) {
+                            capturedPointerTransform = it
+                            putString("transformCapturedPointer", it)
+                        }
+
+                        Text(
+                            "Captured pointer speed: $capturedPointerSpeed%",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Slider(
+                            value = capturedPointerSpeed.toFloat(),
+                            onValueChange = {
+                                capturedPointerSpeed = it.toInt().coerceIn(1, 300)
+                            },
+                            onValueChangeFinished = {
+                                putInt(
+                                    "capturedPointerSpeedFactor",
+                                    capturedPointerSpeed
                                 )
-                                Slider(
-                                    value = displayScale.toFloat(),
-                                    onValueChange = { displayScale = it.toInt() },
-                                    onValueChangeFinished = {
-                                        putInt("displayScale", displayScale)
-                                    },
-                                    valueRange = 30f..300f,
-                                    steps = 26
-                                )
-                            }
+                            },
+                            valueRange = 1f..300f
+                        )
+                    }
 
-                            if (resolutionMode == "exact") {
-                                OutlinedTextField(
-                                    value = exactResolution,
-                                    onValueChange = { exactResolution = it },
-                                    label = { Text("Exact resolution") },
-                                    singleLine = true,
-                                    trailingIcon = {
-                                        IconButton(
-                                            onClick = {
-                                                putString("displayResolutionExact", exactResolution)
-                                            }
-                                        ) {
-                                            Icon(Icons.Default.Check, contentDescription = "Apply")
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
+                    SwitchSetting("Tap to move", tapToMove) {
+                        tapToMove = it
+                        putBoolean("tapToMove", it)
+                    }
+                }
+            }
 
-                            if (resolutionMode == "custom") {
-                                OutlinedTextField(
-                                    value = customResolution,
-                                    onValueChange = { customResolution = it },
-                                    label = { Text("Custom resolution") },
-                                    singleLine = true,
-                                    trailingIcon = {
-                                        IconButton(
-                                            onClick = {
-                                                putString("displayResolutionCustom", customResolution)
-                                            }
-                                        ) {
-                                            Icon(Icons.Default.Check, contentDescription = "Apply")
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-
-                            ChoiceSetting(
-                                "Filtering",
-                                filtering,
-                                listOf("nearest", "bilinear")
-                            ) {
-                                filtering = it
-                                putString("displayFilteringMode", it)
-                            }
-
-                            ChoiceSetting(
-                                "Orientation",
-                                orientation,
-                                listOf(
-                                    "auto",
-                                    "portrait",
-                                    "landscape",
-                                    "reverse portrait",
-                                    "reverse landscape"
-                                )
-                            ) {
-                                orientation = it
-                                putString("forceOrientation", it)
-                            }
-
-                            SwitchSetting(
-                                "Adjust resolution to orientation",
-                                adjustResolution
-                            ) {
-                                adjustResolution = it
-                                putBoolean("adjustResolution", it)
-                            }
-
-                            SwitchSetting("Stretch display", displayStretch) {
-                                displayStretch = it
-                                putBoolean("displayStretch", it)
-                            }
-
-                            SwitchSetting("Use display cutout area", useDisplayCutoutArea) {
-                                useDisplayCutoutArea = it
-                                putBoolean("hideCutout", it)
-                            }
-
-                            ChoiceSetting(
-                                "Screen idle timeout",
-                                idleTimeout,
-                                listOf("never", "1", "5", "10", "20", "60", "system"),
-                                labels = mapOf(
-                                    "never" to "Never",
-                                    "1" to "1 minute",
-                                    "5" to "5 minutes",
-                                    "10" to "10 minutes",
-                                    "20" to "20 minutes",
-                                    "60" to "1 hour",
-                                    "system" to "System"
-                                )
-                            ) {
-                                idleTimeout = it
-                                putString("screenIdleTimeout", it)
-                            }
+            item {
+                ConfigSection("Keyboard", Icons.Default.Keyboard) {
+                    SwitchSetting("Enable additional key bar", showAdditionalKbd) {
+                        showAdditionalKbd = it
+                        putBoolean(PREF_SHOW_ADDITIONAL_KEYS, it)
+                        if (!it) {
+                            putBoolean(PREF_ADDITIONAL_KEYS_VISIBLE, false)
                         }
                     }
 
-                    item {
-                        ConfigSection("Input", Icons.Default.Mouse) {
-                            ChoiceSetting(
-                                "Touch mode",
-                                touchMode,
-                                listOf("1", "2", "3"),
-                                labels = mapOf(
-                                    "1" to "Trackpad",
-                                    "2" to "Simulated touchscreen",
-                                    "3" to "Direct touch"
-                                )
-                            ) {
-                                touchMode = it
-                                putString("touchMode", it)
-                            }
+                    Text(
+                        "Enables the ESC/CTRL/ALT/arrows toolbar. The toolbar itself is shown only from the keyboard icon inside Screen.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
-                            SwitchSetting("Scale touchpad", scaleTouchpad) {
-                                scaleTouchpad = it
-                                putBoolean("scaleTouchpad", it)
-                            }
-
-                            SwitchSetting("Pointer capture", pointerCapture) {
-                                pointerCapture = it
-                                putBoolean("pointerCapture", it)
-                            }
-
-                            if (pointerCapture) {
-                                ChoiceSetting(
-                                    "Captured pointer transform",
-                                    capturedPointerTransform,
-                                    listOf("at", "no", "cc", "ud", "c"),
-                                    labels = mapOf(
-                                        "at" to "Automatic",
-                                        "no" to "None",
-                                        "cc" to "Counter-clockwise",
-                                        "ud" to "Upside down",
-                                        "c" to "Clockwise"
-                                    )
+                    if (showAdditionalKbd) {
+                        OutlinedTextField(
+                            value = extraKeysConfig,
+                            onValueChange = { extraKeysConfig = it },
+                            label = { Text("Custom extra-key layout") },
+                            supportingText = {
+                                Text("Leave blank to use the built-in layout.")
+                            },
+                            minLines = 3,
+                            maxLines = 8,
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = {
+                                        putString("extra_keys_config", extraKeysConfig)
+                                    }
                                 ) {
-                                    capturedPointerTransform = it
-                                    putString("transformCapturedPointer", it)
+                                    Icon(Icons.Default.Check, contentDescription = "Apply")
                                 }
-
-                                Text(
-                                    "Captured pointer speed: $capturedPointerSpeed%",
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Slider(
-                                    value = capturedPointerSpeed.toFloat(),
-                                    onValueChange = {
-                                        capturedPointerSpeed = it.toInt().coerceIn(1, 300)
-                                    },
-                                    onValueChangeFinished = {
-                                        putInt(
-                                            "capturedPointerSpeedFactor",
-                                            capturedPointerSpeed
-                                        )
-                                    },
-                                    valueRange = 1f..300f
-                                )
-                            }
-
-                            SwitchSetting("Tap to move", tapToMove) {
-                                tapToMove = it
-                                putBoolean("tapToMove", it)
-                            }
-                        }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
 
-                    item {
-                        ConfigSection("Keyboard", Icons.Default.Keyboard) {
-                            SwitchSetting("Enable additional key bar", showAdditionalKbd) {
-                                showAdditionalKbd = it
-                                putBoolean(PREF_SHOW_ADDITIONAL_KEYS, it)
-                                if (!it) {
-                                    putBoolean(PREF_ADDITIONAL_KEYS_VISIBLE, false)
-                                }
-                            }
-
-                            Text(
-                                "Enables the ESC/CTRL/ALT/arrows toolbar. The toolbar itself is shown only from the keyboard icon inside Screen.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-
-                            if (showAdditionalKbd) {
-                                OutlinedTextField(
-                                    value = extraKeysConfig,
-                                    onValueChange = { extraKeysConfig = it },
-                                    label = { Text("Custom extra-key layout") },
-                                    supportingText = {
-                                        Text("Leave blank to use the built-in layout.")
-                                    },
-                                    minLines = 3,
-                                    maxLines = 8,
-                                    trailingIcon = {
-                                        IconButton(
-                                            onClick = {
-                                                putString("extra_keys_config", extraKeysConfig)
-                                            }
-                                        ) {
-                                            Icon(Icons.Default.Check, contentDescription = "Apply")
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-
-                            SwitchSetting(
-                                "Allow Android IME with external keyboard",
-                                showIme
-                            ) {
-                                showIme = it
-                                putBoolean(PREF_SHOW_IME_WITH_EXTERNAL_KEYBOARD, it)
-                            }
-
-                            Text(
-                                "Android IME is separate from the additional key bar.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-
-                            SwitchSetting("Prefer scancodes", preferScancodes) {
-                                preferScancodes = it
-                                putBoolean("preferScancodes", it)
-                            }
-
-                            SwitchSetting(
-                                "Hardware keyboard scancode workaround",
-                                hardwareScancodeWorkaround
-                            ) {
-                                hardwareScancodeWorkaround = it
-                                putBoolean("hardwareKbdScancodesWorkaround", it)
-                            }
-
-                            SwitchSetting("Filter Windows/Meta key", filterWinKey) {
-                                filterWinKey = it
-                                putBoolean("filterOutWinkey", it)
-                            }
-
-                            SwitchSetting("Force character based input", charInput) {
-                                charInput = it
-                                putBoolean("enforceCharBasedInput", it)
-                            }
-                        }
+                    SwitchSetting(
+                        "Allow Android IME with external keyboard",
+                        showIme
+                    ) {
+                        showIme = it
+                        putBoolean(PREF_SHOW_IME_WITH_EXTERNAL_KEYBOARD, it)
                     }
 
-                    item {
-                        ConfigSection("X11", Icons.Default.Memory) {
-                            SwitchSetting("Clipboard synchronization", clipboard) {
-                                clipboard = it
-                                putBoolean("clipboardEnable", it)
-                            }
+                    Text(
+                        "Android IME is separate from the additional key bar.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
-                            Text(
-                                "Only settings implemented by the embedded X11 host are shown here.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                    SwitchSetting("Prefer scancodes", preferScancodes) {
+                        preferScancodes = it
+                        putBoolean("preferScancodes", it)
                     }
+
+                    SwitchSetting(
+                        "Hardware keyboard scancode workaround",
+                        hardwareScancodeWorkaround
+                    ) {
+                        hardwareScancodeWorkaround = it
+                        putBoolean("hardwareKbdScancodesWorkaround", it)
+                    }
+
+                    SwitchSetting("Filter Windows/Meta key", filterWinKey) {
+                        filterWinKey = it
+                        putBoolean("filterOutWinkey", it)
+                    }
+
+                    SwitchSetting("Force character based input", charInput) {
+                        charInput = it
+                        putBoolean("enforceCharBasedInput", it)
+                    }
+                }
+            }
+
+            item {
+                ConfigSection("X11", Icons.Default.Memory) {
+                    SwitchSetting("Clipboard synchronization", clipboard) {
+                        clipboard = it
+                        putBoolean("clipboardEnable", it)
+                    }
+
+                    Text(
+                        "Only settings implemented by the embedded X11 host are shown here.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
@@ -454,31 +422,12 @@ private fun ConfigSection(
     icon: ImageVector,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer
-    ) {
+    SettingsSection(title = title, icon = { Icon(icon, contentDescription = null) }) {
         Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-            HorizontalDivider()
-            content()
-        }
+            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            content = content
+        )
     }
 }
 
@@ -488,20 +437,12 @@ private fun SwitchSetting(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            label,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyMedium
-        )
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange
-        )
-    }
+    SettingsToggleRow(
+        title = label,
+        checked = checked,
+        contentPadding = PaddingValues(vertical = 8.dp),
+        onCheckedChange = onCheckedChange
+    )
 }
 
 @Composable
@@ -523,7 +464,8 @@ private fun ChoiceSetting(
         Box {
             OutlinedButton(
                 onClick = { expanded = true },
-                modifier = Modifier.fillMaxWidth()
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().testTag("x11-choice-$label")
             ) {
                 Text(labels[value] ?: value, modifier = Modifier.weight(1f))
                 Icon(Icons.Default.ArrowDropDown, contentDescription = null)
@@ -531,7 +473,8 @@ private fun ChoiceSetting(
 
             DropdownMenu(
                 expanded = expanded,
-                onDismissRequest = { expanded = false }
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(4.dp))
             ) {
                 choices.forEach { choice ->
                     DropdownMenuItem(

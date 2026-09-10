@@ -72,6 +72,12 @@ class ViewModelLogger(
         enqueueReduced(reduce(Log.ERROR, msg))
     }
 
+    /** Drain the final burst before marking an operation complete or saving its logs. */
+    suspend fun flush() = withContext(Dispatchers.Main.immediate) {
+        mainHandler.removeCallbacks(flushRunnable)
+        flushRunnable.run()
+    }
+
     private fun enqueueReduced(entries: List<Pair<Int, String>>) {
         if (entries.isEmpty()) return
 

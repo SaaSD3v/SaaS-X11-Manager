@@ -1,6 +1,9 @@
 # Audio transport baseline
 
-Status: **physically validated on real hardware**
+Status: **historical X11APP baseline physically validated on real hardware**
+
+For the current X11-0nly adaptation and its separate validation scope, see
+[X11-0nly review](X11-ONLY-REVIEW.md).
 
 Date: **2026-09-05**
 

@@ -27,12 +27,15 @@ class VncSettingsFullscreenPolicyTest {
             "app/src/main/java/com/saas/x11manager/ui/screen/TigerVncSettingsDialog.kt"
         )
 
+        val shared = source(
+            "app/src/main/java/com/saas/x11manager/ui/component/SettingsComponents.kt"
+        )
         assertFalse(general.contains("AlertDialog("))
-        assertTrue(Regex("usePlatformDefaultWidth\\s*=\\s*false").containsMatchIn(general))
-        assertTrue(Regex("usePlatformDefaultWidth\\s*=\\s*false").containsMatchIn(advanced))
-        assertTrue(general.contains("modifier = Modifier.fillMaxSize()"))
-        assertTrue(advanced.contains("modifier = Modifier.fillMaxSize()"))
-        assertTrue(general.contains("shape = RectangleShape"))
-        assertTrue(advanced.contains("shape = RectangleShape"))
+        assertTrue(general.contains("SettingsDialog("))
+        assertTrue(advanced.contains("SettingsDialog("))
+        assertTrue(shared.contains("usePlatformDefaultWidth = false"))
+        assertTrue(shared.contains("decorFitsSystemWindows = false"))
+        assertTrue(shared.contains("Modifier.fillMaxSize()"))
+        assertTrue(shared.contains("shape = RectangleShape"))
     }
 }

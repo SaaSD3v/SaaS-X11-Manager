@@ -106,8 +106,7 @@ object PulseAudioNatScriptTransport {
             ?: return@withContext fail(logger, "Manager PulseAudio cookie could not be serialized")
 
         val payload = buildContainerPayload(listener.server, cookieEscaped)
-        val command =
-            "${Constants.DS_BINARY_PATH} --name=${q(containerName)} run /bin/sh -lc ${q(payload)}"
+        val command = PulseAudioContainerCommand.build(containerName, payload)
 
         logger?.i("[*] Configuring and verifying the PulseAudio client inside $containerName...")
 
@@ -140,8 +139,8 @@ object PulseAudioNatScriptTransport {
         val ready = result.isSuccess &&
             result.out.any { it.trim() == "__SAAS_AUDIO_TRANSPORT_READY__" }
         if (!ready) {
-            logger?.w("[PA-NAT-CONTAINER] exit=${result.code}")
-            return@withContext fail(logger, "Container could not verify ${listener.server}")
+            val failure = PulseAudioClientConfig.failureSummary(result.code, result.out + result.err)
+            return@withContext fail(logger, "Client setup failed for ${listener.server}: $failure")
         }
 
         val sink = result.out.asSequence()
@@ -274,12 +273,10 @@ object PulseAudioNatScriptTransport {
     private fun serializeCookie(uid: Int): String? {
         val result = execAsTermux(
             uid,
-            "test \"\$(wc -c < ${q(COOKIE)} 2>/dev/null | tr -d ' ')\" = 256 || exit 2; " +
-                "od -An -v -tu1 ${q(COOKIE)} 2>/dev/null | " +
-                "awk '{ for (i=1; i<=NF; i++) printf \"\\\\0%03o\", ${'$'}i }'"
+            PulseAudioCookieTransport.encodeCommand(COOKIE)
         )
         if (!result.success) return null
-        return result.out.joinToString("").trim().takeIf { it.isNotEmpty() }
+        return PulseAudioCookieTransport.fromOutput(result.out)
     }
 
     private fun resolveNatEndpoint(info: ContainerInfo): String? {
@@ -435,6 +432,7 @@ object PulseAudioNatScriptTransport {
 
     internal fun buildContainerPayload(server: String, cookieEscaped: String): String = """
         set -u
+        ${PulseAudioClientConfig.failureTrap().prependIndent("        ")}
         SERVER=${q(server)}
         COOKIE_ESCAPED=${q(cookieEscaped)}
         MANAGED=${q(MANAGED)}
@@ -450,6 +448,7 @@ object PulseAudioNatScriptTransport {
 
         need=0
         command -v pactl >/dev/null 2>&1 || need=1
+        command -v pacat >/dev/null 2>&1 || need=1
         command -v speaker-test >/dev/null 2>&1 || need=1
         if [ "${'$'}need" -eq 1 ]; then
             if command -v apt-get >/dev/null 2>&1; then
@@ -464,6 +463,7 @@ object PulseAudioNatScriptTransport {
             fi
         fi
         command -v pactl >/dev/null 2>&1 || die 'pactl is unavailable; cannot verify the transport'
+        command -v pacat >/dev/null 2>&1 || die 'pacat is unavailable; cannot verify playback'
 
         backup_unmanaged() {
             target="${'$'}1"; backup="${'$'}2"; old1="${'$'}{3:-}"; old2="${'$'}{4:-}"
@@ -489,6 +489,7 @@ object PulseAudioNatScriptTransport {
         mkdir -p /root/.config/pulse /etc/profile.d || \
             die 'cannot create PulseAudio config directories'
 
+        saas_audio_step=cookie
         cookie=/root/.config/pulse/saas-audio.cookie
         printf '%b' "${'$'}COOKIE_ESCAPED" > "${'$'}cookie" || \
             die 'cannot write PulseAudio cookie'
@@ -496,6 +497,7 @@ object PulseAudioNatScriptTransport {
             die 'PulseAudio cookie has invalid length'
         chmod 600 "${'$'}cookie" 2>/dev/null || true
 
+        saas_audio_step=client-config
         client=/root/.config/pulse/client.conf
         backup_unmanaged "${'$'}client" "${'$'}client.saas-hostnat.bak" \
             "${'$'}client.saas-netlab.bak" "${'$'}client.saas-audio.bak"
@@ -553,6 +555,7 @@ object PulseAudioNatScriptTransport {
         fi
 
         ${PulseAudioClientConfig.install(server).prependIndent("        ")}
+        saas_audio_step=client-auth
 
         info="${'$'}(PULSE_SERVER="${'$'}SERVER" PULSE_COOKIE="${'$'}cookie" timeout 5 pactl info 2>&1)" || {
             printf '%s\n' "${'$'}info" >&2
@@ -568,7 +571,7 @@ object PulseAudioNatScriptTransport {
     """.trimIndent()
 
     private suspend fun fail(logger: ContainerLogger?, message: String): Boolean {
-        logger?.w("[!] $message")
+        logger?.w("[AUDIO] ✗ $message")
         logger?.w("[!] Graphical startup will continue")
         return false
     }

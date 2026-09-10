@@ -5,8 +5,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/SaaSD3v/SaaS-X11-Manager/actions/workflows/ci.yml"><img alt="Android CI" src="https://github.com/SaaSD3v/SaaS-X11-Manager/actions/workflows/ci.yml/badge.svg?branch=agent%2Fintegrated-x11"></a>
-  <a href="https://github.com/SaaSD3v/SaaS-X11-Manager/actions/workflows/rootfs-compatibility.yml"><img alt="Rootfs compatibility" src="https://github.com/SaaSD3v/SaaS-X11-Manager/actions/workflows/rootfs-compatibility.yml/badge.svg?branch=agent%2Fintegrated-x11"></a>
+  <a href="https://github.com/SaaSD3v/SaaS-X11-Manager/actions/workflows/x11-only-ci.yml"><img alt="Android CI" src="https://github.com/SaaSD3v/SaaS-X11-Manager/actions/workflows/x11-only-ci.yml/badge.svg?branch=X11-0nly"></a>
+  <a href="https://github.com/SaaSD3v/SaaS-X11-Manager/actions/workflows/rootfs-compatibility.yml"><img alt="Rootfs compatibility" src="https://github.com/SaaSD3v/SaaS-X11-Manager/actions/workflows/rootfs-compatibility.yml/badge.svg?branch=X11-0nly"></a>
 </p>
 
 SaaS X11 Manager manages DroidSpaces containers and their X11 graphical sessions from one Android application. The X server is not handed off to a separate Termux:X11 application: the Manager builds the pinned Termux:X11/Lorie engine into its own APK, starts the server through its own APK classpath, renders `LorieView` inside the Manager UI, and connects DroidSpaces containers to the Manager-owned X11 socket.
@@ -15,7 +15,9 @@ The central design rule is simple:
 
 > **Detect capabilities at runtime. Do not select behavior from a hardcoded DroidSpaces, kernel, distro, or package version.**
 
-The active integrated-X11 development branch is **`agent/integrated-x11`**.
+This branch is **`X11-0nly`**: one embedded X11 server, one renderer and the fixed `:0` / `X0` transport. Its desktop and container lifecycle remain separate.
+
+The current review brings the Manager appearance controls, full-screen settings editors, optional AMOLED, minimized operation notifications and saved logs to this variant. Audio uses the corrected HOST/NAT command and cookie adapters. See [the variant review](docs/X11-ONLY-REVIEW.md) for behavior and validation scope.
 
 ---
 
@@ -49,13 +51,14 @@ The active integrated-X11 development branch is **`agent/integrated-x11`**.
 
 ## What the project does
 
-The Android application provides three main areas:
+The Android application provides four main areas:
 
 | Area | Purpose |
 | --- | --- |
 | **Home** | Discover containers, show runtime state, start X11, stop containers, inspect logs, open container configuration. |
 | **Display** | Configure the embedded X11 host and open the full-size managed X11 screen. |
 | **Requirements** | Show root, DroidSpaces, host capability diagnostics, device information, and integrated X11 runtime state. |
+| **Config** | Choose light/dark/system appearance, static or dynamic colors, and optional AMOLED. |
 
 The Manager currently owns the following responsibilities:
 

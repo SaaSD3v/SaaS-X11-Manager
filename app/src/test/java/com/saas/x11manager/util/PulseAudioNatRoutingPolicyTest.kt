@@ -58,8 +58,7 @@ class PulseAudioNatRoutingPolicyTest {
             "app/src/main/java/com/saas/x11manager/util/PulseAudioNatScriptTransport.kt"
         ).readText()
 
-        assertTrue(transport.contains("Constants.DS_BINARY_PATH"))
-        assertTrue(transport.contains("run /bin/sh -lc"))
+        assertTrue(transport.contains("PulseAudioContainerCommand.build(containerName, payload)"))
         assertTrue(transport.contains("/root/.config/pulse/saas-audio.cookie"))
         assertTrue(transport.contains("default-server = \$server"))
         assertTrue(transport.contains("__SAAS_AUDIO_TRANSPORT_READY__"))

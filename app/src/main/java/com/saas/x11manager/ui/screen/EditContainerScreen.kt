@@ -1,5 +1,6 @@
 package com.saas.x11manager.ui.screen
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -21,9 +22,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.saas.x11manager.ui.component.TerminalDialog
+import com.saas.x11manager.ui.component.OperationResultCard
+import com.saas.x11manager.X11Application
 import com.saas.x11manager.util.AlpineInstallProfile
-import com.saas.x11manager.util.AlpineInstallProfileOverride
-import com.saas.x11manager.util.AptInstallRecommendationOverride
 import com.saas.x11manager.util.ContainerPlatform
 import com.saas.x11manager.util.ContainerStatus
 import com.saas.x11manager.util.GraphicProtocol
@@ -41,7 +42,9 @@ private enum class RunningWarningMode {
 fun EditContainerScreen(
     containerName: String,
     onDismiss: () -> Unit,
-    viewModel: EditContainerViewModel = viewModel()
+    viewModel: EditContainerViewModel = viewModel(
+        viewModelStoreOwner = X11Application.instance, key = "edit:$containerName"
+    )
 ) {
     val context = LocalContext.current
 
@@ -65,9 +68,7 @@ fun EditContainerScreen(
     var installedActionSession by remember { mutableStateOf<GraphicSession?>(null) }
     var selectingInstalledSession by remember { mutableStateOf<GraphicSession?>(null) }
     var aptRecommendationSession by remember { mutableStateOf<GraphicSession?>(null) }
-    var activeAptRecommendationOverrideSession by remember { mutableStateOf<GraphicSession?>(null) }
     var alpineProfileSession by remember { mutableStateOf<GraphicSession?>(null) }
-    var activeAlpineProfileOverrideSession by remember { mutableStateOf<GraphicSession?>(null) }
 
     fun requestSessionInstall(session: GraphicSession) {
         when (viewModel.containerCapabilities?.platform) {
@@ -78,46 +79,20 @@ fun EditContainerScreen(
     }
 
     fun startAptInstall(session: GraphicSession, installRecommendedPackages: Boolean) {
-        AptInstallRecommendationOverride.set(session, installRecommendedPackages)
-        activeAptRecommendationOverrideSession = session
         aptRecommendationSession = null
-        viewModel.configureWizardSession(session)
+        viewModel.configureWizardSession(session, installRecommendedPackages = installRecommendedPackages)
     }
 
     fun startAlpineInstall(session: GraphicSession, profile: AlpineInstallProfile) {
-        AlpineInstallProfileOverride.set(session, profile)
-        activeAlpineProfileOverrideSession = session
         alpineProfileSession = null
-        viewModel.configureWizardSession(session)
+        viewModel.configureWizardSession(session, alpineProfile = profile)
     }
 
-    LaunchedEffect(isInstalling, activeAptRecommendationOverrideSession) {
-        val session = activeAptRecommendationOverrideSession
-        if (session != null && !isInstalling) {
-            AptInstallRecommendationOverride.clear(session)
-            activeAptRecommendationOverrideSession = null
+    LaunchedEffect(name, status, containerName, isInstalling) {
+        if (isInstalling) {
+            entryRunningWarningHandled = true
+            return@LaunchedEffect
         }
-    }
-
-    LaunchedEffect(isInstalling, activeAlpineProfileOverrideSession) {
-        val session = activeAlpineProfileOverrideSession
-        if (session != null && !isInstalling) {
-            AlpineInstallProfileOverride.clear(session)
-            activeAlpineProfileOverrideSession = null
-        }
-    }
-
-    DisposableEffect(activeAptRecommendationOverrideSession) {
-        val session = activeAptRecommendationOverrideSession
-        onDispose { if (session != null) AptInstallRecommendationOverride.clear(session) }
-    }
-
-    DisposableEffect(activeAlpineProfileOverrideSession) {
-        val session = activeAlpineProfileOverrideSession
-        onDispose { if (session != null) AlpineInstallProfileOverride.clear(session) }
-    }
-
-    LaunchedEffect(name, status, containerName) {
         if (!entryRunningWarningHandled && name == containerName) {
             when (status) {
                 ContainerStatus.RUNNING -> {
@@ -144,6 +119,7 @@ fun EditContainerScreen(
                     viewModel.dismissInstallTerminal()
                     onDismiss()
                 },
+                onMinimize = { viewModel.minimizeInstallTerminal() },
                 onClear = { viewModel.clearInstallLogs() },
                 isBlocking = isInstalling
             )
@@ -518,6 +494,8 @@ fun EditContainerScreen(
             selectingInstalledSession != null ||
             viewModel.wizardStage != ConfigurationWizardStage.HIDDEN
 
+    BackHandler(enabled = !modalVisible && !isSaving) { onDismiss() }
+
     if (modalVisible) {
         // Dialog windows still render above this composable, but the page beneath
         // them becomes a clean solid work surface instead of leaking the editor UI.
@@ -533,7 +511,7 @@ fun EditContainerScreen(
                     navigationIcon = {
                         IconButton(
                             onClick = onDismiss,
-                            enabled = !isInstalling && !viewModel.isPreparingWizard && !isSaving
+                            enabled = !viewModel.isPreparingWizard && !isSaving
                         ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                         }
@@ -589,6 +567,9 @@ fun EditContainerScreen(
                             SummaryRow("Protocol", graphicSession.protocol.label)
                             SummaryRow("Graphic session", graphicSession.label)
                             Spacer(Modifier.height(6.dp))
+                            viewModel.sessionLogOperation?.let { operation ->
+                                OperationResultCard(operation, viewModel::openInstallTerminal)
+                            }
                             Button(
                                 onClick = {
                                     installedActionSession = null
@@ -596,7 +577,7 @@ fun EditContainerScreen(
                                     viewModel.startConfigurationWizard()
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                                enabled = !isInstalling && !viewModel.isPreparingWizard && !isSaving
+                                enabled = !isInstalling && !viewModel.isPreparingWizard && !isSaving && !viewModel.otherRuntimeOperationRunning
                             ) {
                                 if (viewModel.isPreparingWizard) {
                                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)

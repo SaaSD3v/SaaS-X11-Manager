@@ -13,24 +13,23 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Build
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.saas.x11manager.ui.component.SettingsSection
+import com.saas.x11manager.ui.component.SettingsToggleRow
 import com.saas.x11manager.util.FixSettings
 
 @Composable
@@ -80,7 +79,7 @@ internal fun FixesScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(20.dp),
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
@@ -89,68 +88,29 @@ internal fun FixesScreen(
                 fontWeight = FontWeight.SemiBold
             )
 
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
+            SettingsSection(
+                title = "Audio configuration",
+                subtitle = "Android audio for Linux applications",
+                icon = { Icon(Icons.Default.Build, contentDescription = null) }
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(18.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.Build,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
+                SettingsToggleRow(
+                    title = if (enabled) "Enabled" else "Disabled by default",
+                    subtitle = "HOST and NAT network modes supported",
+                    checked = enabled,
+                    onCheckedChange = { requested ->
+                        val saved = FixSettings.setPulseAudioEnabled(
+                            context = context,
+                            containerName = containerName,
+                            enabled = requested
                         )
-                        Column(modifier = Modifier.padding(start = 12.dp)) {
-                            Text(
-                                "Audio configuration",
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Text(
-                                if (enabled) "Enabled" else "Disabled by default",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                "Android audio for Linux applications",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                "HOST and NAT network modes supported",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        if (saved) {
+                            enabled = requested
+                            saveError = false
+                        } else {
+                            saveError = true
                         }
                     }
-
-                    Switch(
-                        checked = enabled,
-                        onCheckedChange = { requested ->
-                            val saved = FixSettings.setPulseAudioEnabled(
-                                context = context,
-                                containerName = containerName,
-                                enabled = requested
-                            )
-                            if (saved) {
-                                enabled = requested
-                                saveError = false
-                            } else {
-                                saveError = true
-                            }
-                        }
-                    )
-                }
+                )
             }
 
             if (saveError) {

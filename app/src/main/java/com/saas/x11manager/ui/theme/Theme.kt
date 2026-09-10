@@ -28,36 +28,39 @@ private fun darkColorSchemeFor(palette: ThemePalette): ColorScheme {
     val p = palette.primaryDark
     val s = palette.secondaryDark
     val t = palette.tertiaryDark
-    val base = Color(0xFF121212)
+    val base = Color(0xFF101114)
 
     return darkColorScheme(
         primary = p,
         onPrimary = Color(0xFF000000).blend(p, 0.08f),
-        primaryContainer = p.blend(Color.Black, 0.40f),
+        primaryContainer = p.blend(Color.Black, 0.40f).readableOn(p.blend(Color.White, 0.75f)),
         onPrimaryContainer = p.blend(Color.White, 0.75f),
         secondary = s,
         onSecondary = Color(0xFF000000).blend(s, 0.08f),
-        secondaryContainer = s.blend(Color.Black, 0.40f),
+        secondaryContainer = s.blend(Color.Black, 0.40f).readableOn(s.blend(Color.White, 0.75f)),
         onSecondaryContainer = s.blend(Color.White, 0.75f),
         tertiary = t,
         onTertiary = Color(0xFF000000).blend(t, 0.08f),
-        tertiaryContainer = t.blend(Color.Black, 0.40f),
+        tertiaryContainer = t.blend(Color.Black, 0.40f).readableOn(t.blend(Color.White, 0.75f)),
         onTertiaryContainer = t.blend(Color.White, 0.75f),
-        background = base.blend(p, 0.15f),
+        background = base.blend(p, 0.025f),
         onBackground = Color(0xFFE2E2E6),
-        surface = base.blend(p, 0.15f),
+        surface = base.blend(p, 0.025f),
         onSurface = Color(0xFFE2E2E6),
-        surfaceVariant = Color(0xFF2B2B2F).blend(p, 0.25f),
+        surfaceVariant = Color(0xFF2D2E34).blend(p, 0.05f),
         onSurfaceVariant = Color(0xFFC6C6CA),
-        surfaceContainer = Color(0xFF1E1E22).blend(p, 0.20f),
-        surfaceContainerHigh = Color(0xFF282830).blend(p, 0.22f),
-        surfaceContainerHighest = Color(0xFF333338).blend(p, 0.25f),
-        surfaceContainerLow = Color(0xFF1A1A1E).blend(p, 0.18f),
-        surfaceContainerLowest = Color(0xFF0F0F13).blend(p, 0.15f),
+        surfaceContainer = Color(0xFF191A1E).blend(p, 0.035f),
+        surfaceContainerHigh = Color(0xFF232428).blend(p, 0.04f),
+        surfaceContainerHighest = Color(0xFF2E2F34).blend(p, 0.05f),
+        surfaceContainerLow = Color(0xFF15161A).blend(p, 0.03f),
+        surfaceContainerLowest = Color(0xFF0B0C10).blend(p, 0.02f),
+        surfaceDim = base.blend(p, 0.025f),
+        surfaceBright = Color(0xFF38393E).blend(p, 0.05f),
         outline = Color(0xFF8E8E93).blend(p, 0.35f),
         outlineVariant = Color(0xFF46464A).blend(p, 0.30f),
         inverseSurface = Color(0xFFE2E2E6),
         inverseOnSurface = Color(0xFF303034),
+        surfaceTint = p,
         inversePrimary = palette.primaryLight
     )
 }
@@ -67,17 +70,20 @@ private fun lightColorSchemeFor(palette: ThemePalette): ColorScheme {
     val s = palette.secondaryLight
     val t = palette.tertiaryLight
     val base = Color(0xFFFFFBFF)
+    // Pastel seeds still tint the surfaces, but foreground accents need to remain
+    // readable on the darkest light surface as well as underneath white labels.
+    val highestSurface = Color(0xFFE4E1E6).blend(p, 0.14f)
 
     return lightColorScheme(
-        primary = p,
+        primary = p.readableOn(highestSurface),
         onPrimary = Color.White,
         primaryContainer = p.blend(Color.White, 0.55f),
         onPrimaryContainer = p.blend(Color.Black, 0.55f),
-        secondary = s,
+        secondary = s.readableOn(highestSurface),
         onSecondary = Color.White,
         secondaryContainer = s.blend(Color.White, 0.55f),
         onSecondaryContainer = s.blend(Color.Black, 0.55f),
-        tertiary = t,
+        tertiary = t.readableOn(highestSurface),
         onTertiary = Color.White,
         tertiaryContainer = t.blend(Color.White, 0.55f),
         onTertiaryContainer = t.blend(Color.Black, 0.55f),
@@ -89,13 +95,14 @@ private fun lightColorSchemeFor(palette: ThemePalette): ColorScheme {
         onSurfaceVariant = Color(0xFF46464A),
         surfaceContainer = Color(0xFFF0EDF1).blend(p, 0.10f),
         surfaceContainerHigh = Color(0xFFEAE7EB).blend(p, 0.12f),
-        surfaceContainerHighest = Color(0xFFE4E1E6).blend(p, 0.14f),
+        surfaceContainerHighest = highestSurface,
         surfaceContainerLow = Color(0xFFF6F3F7).blend(p, 0.08f),
         surfaceContainerLowest = base.blend(p, 0.04f),
         outline = Color(0xFF767680).blend(p, 0.22f),
         outlineVariant = Color(0xFFC6C6CA).blend(p, 0.18f),
         inverseSurface = Color(0xFF303034),
         inverseOnSurface = Color(0xFFF2F0F4),
+        surfaceTint = p.readableOn(highestSurface),
         inversePrimary = palette.primaryDark
     )
 }
@@ -117,6 +124,7 @@ private object AmoledColorCache {
 
     fun createAmoledScheme(dynamicScheme: ColorScheme): ColorScheme {
         return dynamicScheme.copy(
+            surfaceTint = AMOLED_BLACK,
             background = AMOLED_BLACK,
             surface = AMOLED_BLACK,
             surfaceVariant = AMOLED_BLACK,
@@ -125,6 +133,8 @@ private object AmoledColorCache {
             surfaceContainerLowest = AMOLED_BLACK,
             surfaceContainerHigh = AMOLED_BLACK,
             surfaceContainerHighest = AMOLED_BLACK,
+            surfaceDim = AMOLED_BLACK,
+            surfaceBright = AMOLED_BLACK,
             primaryContainer = dynamicScheme.primaryContainer.fastBlend(AMOLED_BLACK, 0.7f),
             secondaryContainer = dynamicScheme.secondaryContainer.fastBlend(AMOLED_BLACK, 0.7f),
             tertiaryContainer = dynamicScheme.tertiaryContainer.fastBlend(AMOLED_BLACK, 0.7f)
@@ -138,6 +148,7 @@ private object AmoledColorCache {
         val baseScheme = darkColorSchemeFor(palette)
         val p = palette.primaryDark
         val scheme = baseScheme.copy(
+            surfaceTint = AMOLED_BLACK,
             background = AMOLED_BLACK,
             surface = AMOLED_BLACK,
             surfaceVariant = AMOLED_BLACK,
@@ -146,6 +157,8 @@ private object AmoledColorCache {
             surfaceContainerLowest = AMOLED_BLACK,
             surfaceContainerHigh = AMOLED_BLACK,
             surfaceContainerHighest = AMOLED_BLACK,
+            surfaceDim = AMOLED_BLACK,
+            surfaceBright = AMOLED_BLACK,
             outlineVariant = p.copy(alpha = 0.25f),
             primaryContainer = p.copy(alpha = 0.2f),
             onPrimaryContainer = p.blend(Color.White, 0.85f)

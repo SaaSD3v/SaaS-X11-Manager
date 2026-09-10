@@ -1,8 +1,15 @@
 package com.saas.x11manager.ui.component
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.pm.PackageManager
+import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -12,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -33,6 +41,7 @@ fun TerminalDialog(
     title: String,
     logs: List<Pair<Int, String>>,
     onDismiss: () -> Unit,
+    onMinimize: () -> Unit,
     onClear: (() -> Unit)? = null,
     isBlocking: Boolean = false,
     primaryActionLabel: String? = null,
@@ -44,6 +53,18 @@ fun TerminalDialog(
     val screenHeight = configuration.screenHeightDp.dp
     val dialogShape = RoundedCornerShape(28.dp)
     val buttonShape = RoundedCornerShape(14.dp)
+    val minimize by rememberUpdatedState(onMinimize)
+    fun minimizeWithNotification() {
+        minimize()
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            Toast.makeText(context,
+                "Notifications are disabled. You can reopen the logs from this operation's screen.",
+                Toast.LENGTH_LONG).show()
+        }
+    }
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { minimizeWithNotification() }
 
     Dialog(
         onDismissRequest = if (isBlocking) { {} } else { onDismiss },
@@ -75,14 +96,26 @@ fun TerminalDialog(
                         text = title,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f, fill = false).padding(end = 12.dp),
+                        modifier = Modifier.weight(1f).padding(end = 12.dp),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
 
+                    IconButton(
+                        onClick = {
+                            if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(
+                                    context, Manifest.permission.POST_NOTIFICATIONS
+                                ) != PackageManager.PERMISSION_GRANTED) {
+                                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            } else minimizeWithNotification()
+                        },
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(Icons.Default.Remove, "Minimize logs", modifier = Modifier.size(22.dp))
+                    }
                     Surface(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(48.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .clickable(
                                 enabled = !isBlocking,

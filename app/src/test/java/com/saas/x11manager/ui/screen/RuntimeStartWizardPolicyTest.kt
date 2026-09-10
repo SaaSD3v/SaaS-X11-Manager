@@ -94,15 +94,15 @@ class RuntimeStartWizardPolicyTest {
         assertTrue(access.contains("adbLocalPort = vncAdbLocalPort"))
         assertTrue(access.contains("Constants.X11_DISPLAY"))
 
-        // Preserve the current X11APP workspace language, but collapse it to the
-        // one Manager-owned monitor/display that X11-0nly is allowed to expose.
+        // The fixed workspace uses its full width and exposes only its one display.
         assertTrue(display.contains("text = \"X11 Screen\""))
-        assertTrue(display.contains("text = \"Monitors\""))
+        assertTrue(display.contains("text = \"X11 display\""))
         assertTrue(display.contains("add(\"Monitor 1\")"))
         assertTrue(display.contains("add(Constants.X11_DISPLAY)"))
         assertTrue(display.contains("private fun FixedMonitorDeck("))
-        assertTrue(display.contains(".width(204.dp)"))
-        assertTrue(display.contains("Monitor 1 (\${Constants.X11_DISPLAY})"))
+        assertFalse(display.contains(".width(204.dp)"))
+        assertTrue(display.contains("modifier = Modifier.fillMaxWidth()"))
+        assertTrue(display.contains("Monitor 1 stopped"))
 
         assertFalse(display.contains("createMonitor("))
         assertFalse(display.contains("selectMonitor("))
