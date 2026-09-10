@@ -17,17 +17,17 @@ class PulseAudioNatRoutingPolicyTest {
     }
 
     @Test
-    fun natUsesScriptParityTransportWhileHostKeepsValidatedFinalizer() {
+    fun hostAndNatUseOneManagerOwnedNativeFinalizer() {
         val session = projectFile(
             "app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt"
         ).readText()
 
-        assertTrue(session.contains("if (mode == \"nat\")"))
-        assertTrue(session.contains("PulseAudioNatScriptTransport.finalizeAfterContainerReady"))
-        assertTrue(session.contains("PulseAudioUnifiedTransport.finalizeAfterContainerReady"))
+        assertTrue(session.contains("PulseAudioFixManager.prepareBeforeGraphicalStart"))
+        assertTrue(session.contains("PulseAudioFixManager.finalizeAfterContainerReady"))
+        assertFalse(session.contains("PulseAudioNatScriptTransport.finalizeAfterContainerReady"))
+        assertFalse(session.contains("PulseAudioUnifiedTransport.finalizeAfterContainerReady"))
         assertFalse(session.contains("PulseAudioNatHostReadiness"))
         assertFalse(session.contains("PulseAudioNatPreflight"))
-        assertFalse(session.contains("PulseAudioFixManager.finalizeAfterContainerReady"))
     }
 
     @Test
