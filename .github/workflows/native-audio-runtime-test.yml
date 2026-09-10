@@ -1,0 +1,107 @@
+name: Native Audio Runtime Test
+
+on:
+  push:
+    branches:
+      - "x11app-native-audio-runtime-test"
+  workflow_dispatch:
+
+concurrency:
+  group: native-audio-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build native-audio APKs
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: temurin
+          cache: gradle
+
+      - name: Install native runtime packaging tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends patchelf dpkg
+          patchelf --version
+          dpkg-deb --version | head -n 1
+
+      - name: Validate native-only source policy
+        run: |
+          set -euo pipefail
+          active=(
+            app/src/main/java/com/saas/x11manager/audio/NativeAudioRuntime.kt
+            app/src/main/java/com/saas/x11manager/audio/NativeAudioRuntimeService.kt
+            app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt
+            app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt
+          )
+          ! grep -nE '/data/data/com\.termux|pkg install|runAsTermux|detectTermuxRuntime|libskcodec|ro\.product\.manufacturer' "${active[@]}"
+          ! grep -nE 'PulseAudio(UnifiedTransport|NatScriptTransport|RuntimeSanitizer)\.finalizeAfterContainerReady|PulseAudioRuntimeSanitizer\.prepare' \
+            app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt
+          grep -q 'NativeAudioRuntime.ensureCore' app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt
+          grep -q 'NativeAudioRuntime.configureContainer' app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt
+
+      - name: Build tests and release APKs
+        env:
+          SAAS_PULSE_INTEGRATION_REQUIRED: "0"
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew testReleaseUnitTest assembleRelease \
+            -PVERSION_NAME=1.0.0-native-audio-test \
+            -PVERSION_CODE=${{ github.run_number }} \
+            --stacktrace 2>&1 | tee native-audio-gradle.log
+
+      - name: Verify embedded PulseAudio in every APK ABI
+        run: |
+          set -euo pipefail
+          mapfile -t apks < <(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | sort)
+          test "${#apks[@]}" -eq 5
+          required=(
+            libsaas_pulseaudio_exec.so
+            libsaas_pactl_exec.so
+            libsaas_pacat_exec.so
+            module-aaudio-sink.so
+            module-sles-sink.so
+            module-native-protocol-unix.so
+            module-native-protocol-tcp.so
+          )
+          for apk in "${apks[@]}"; do
+            echo "Checking $(basename "$apk")"
+            listing=$(unzip -Z1 "$apk")
+            for name in "${required[@]}"; do
+              count=$(printf '%s\n' "$listing" | grep -c "/$name$" || true)
+              test "$count" -ge 1 || { echo "::error::$name missing from $apk"; exit 1; }
+            done
+          done
+
+      - name: Reject external Termux requirement in built manifest
+        run: |
+          set -euo pipefail
+          grep -q 'android:process=":audio"' app/src/main/AndroidManifest.xml
+          grep -q 'android:foregroundServiceType="mediaPlayback"' app/src/main/AndroidManifest.xml
+          ! grep -q 'com.termux.permission.RUN_COMMAND' app/src/main/AndroidManifest.xml
+          ! grep -q 'com.termux.app.RunCommandService' app/src/main/AndroidManifest.xml
+
+      - name: Upload native-audio test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-audio-runtime-test-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/test-results/testReleaseUnitTest/**
+            app/build/reports/tests/testReleaseUnitTest/**
+            app/build/generated/nativeAudio/jniLibs/**/NATIVE-AUDIO-MANIFEST.txt
+            native-audio-gradle.log
