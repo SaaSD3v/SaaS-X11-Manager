@@ -13,6 +13,21 @@ val releaseVersionCode = providers.gradleProperty("VERSION_CODE")
     ?.takeIf { it > 0 }
     ?: 1
 
+val nativeAudioJniLibs = layout.buildDirectory.dir("generated/nativeAudio/jniLibs")
+val prepareNativeAudioRuntime = tasks.register("prepareNativeAudioRuntime", Exec::class) {
+    group = "build"
+    description = "Resolve and package the embedded Android PulseAudio runtime"
+    workingDir(rootProject.projectDir)
+    commandLine(
+        "python3",
+        rootProject.file("tools/native-audio/prepare_runtime.py").absolutePath,
+        "--output",
+        nativeAudioJniLibs.get().asFile.absolutePath
+    )
+    inputs.file(rootProject.file("tools/native-audio/prepare_runtime.py"))
+    outputs.dir(nativeAudioJniLibs)
+}
+
 android {
     namespace = "com.saas.x11manager"
     compileSdk = 34
@@ -31,15 +46,20 @@ android {
     }
 
     // Keep the universal APK for maximum compatibility while also producing
-    // lightweight per-ABI APKs. libXlorie is by far the largest part of the
-    // application, so ABI-specific artifacts cut download/install size without
-    // dropping support for any architecture.
+    // lightweight per-ABI APKs. libXlorie and the embedded PulseAudio runtime
+    // are native, so ABI-specific artifacts reduce download/install size.
     splits {
         abi {
             isEnable = true
             reset()
             include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
             isUniversalApk = true
+        }
+    }
+
+    sourceSets {
+        getByName("main") {
+            jniLibs.srcDir(nativeAudioJniLibs)
         }
     }
 
@@ -105,7 +125,21 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        jniLibs {
+            // The PulseAudio daemon/pactl/pacat are executable ELF files kept in
+            // nativeLibraryDir. Legacy extraction gives them an executable,
+            // read-only APK-owned location accepted by Android's W^X policy.
+            useLegacyPackaging = true
+            keepDebugSymbols += "**/libsaas_*_exec.so"
+            keepDebugSymbols += "**/module-*.so"
+        }
     }
+}
+
+// The generated jniLibs directory is not a source artifact, so Android's merge
+// tasks need an explicit dependency on the reproducible runtime preparation.
+tasks.matching { it.name.endsWith("JniLibFolders") }.configureEach {
+    dependsOn(prepareNativeAudioRuntime)
 }
 
 dependencies {
