@@ -19,11 +19,13 @@ class PulseAudioUnifiedTransportPolicyTest {
     private fun source(relativePath: String): String = projectFile(relativePath).readText()
 
     @Test
-    fun sessionUsesOnePreparedCoreAndOneUnifiedFinalizer() {
+    fun sessionUsesOneNativePreparedCoreAndOneManagerFinalizer() {
         val session = source("app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt")
 
         assertTrue(session.contains("PulseAudioFixManager.prepareBeforeGraphicalStart"))
-        assertTrue(session.contains("PulseAudioUnifiedTransport.finalizeAfterContainerReady"))
+        assertTrue(session.contains("PulseAudioFixManager.finalizeAfterContainerReady"))
+        assertFalse(session.contains("PulseAudioUnifiedTransport.finalizeAfterContainerReady"))
+        assertFalse(session.contains("PulseAudioNatScriptTransport.finalizeAfterContainerReady"))
         assertFalse(session.contains("TermuxRunCommandPreflight"))
         assertFalse(session.contains("PulseAudioRootAmTransport"))
         assertFalse(session.contains("PulseAudioDataPathTransport"))
@@ -86,8 +88,6 @@ class PulseAudioUnifiedTransportPolicyTest {
         assertTrue(transport.contains("pulseaudio.log"))
         assertTrue(transport.contains("verifyContainerClientDetailed"))
 
-        // No Manager-side TCP self-probe: the module table proves the exact
-        // server listener and the running container proves the real data path.
         assertFalse(transport.contains("probeEndpointAndroidSink"))
         assertFalse(transport.contains("endpoint_ready_from_host"))
     }
@@ -107,9 +107,6 @@ class PulseAudioUnifiedTransportPolicyTest {
         assertTrue(transport.contains("configuredPortForwardOwner"))
         assertTrue(transport.contains("port is reserved by DroidSpaces TCP port-forward"))
 
-        // NAT endpoint enumeration must never become an arbitrary 172.28.x.x
-        // scan. The live default gateway (or v6.5.0 canonical gateway) is the
-        // one endpoint on which PulseAudio is allowed to bind.
         assertFalse(transport.contains("discoverNatEndpoints"))
         assertFalse(transport.contains("hostOwnsIpv4"))
     }
