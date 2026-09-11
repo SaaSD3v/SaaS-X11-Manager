@@ -19,6 +19,15 @@ data class VncStartResult(
     val mirroredDisplayName: String? = null
 )
 
+/**
+ * External TigerVNC integration.
+ *
+ * No VNC implementation is bundled in the APK. The Manager detects TigerVNC in
+ * the selected DroidSpaces container and installs the distro package only when
+ * the required executable is missing. Standalone VNC owns a private Xvnc display.
+ * The mirror path remains only for backward API compatibility; current UI policy
+ * exposes standalone VNC and Integrated X11 as separate runtime choices.
+ */
 object VncServerManager {
     private const val STATE_DIR = "/run/saas-x11-manager-vnc"
     private const val PASSWORD_FILE = "/root/.vnc/passwd"
@@ -41,11 +50,16 @@ object VncServerManager {
         logger?.i("[CTX] Graphic session: ${session.label}")
         logger?.i("[CTX] VNC port: $port")
         logger?.i("[CTX] Mode: standalone virtual display")
+
         if (!VncSettings.isValidPort(port)) {
             logger?.e("[-] Invalid VNC port: $port")
             return@withContext VncStartResult(false, port)
         }
-        val launchSettings = VncSettings.getLaunchSettings(X11Application.instance, containerName)
+
+        val launchSettings = VncSettings.getLaunchSettings(
+            X11Application.instance,
+            containerName
+        )
         val settingsError = VncSettings.validateLaunchSettings(launchSettings)
         if (settingsError != null) {
             logger?.e("[-] Invalid TigerVNC settings: $settingsError")
@@ -53,15 +67,26 @@ object VncServerManager {
         }
         logger?.i("[CTX] VNC resolution: ${launchSettings.geometry}")
         logger?.i("[CTX] VNC depth: ${launchSettings.depth}")
+
         val lease = ensureContainerReady(containerName, logger)
             ?: return@withContext VncStartResult(false, port)
+
         logger?.i(LogLayout.SPACER)
         logger?.i("[VNC] Preparing TigerVNC runtime")
+
         var success = false
         try {
-            if (!prepareTigerVnc(containerName, platform, session, false, password, logger)) {
+            if (!prepareTigerVnc(
+                    containerName = containerName,
+                    platform = platform,
+                    session = session,
+                    needsMirror = false,
+                    password = password,
+                    logger = logger
+                )) {
                 return@withContext VncStartResult(false, port)
             }
+
             logger?.i(LogLayout.SPACER)
             logger?.i("[VNC] Launching standalone VNC runtime")
             if (!stopManagedVnc(containerName, logger)) {
@@ -73,10 +98,12 @@ object VncServerManager {
                 logger?.e("[-] Choose another VNC port in General settings")
                 return@withContext VncStartResult(false, port)
             }
+
             if (!stopIntegratedGraphicService(containerName, logger)) {
                 logger?.e("[-] Integrated X11 startup service is still active; standalone VNC was not started")
                 return@withContext VncStartResult(false, port)
             }
+
             val displayNumber = findFreeVirtualDisplay(containerName)
             if (displayNumber == null) {
                 logger?.e("[-] No free VNC X display was found in :1..:20")
@@ -84,26 +111,47 @@ object VncServerManager {
             }
             val displayName = ":$displayNumber"
             logger?.i("[CTX] VNC X display: $displayName")
-            val launchCommand = standaloneLaunchCommand(displayNumber, port, launchSettings, password != null)
-            if (!runContainerCommand(containerName, "Launching TigerVNC virtual X server", launchCommand, logger)) {
+
+            val launchCommand = standaloneLaunchCommand(
+                displayNumber = displayNumber,
+                port = port,
+                settings = launchSettings,
+                passwordEnabled = password != null
+            )
+            if (!runContainerCommand(
+                    containerName,
+                    "Launching TigerVNC virtual X server",
+                    launchCommand,
+                    logger
+                )) {
                 logContainerFileTail(containerName, SERVER_LOG, logger)
                 return@withContext VncStartResult(false, port, displayName)
             }
+
             if (!waitForPort(containerName, port)) {
                 logger?.e("[-] TigerVNC did not begin listening on TCP $port")
                 logContainerFileTail(containerName, SERVER_LOG, logger)
                 stopManagedVnc(containerName, logger)
                 return@withContext VncStartResult(false, port, displayName)
             }
+
             beforeGraphicSession?.invoke()
             val sessionLaunch =
-                "DISPLAY=${shellQuote(displayName)} nohup $SESSION_SCRIPT >$SESSION_LOG 2>&1 & " +
-                    "session_pid=\$!; " + VncRuntimeSafety.recordLease(STATE_DIR, "session", "session_pid")
-            if (!runContainerCommand(containerName, "Launching ${session.label} on VNC $displayName", sessionLaunch, logger)) {
+                "DISPLAY=${shellQuote(displayName)} " +
+                    "nohup $SESSION_SCRIPT >$SESSION_LOG 2>&1 & " +
+                    "session_pid=\$!; " +
+                    VncRuntimeSafety.recordLease(STATE_DIR, "session", "session_pid")
+            if (!runContainerCommand(
+                    containerName,
+                    "Launching ${session.label} on VNC $displayName",
+                    sessionLaunch,
+                    logger
+                )) {
                 logContainerFileTail(containerName, SESSION_LOG, logger)
                 stopManagedVnc(containerName, logger)
                 return@withContext VncStartResult(false, port, displayName)
             }
+
             delay(750)
             if (!isPortListening(containerName, port)) {
                 logger?.e("[-] TigerVNC stopped after the graphical session launch")
@@ -112,11 +160,14 @@ object VncServerManager {
                 stopManagedVnc(containerName, logger)
                 return@withContext VncStartResult(false, port, displayName)
             }
+
             logger?.i("[+] VNC server started successfully")
             success = true
             VncStartResult(true, port, displayName = displayName)
         } finally {
-            if (!success && lease.restoreStoppedOnFailure) restoreStoppedState(containerName, logger)
+            if (!success && lease.restoreStoppedOnFailure) {
+                restoreStoppedState(containerName, logger)
+            }
         }
     }
 
@@ -136,53 +187,109 @@ object VncServerManager {
         logger?.i("[CTX] Integrated display: $integratedDisplayName")
         logger?.i("[CTX] VNC port: $port")
         logger?.i("[CTX] Mode: mirror existing Integrated X11 screen")
-        if (!VncSettings.isValidPort(port)) return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
-        val launchSettings = VncSettings.getLaunchSettings(X11Application.instance, containerName)
-        VncSettings.validateLaunchSettings(launchSettings)?.let {
-            logger?.e("[-] Invalid TigerVNC settings: $it")
+
+        if (!VncSettings.isValidPort(port)) {
+            logger?.e("[-] Invalid VNC port: $port")
             return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
         }
+
+        val launchSettings = VncSettings.getLaunchSettings(
+            X11Application.instance,
+            containerName
+        )
+        val settingsError = VncSettings.validateLaunchSettings(launchSettings)
+        if (settingsError != null) {
+            logger?.e("[-] Invalid TigerVNC settings: $settingsError")
+            return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
+        }
+        if (launchSettings.mirrorGeometry.isNotBlank()) {
+            logger?.i("[CTX] VNC mirror crop: ${launchSettings.mirrorGeometry}")
+        }
+
         val lease = ensureContainerReady(containerName, logger)
             ?: return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
+
         var success = false
         try {
-            if (!prepareTigerVnc(containerName, platform, session, true, password, logger)) {
+            if (!prepareTigerVnc(
+                    containerName = containerName,
+                    platform = platform,
+                    session = session,
+                    needsMirror = true,
+                    password = password,
+                    logger = logger
+                )) {
                 return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
             }
+
             if (!stopManagedVnc(containerName, logger)) {
                 logger?.e("[-] Refusing to replace an unverified VNC PID lease")
                 return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
             }
-            if (isPortListening(containerName, port)) return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
+            if (isPortListening(containerName, port)) {
+                logger?.e("[-] Port $port is already in use inside the container network namespace")
+                logger?.e("[-] Choose another VNC port in General settings")
+                return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
+            }
+
             val displaySocket = "/tmp/.X11-unix/X${integratedDisplayName.removePrefix(":")}"
             if (!probeContainer(containerName, "test -S ${shellQuote(displaySocket)}")) {
                 logger?.e("[-] Integrated display socket is not visible in the container: $displaySocket")
                 return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
             }
-            val launchCommand = mirrorLaunchCommand(integratedDisplayName, port, launchSettings)
-            if (!runContainerCommand(containerName, "Publishing Integrated X11 through x0vncserver", launchCommand, logger)) {
+
+            val launchCommand = mirrorLaunchCommand(
+                displayName = integratedDisplayName,
+                port = port,
+                settings = launchSettings
+            )
+            if (!runContainerCommand(
+                    containerName,
+                    "Publishing Integrated X11 through x0vncserver",
+                    launchCommand,
+                    logger
+                )) {
                 logContainerFileTail(containerName, SERVER_LOG, logger)
                 return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
             }
+
             if (!waitForPort(containerName, port)) {
                 logger?.e("[-] x0vncserver did not begin listening on TCP $port")
                 logContainerFileTail(containerName, SERVER_LOG, logger)
                 stopManagedVnc(containerName, logger)
                 return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
             }
-            logConnectionAddresses(containerName, port, integratedDisplayName, true, logger)
+
+            logConnectionAddresses(
+                containerName,
+                port,
+                integratedDisplayName,
+                mirror = true,
+                logger = logger
+            )
             logger?.i("[+] VNC mirror started successfully")
             success = true
             VncStartResult(true, port, mirroredDisplayName = integratedDisplayName)
         } finally {
-            if (!success && lease.restoreStoppedOnFailure) restoreStoppedState(containerName, logger)
+            if (!success && lease.restoreStoppedOnFailure) {
+                restoreStoppedState(containerName, logger)
+            }
         }
     }
 
-    suspend fun stopManagedVnc(containerName: String, logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
-        val result = runContainerCommandRaw(containerName, VncRuntimeSafety.stopOwnedRuntime(STATE_DIR))
-        if (result) logger?.i("[+] Previous Manager-owned VNC runtime cleared")
-        else logger?.w("[!] VNC PID state did not match the recorded Manager lease; no unverified PID was killed")
+    suspend fun stopManagedVnc(
+        containerName: String,
+        logger: ContainerLogger? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        val result = runContainerCommandRaw(
+            containerName,
+            VncRuntimeSafety.stopOwnedRuntime(STATE_DIR)
+        )
+        if (result) {
+            logger?.i("[+] Previous Manager-owned VNC runtime cleared")
+        } else {
+            logger?.w("[!] VNC PID state did not match the recorded Manager lease; no unverified PID was killed")
+        }
         result
     }
 
@@ -194,49 +301,148 @@ object VncServerManager {
         password: String?,
         logger: ContainerLogger?
     ): Boolean {
-        if (password != null && !VncSettings.isValidPassword(password)) return false
-        if (needsMirror && password == null && !probeContainer(containerName, "test -s $PASSWORD_FILE")) return false
-        val requiredServerPresent = if (needsMirror) probeContainer(containerName, "command -v x0vncserver >/dev/null 2>&1")
-            else probeContainer(containerName, "command -v Xtigervnc >/dev/null 2>&1 || command -v Xvnc >/dev/null 2>&1")
-        val passwordToolPresent = password == null || probeContainer(containerName, "command -v tigervncpasswd >/dev/null 2>&1 || command -v vncpasswd >/dev/null 2>&1")
-        if (!(requiredServerPresent && passwordToolPresent)) {
-            val resolvedPlatform = platform ?: detectPlatform(containerName) ?: return false
-            if (!installTigerVnc(containerName, resolvedPlatform, needsMirror, logger)) return false
+        if (password != null && !VncSettings.isValidPassword(password)) {
+            logger?.e(
+                "[-] VNC password must contain ${VncSettings.MIN_PASSWORD_LENGTH}-${VncSettings.MAX_PASSWORD_LENGTH} characters"
+            )
+            return false
         }
+
+        if (needsMirror && password == null && !probeContainer(containerName, "test -s $PASSWORD_FILE")) {
+            logger?.e("[-] Legacy VNC mirror requires an existing TigerVNC password file")
+            return false
+        }
+
+        val requiredServerPresent = if (needsMirror) {
+            probeContainer(containerName, "command -v x0vncserver >/dev/null 2>&1")
+        } else {
+            probeContainer(
+                containerName,
+                "command -v Xtigervnc >/dev/null 2>&1 || command -v Xvnc >/dev/null 2>&1"
+            )
+        }
+        val passwordToolPresent = password == null || probeContainer(
+            containerName,
+            "command -v tigervncpasswd >/dev/null 2>&1 || command -v vncpasswd >/dev/null 2>&1"
+        )
+
+        if (requiredServerPresent && passwordToolPresent) {
+            logger?.i("[+] TigerVNC already installed; package manager skipped")
+        } else {
+            val resolvedPlatform = platform ?: detectPlatform(containerName)
+            if (resolvedPlatform == null) {
+                logger?.e("[-] Could not detect apk or apt/dpkg for TigerVNC installation")
+                return false
+            }
+            logger?.i("[*] TigerVNC component missing; installing only what is required...")
+            if (!installTigerVnc(containerName, resolvedPlatform, needsMirror, logger)) return false
+
+            val verified = if (needsMirror) {
+                probeContainer(containerName, "command -v x0vncserver >/dev/null 2>&1")
+            } else {
+                probeContainer(
+                    containerName,
+                    "command -v Xtigervnc >/dev/null 2>&1 || command -v Xvnc >/dev/null 2>&1"
+                )
+            }
+            if (!verified) {
+                logger?.e("[-] TigerVNC package installation finished without the required server binary")
+                return false
+            }
+        }
+
         if (password != null) {
-            val passwordCommand = "mkdir -p /root/.vnc && chmod 700 /root/.vnc && tool=\$(command -v tigervncpasswd 2>/dev/null || command -v vncpasswd 2>/dev/null); [ -n \"\$tool\" ] || exit 1; printf '%s\\n' ${shellQuote(password)} | \"\$tool\" -f > $PASSWORD_FILE && chmod 600 $PASSWORD_FILE && test -s $PASSWORD_FILE"
-            if (!runContainerCommandRaw(containerName, passwordCommand)) return false
-        } else if (!needsMirror && !runContainerCommandRaw(containerName, "rm -f $PASSWORD_FILE")) return false
+            val passwordCommand =
+                "mkdir -p /root/.vnc && chmod 700 /root/.vnc && " +
+                    "tool=\$(command -v tigervncpasswd 2>/dev/null || command -v vncpasswd 2>/dev/null); " +
+                    "[ -n \"\$tool\" ] || exit 1; " +
+                    "printf '%s\\n' ${shellQuote(password)} | \"\$tool\" -f > $PASSWORD_FILE && " +
+                    "chmod 600 $PASSWORD_FILE && test -s $PASSWORD_FILE"
+            logger?.i("[+] Configuring TigerVNC authentication")
+            if (!runContainerCommandRaw(containerName, passwordCommand)) {
+                logger?.e("[-] Could not create the TigerVNC password file")
+                return false
+            }
+            logger?.i("[+] TigerVNC password file ready")
+        } else if (!needsMirror) {
+            if (!runContainerCommandRaw(containerName, "rm -f $PASSWORD_FILE")) {
+                logger?.e("[-] Could not clear the previous Manager-owned VNC password file")
+                return false
+            }
+            logger?.i("[VNC] • Authentication: none for this Start")
+        }
+
         if (!needsMirror) {
             val launcher = sessionLauncher(session)
-            val writeLauncher = "mkdir -p /usr/local/bin /root/.vnc && printf '%s' ${shellQuote(launcher)} > $SESSION_SCRIPT && chmod 755 $SESSION_SCRIPT"
-            if (!runContainerCommand(containerName, "Writing user-aware VNC session launcher for ${session.label}", writeLauncher, logger, false)) return false
+            val writeLauncher =
+                "mkdir -p /usr/local/bin /root/.vnc && " +
+                    "printf '%s' ${shellQuote(launcher)} > $SESSION_SCRIPT && " +
+                    "chmod 755 $SESSION_SCRIPT"
+            if (!runContainerCommand(
+                    containerName,
+                    "Writing user-aware VNC session launcher for ${session.label}",
+                    writeLauncher,
+                    logger,
+                    logCommand = false
+                )) return false
         }
+
         return true
     }
 
-    private suspend fun installTigerVnc(containerName: String, platform: ContainerPlatform, needsMirror: Boolean, logger: ContainerLogger?): Boolean {
+    private suspend fun installTigerVnc(
+        containerName: String,
+        platform: ContainerPlatform,
+        needsMirror: Boolean,
+        logger: ContainerLogger?
+    ): Boolean {
         val command = when (platform) {
-            ContainerPlatform.ALPINE -> "apk update && apk add tigervnc"
+            ContainerPlatform.ALPINE ->
+                "apk update && apk add tigervnc"
+
             ContainerPlatform.UBUNTU -> {
-                val packages = if (needsMirror) "tigervnc-scraping-server tigervnc-tools" else "tigervnc-standalone-server tigervnc-tools"
-                "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $packages"
+                val packages = if (needsMirror) {
+                    "tigervnc-scraping-server tigervnc-tools"
+                } else {
+                    "tigervnc-standalone-server tigervnc-tools"
+                }
+                "DEBIAN_FRONTEND=noninteractive apt-get update && " +
+                    "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $packages"
             }
         }
-        return runContainerCommand(containerName, "Installing TigerVNC (${platform.label})", command, logger)
+        return runContainerCommand(
+            containerName,
+            "Installing TigerVNC (${platform.label})",
+            command,
+            logger
+        )
     }
 
-    private suspend fun ensureContainerReady(containerName: String, logger: ContainerLogger?): VncRuntimeLease? {
+    private suspend fun ensureContainerReady(
+        containerName: String,
+        logger: ContainerLogger?
+    ): VncRuntimeLease? {
         val (initialStatus, initialPid) = ContainerManager.getContainerRuntimeStatePublic(containerName)
         val restoreOnFailure = initialStatus == ContainerStatus.STOPPED
         when (initialStatus) {
-            ContainerStatus.RUNNING -> logger?.i("[+] Container already running${if (initialPid != null) " (PID=$initialPid)" else ""}")
-            ContainerStatus.STOPPED, ContainerStatus.UNKNOWN -> ContainerManager.startContainer(containerName, logger)
+            ContainerStatus.RUNNING -> logger?.i(
+                "[+] Container already running${if (initialPid != null) " (PID=$initialPid)" else ""}"
+            )
+
+            ContainerStatus.STOPPED, ContainerStatus.UNKNOWN -> {
+                logger?.i("[*] Starting container for VNC...")
+                ContainerManager.startContainer(containerName, logger)
+            }
         }
+
         val deadline = System.nanoTime() + 15_000_000_000L
         while (true) {
-            if (probeContainer(containerName, "printf '%s\\n' __SAAS_VNC_READY__")) return VncRuntimeLease(restoreOnFailure)
+            if (probeContainer(containerName, "printf '%s\\n' __SAAS_VNC_READY__")) {
+                logger?.i("[+] Container command channel ready")
+                return VncRuntimeLease(restoreStoppedOnFailure = restoreOnFailure)
+            }
             if (System.nanoTime() >= deadline) {
+                logger?.e("[-] Container did not become ready for VNC commands")
                 if (restoreOnFailure) restoreStoppedState(containerName, logger)
                 return null
             }
@@ -245,34 +451,89 @@ object VncServerManager {
     }
 
     private suspend fun restoreStoppedState(containerName: String, logger: ContainerLogger?) {
+        logger?.i("[*] Restoring stopped container state after VNC failure...")
         ContainerManager.stopContainer(containerName, logger)
     }
 
-    private suspend fun stopIntegratedGraphicService(containerName: String, logger: ContainerLogger?): Boolean {
-        val stopped = runContainerCommandRaw(containerName, VncRuntimeSafety.stopIntegratedGraphicService())
-        if (stopped) logger?.i("[+] Standalone VNC isolated from the Integrated X11 startup service")
-        else logger?.w("[!] Integrated X11 startup service stop could not be confirmed")
+    private suspend fun stopIntegratedGraphicService(
+        containerName: String,
+        logger: ContainerLogger?
+    ): Boolean {
+        val stopped = runContainerCommandRaw(
+            containerName,
+            VncRuntimeSafety.stopIntegratedGraphicService()
+        )
+        if (stopped) {
+            logger?.i("[+] Standalone VNC isolated from the Integrated X11 startup service")
+        } else {
+            logger?.w("[!] Integrated X11 startup service stop could not be confirmed")
+        }
         return stopped
     }
 
-    private fun sessionLauncher(session: GraphicSession): String = GraphicSessionInitFiles.vncSessionScript(session, "/bin/sh")
+    private fun sessionLauncher(session: GraphicSession): String =
+        GraphicSessionInitFiles.vncSessionScript(session, "/bin/sh")
 
-    private fun standaloneLaunchCommand(displayNumber: Int, port: Int, settings: VncLaunchSettings, passwordEnabled: Boolean): String {
-        val argv = TigerVncCommandOptions.standalone(settings, displayNumber, port, PASSWORD_FILE.takeIf { passwordEnabled }).joinToString(" ") { shellQuote(it) }
-        return "mkdir -p /root/.vnc /tmp/.X11-unix $STATE_DIR && chmod 1777 /tmp/.X11-unix && server=\$(command -v Xtigervnc 2>/dev/null || command -v Xvnc 2>/dev/null); [ -n \"\$server\" ] || exit 1; rm -f /tmp/.X${displayNumber}-lock; nohup \"\$server\" $argv >$SERVER_LOG 2>&1 & server_pid=\$!; " + VncRuntimeSafety.recordLease(STATE_DIR, "server", "server_pid") + "; printf '%s\\n' standalone > $STATE_DIR/mode; printf '%s\\n' $port > $STATE_DIR/port; printf '%s\\n' $displayNumber > $STATE_DIR/display"
+    private fun standaloneLaunchCommand(
+        displayNumber: Int,
+        port: Int,
+        settings: VncLaunchSettings,
+        passwordEnabled: Boolean
+    ): String {
+        val argv = TigerVncCommandOptions.standalone(
+            settings = settings,
+            displayNumber = displayNumber,
+            port = port,
+            passwordFile = PASSWORD_FILE.takeIf { passwordEnabled }
+        ).joinToString(" ") { shellQuote(it) }
+
+        return "mkdir -p /root/.vnc /tmp/.X11-unix $STATE_DIR && chmod 1777 /tmp/.X11-unix && " +
+            "server=\$(command -v Xtigervnc 2>/dev/null || command -v Xvnc 2>/dev/null); " +
+            "[ -n \"\$server\" ] || exit 1; " +
+            "rm -f /tmp/.X${displayNumber}-lock; " +
+            "nohup \"\$server\" $argv >$SERVER_LOG 2>&1 & " +
+            "server_pid=\$!; " +
+            VncRuntimeSafety.recordLease(STATE_DIR, "server", "server_pid") + "; " +
+            "printf '%s\\n' standalone > $STATE_DIR/mode; " +
+            "printf '%s\\n' $port > $STATE_DIR/port; " +
+            "printf '%s\\n' $displayNumber > $STATE_DIR/display"
     }
 
-    private fun mirrorLaunchCommand(displayName: String, port: Int, settings: VncLaunchSettings): String {
-        val argv = TigerVncCommandOptions.mirror(settings, displayName, port, PASSWORD_FILE).joinToString(" ") { shellQuote(it) }
-        return "mkdir -p /root/.vnc $STATE_DIR && server=\$(command -v x0vncserver 2>/dev/null); [ -n \"\$server\" ] || exit 1; nohup \"\$server\" $argv >$SERVER_LOG 2>&1 & server_pid=\$!; " + VncRuntimeSafety.recordLease(STATE_DIR, "server", "server_pid") + "; printf '%s\\n' mirror > $STATE_DIR/mode; printf '%s\\n' $port > $STATE_DIR/port; printf '%s\\n' ${shellQuote(displayName)} > $STATE_DIR/display"
+    private fun mirrorLaunchCommand(
+        displayName: String,
+        port: Int,
+        settings: VncLaunchSettings
+    ): String {
+        val argv = TigerVncCommandOptions.mirror(
+            settings = settings,
+            displayName = displayName,
+            port = port,
+            passwordFile = PASSWORD_FILE
+        ).joinToString(" ") { shellQuote(it) }
+
+        return "mkdir -p /root/.vnc $STATE_DIR && " +
+            "server=\$(command -v x0vncserver 2>/dev/null); [ -n \"\$server\" ] || exit 1; " +
+            "nohup \"\$server\" $argv >$SERVER_LOG 2>&1 & " +
+            "server_pid=\$!; " +
+            VncRuntimeSafety.recordLease(STATE_DIR, "server", "server_pid") + "; " +
+            "printf '%s\\n' mirror > $STATE_DIR/mode; " +
+            "printf '%s\\n' $port > $STATE_DIR/port; " +
+            "printf '%s\\n' ${shellQuote(displayName)} > $STATE_DIR/display"
     }
 
     private suspend fun findFreeVirtualDisplay(containerName: String): Int? {
-        val command = "n=1; while [ \"\$n\" -le 20 ]; do if [ ! -S /tmp/.X11-unix/X\$n ] && [ ! -e /tmp/.X\$n-lock ]; then printf '%s\\n' \"\$n\"; exit 0; fi; n=\$((n+1)); done; exit 1"
+        val command =
+            "n=1; while [ \"\$n\" -le 20 ]; do " +
+                "if [ ! -S /tmp/.X11-unix/X\$n ] && [ ! -e /tmp/.X\$n-lock ]; then " +
+                "printf '%s\\n' \"\$n\"; exit 0; fi; n=\$((n+1)); done; exit 1"
         return runContainerCapture(containerName, command).firstOrNull()?.trim()?.toIntOrNull()
     }
 
-    private suspend fun waitForPort(containerName: String, port: Int, timeoutMillis: Long = 10_000L): Boolean {
+    private suspend fun waitForPort(
+        containerName: String,
+        port: Int,
+        timeoutMillis: Long = 10_000L
+    ): Boolean {
         val deadline = System.nanoTime() + timeoutMillis * 1_000_000L
         while (true) {
             if (isPortListening(containerName, port)) return true
@@ -281,73 +542,154 @@ object VncServerManager {
         }
     }
 
-    private fun isPortListening(containerName: String, port: Int): Boolean = probeContainer(containerName, portListeningCommand(port))
-    internal fun portListeningCommand(port: Int): String = VncRuntimeSafety.listeningPort(port)
+    private fun isPortListening(containerName: String, port: Int): Boolean =
+        probeContainer(containerName, portListeningCommand(port))
+
+    internal fun portListeningCommand(port: Int): String =
+        VncRuntimeSafety.listeningPort(port)
 
     private suspend fun detectPlatform(containerName: String): ContainerPlatform? = when {
         probeContainer(containerName, "command -v apk >/dev/null 2>&1") -> ContainerPlatform.ALPINE
-        probeContainer(containerName, "command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1") -> ContainerPlatform.UBUNTU
+        probeContainer(
+            containerName,
+            "command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1"
+        ) -> ContainerPlatform.UBUNTU
         else -> null
     }
 
-    private suspend fun logConnectionAddresses(containerName: String, port: Int, displayName: String, mirror: Boolean, logger: ContainerLogger?) {
+    private suspend fun logConnectionAddresses(
+        containerName: String,
+        port: Int,
+        displayName: String,
+        mirror: Boolean,
+        logger: ContainerLogger?
+    ) {
         logger?.i("")
         logger?.i("--- VNC Connection ---")
         logger?.i("[CTX] TCP port: $port")
-        if (mirror) logger?.i("[CTX] Shared Integrated X11 display: $displayName") else logger?.i("[CTX] VNC X display: $displayName")
-        val containerIps = runContainerCapture(containerName, "hostname -I 2>/dev/null || ip -4 -o addr show scope global 2>/dev/null | sed -n 's/.* inet \\([0-9.]*\\)\\/.*/\\1/p'").flatMap { it.trim().split(Regex("\\s+")) }.filter(::isIpv4Address).distinct()
-        containerIps.forEach { logger?.i("[+] Container: $it:$port") }
+        if (mirror) {
+            logger?.i("[CTX] Shared Integrated X11 display: $displayName")
+        } else {
+            logger?.i("[CTX] VNC X display: $displayName")
+        }
+
+        val containerIps = runContainerCapture(
+            containerName,
+            "hostname -I 2>/dev/null || ip -4 -o addr show scope global 2>/dev/null | sed -n 's/.* inet \\([0-9.]*\\)\\/.*/\\1/p'"
+        ).flatMap { it.trim().split(Regex("\\s+")) }
+            .filter(::isIpv4Address)
+            .distinct()
+
+        if (containerIps.isEmpty()) {
+            logger?.w("[!] Container IPv4 address could not be resolved")
+        } else {
+            containerIps.forEach { ip -> logger?.i("[+] Container: $ip:$port") }
+        }
+
         val hostIps = androidHostIpv4Addresses()
         val netMode = ContainerManager.getContainerInfo(containerName)?.netMode?.lowercase()
-        hostIps.forEach { logger?.i("[+] Android/LAN: $it:$port") }
-        if (hostIps.isNotEmpty() && netMode != "host") logger?.w("[!] Container network mode is ${netMode ?: "unknown"}; Android/LAN addresses may require DroidSpaces NAT/port forwarding")
+        hostIps.forEach { ip ->
+            logger?.i("[+] Android/LAN: $ip:$port")
+        }
+        if (hostIps.isNotEmpty() && netMode != "host") {
+            logger?.w(
+                "[!] Container network mode is ${netMode ?: "unknown"}; Android/LAN addresses may require DroidSpaces NAT/port forwarding"
+            )
+        }
         logger?.i("[+] Connect with any standard VNC client using one of the reachable addresses above")
     }
 
-    private fun androidHostIpv4Addresses(): List<String> = try {
-        Shell.cmd("ip -4 -o addr show scope global 2>/dev/null").exec().out.mapNotNull { Regex("\\binet\\s+([0-9.]+)/").find(it)?.groupValues?.getOrNull(1) }.filter(::isIpv4Address).distinct()
-    } catch (_: Exception) { emptyList() }
+    private fun androidHostIpv4Addresses(): List<String> {
+        return try {
+            val result = Shell.cmd("ip -4 -o addr show scope global 2>/dev/null").exec()
+            result.out.mapNotNull { line ->
+                Regex("\\binet\\s+([0-9.]+)/").find(line)?.groupValues?.getOrNull(1)
+            }.filter(::isIpv4Address).distinct()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
 
     private fun isIpv4Address(value: String): Boolean {
         val parts = value.split('.')
-        return parts.size == 4 && parts.all { it.toIntOrNull() in 0..255 } && value != "127.0.0.1"
+        return parts.size == 4 && parts.all { part ->
+            val number = part.toIntOrNull() ?: return@all false
+            number in 0..255
+        } && value != "127.0.0.1"
     }
 
-    private suspend fun logContainerFileTail(containerName: String, path: String, logger: ContainerLogger?) {
-        runContainerCapture(containerName, "tail -n 30 ${shellQuote(path)} 2>/dev/null").forEach { logger?.w(it) }
+    private suspend fun logContainerFileTail(
+        containerName: String,
+        path: String,
+        logger: ContainerLogger?
+    ) {
+        val lines = runContainerCapture(containerName, "tail -n 30 ${shellQuote(path)} 2>/dev/null")
+        if (lines.isEmpty()) return
+        logger?.w("[!] Last lines from $path:")
+        lines.forEach { line -> logger?.w(line) }
     }
 
-    private fun probeContainer(containerName: String, command: String): Boolean = try {
-        Shell.cmd(containerHostCommand(containerName, command) + " 2>/dev/null").exec().isSuccess
-    } catch (_: Exception) { false }
+    private fun probeContainer(containerName: String, command: String): Boolean =
+        try {
+            Shell.cmd(containerHostCommand(containerName, command) + " 2>/dev/null").exec().isSuccess
+        } catch (_: Exception) {
+            false
+        }
 
-    private fun runContainerCapture(containerName: String, command: String): List<String> = try {
-        val result = Shell.cmd(containerHostCommand(containerName, command) + " 2>/dev/null").exec()
-        if (result.isSuccess) result.out else emptyList()
-    } catch (_: Exception) { emptyList() }
+    private fun runContainerCapture(containerName: String, command: String): List<String> =
+        try {
+            val result = Shell.cmd(containerHostCommand(containerName, command) + " 2>/dev/null").exec()
+            if (result.isSuccess) result.out else emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
 
-    private suspend fun runContainerCommand(containerName: String, title: String, command: String, logger: ContainerLogger?, logCommand: Boolean = true): Boolean {
+    private suspend fun runContainerCommand(
+        containerName: String,
+        title: String,
+        command: String,
+        logger: ContainerLogger?,
+        logCommand: Boolean = true
+    ): Boolean {
         logger?.i("[+] $title")
         if (logCommand) logger?.i("root@$containerName: $command")
+
         val hostCommand = containerHostCommand(containerName, command)
-        val result = if (logger == null) Shell.cmd(hostCommand).exec() else {
-            val stdout = object : CallbackList<String>() { override fun onAddElement(line: String) { logger.logImmediate(Log.INFO, line) } }
-            val stderr = object : CallbackList<String>() { override fun onAddElement(line: String) { logger.logImmediate(Log.WARN, line) } }
+        val result = if (logger == null) {
+            Shell.cmd(hostCommand).exec()
+        } else {
+            val stdout = object : CallbackList<String>() {
+                override fun onAddElement(line: String) {
+                    logger.logImmediate(Log.INFO, line)
+                }
+            }
+            val stderr = object : CallbackList<String>() {
+                override fun onAddElement(line: String) {
+                    logger.logImmediate(Log.WARN, line)
+                }
+            }
             Shell.cmd(hostCommand).to(stdout, stderr).exec()
         }
         if (!result.isSuccess) {
             logger?.e("[-] FAIL (exit ${result.code})")
+            logger?.i("")
             return false
         }
+        logger?.i("[+] OK")
+        logger?.i("")
         return true
     }
 
-    private fun runContainerCommandRaw(containerName: String, command: String): Boolean = try {
-        Shell.cmd(containerHostCommand(containerName, command)).exec().isSuccess
-    } catch (_: Exception) { false }
+    private fun runContainerCommandRaw(containerName: String, command: String): Boolean =
+        try {
+            Shell.cmd(containerHostCommand(containerName, command)).exec().isSuccess
+        } catch (_: Exception) {
+            false
+        }
 
     private fun containerHostCommand(containerName: String, command: String): String =
         "${Constants.DS_BINARY_PATH} --name=${shellQuote(containerName)} run sh -c ${shellQuote(command)}"
 
-    private fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
+    private fun shellQuote(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
 }
