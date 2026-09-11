@@ -29,7 +29,7 @@ object OperationNotifications {
     fun createChannel(context: Context) {
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, "Operation progress", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Progress and results of minimized container and monitor operations"
+                description = "Progress and results of minimized container, display and VNC operations"
                 setShowBadge(false)
             }
         )
@@ -42,29 +42,43 @@ object OperationNotifications {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra(OWNER, operation.owner.key)
         }
-        val open = PendingIntent.getActivity(context, 0, openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val open = PendingIntent.getActivity(
+            context,
+            0,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         val closeIntent = Intent(context, OperationNotificationReceiver::class.java).apply {
             data = openIntent.data
             putExtra(OWNER, operation.owner.key)
             putExtra(GENERATION, operation.generation)
         }
-        val close = PendingIntent.getBroadcast(context, 0, closeIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val close = PendingIntent.getBroadcast(
+            context,
+            0,
+            closeIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         val text = if (operation.running) {
-            // Only semantic action lines; connection details and passwords never enter the shade.
             operation.snapshot().logs.lastOrNull { (_, line) ->
                 line.matches(Regex("\\[(INSTALL|CONTAINER|SESSION|X11|AUDIO|VNC)\\] [A-Za-z].*"))
             }?.second?.substringAfter("] ") ?: "In progress"
-        } else operation.result.ifBlank { "Logs saved" }
+        } else {
+            operation.result.ifBlank { "Logs saved" }
+        }
+
         return NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_operation_log)
             .setContentTitle(operation.title)
             .setContentText(text)
-            .setSubText(when (operation.owner.area) {
-                OperationArea.MONITOR -> "Monitor ${operation.owner.target.toIntOrNull()?.plus(1) ?: operation.owner.target}"
-                else -> operation.owner.target.takeUnless { it == "__all__" } ?: "All containers"
-            })
+            .setSubText(
+                when (operation.owner.area) {
+                    OperationArea.MONITOR ->
+                        "Monitor ${operation.owner.target.toIntOrNull()?.plus(1) ?: operation.owner.target}"
+                    OperationArea.VNC -> "VNC Viewer"
+                    else -> operation.owner.target.takeUnless { it == "__all__" } ?: "All containers"
+                }
+            )
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(open)
             .setDeleteIntent(close)
@@ -72,11 +86,13 @@ object OperationNotifications {
             .setAutoCancel(!operation.running)
             .setOnlyAlertOnce(true)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-            .setCategory(if (operation.running) NotificationCompat.CATEGORY_PROGRESS else NotificationCompat.CATEGORY_STATUS)
+            .setCategory(
+                if (operation.running) NotificationCompat.CATEGORY_PROGRESS
+                else NotificationCompat.CATEGORY_STATUS
+            )
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setGroup(GROUP_KEY)
             .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_SUMMARY)
-            // Package managers do not expose one reliable total across all phases.
             .setProgress(0, 0, operation.running)
             .addAction(0, "View logs", open)
             .apply { if (!operation.running) addAction(0, "Close", close) }
@@ -120,8 +136,14 @@ object OperationNotifications {
     }
 
     fun post(context: Context, operation: LogOperation) {
-        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context,
-                Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+        if (
+            Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) return
+
         context.getSystemService(NotificationManager::class.java)
             .notify(operation.notificationId, build(context, operation))
         refreshSummary(context)
@@ -136,7 +158,9 @@ object OperationNotifications {
 
 class OperationNotificationReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val owner = OperationOwner.parse(intent.getStringExtra(OperationNotifications.OWNER) ?: return) ?: return
+        val owner = OperationOwner.parse(
+            intent.getStringExtra(OperationNotifications.OWNER) ?: return
+        ) ?: return
         val generation = intent.getStringExtra(OperationNotifications.GENERATION) ?: return
         val pending = goAsync()
         CoroutineScope(Dispatchers.Main.immediate).launch {
@@ -147,7 +171,9 @@ class OperationNotificationReceiver : BroadcastReceiver() {
                 if (!operation.running && operation.generation == generation) {
                     OperationNotifications.dismiss(context, operation)
                 }
-            } finally { pending.finish() }
+            } finally {
+                pending.finish()
+            }
         }
     }
 }

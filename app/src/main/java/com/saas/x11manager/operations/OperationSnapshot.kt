@@ -5,7 +5,8 @@ import java.io.DataOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 
-enum class OperationArea { HOME, SETUP, MONITOR }
+enum class OperationArea { HOME, SETUP, MONITOR, VNC }
+
 data class OperationOwner(val area: OperationArea, val target: String) {
     val key: String get() = "${area.name}:$target"
     companion object {
@@ -41,6 +42,7 @@ data class OperationSnapshot(
 object OperationArchive {
     const val MAX_ENTRIES = 1500
     private const val VERSION = 1
+
     fun write(snapshot: OperationSnapshot, output: OutputStream) {
         DataOutputStream(output).apply {
             writeInt(VERSION)
@@ -70,7 +72,15 @@ object OperationArchive {
         val detail = readUTF()
         val time = readLong()
         val count = readInt().also { require(it in 0..MAX_ENTRIES) }
-        OperationSnapshot(owner, generation, title, status, result, detail,
-            List(count) { readInt() to readUTF() }, time)
+        OperationSnapshot(
+            owner,
+            generation,
+            title,
+            status,
+            result,
+            detail,
+            List(count) { readInt() to readUTF() },
+            time
+        )
     }
 }
