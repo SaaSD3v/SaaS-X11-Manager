@@ -66,6 +66,17 @@ class LogOperation internal constructor(val owner: OperationOwner, private val s
         changed(immediate = true)
     }
 
+    /**
+     * Completes the operation and waits until every log write queued before the
+     * completion marker has reached AtomicFile. Callers should use this before
+     * releasing lifecycle ownership so a process death cannot turn a completed
+     * operation back into a stale RUNNING snapshot on disk.
+     */
+    suspend fun finishDurably(success: Boolean, message: String) {
+        finish(success, message)
+        store.awaitPersisted()
+    }
+
     fun changed(immediate: Boolean = false) {
         dirty = true
         updatedAt = System.currentTimeMillis()
