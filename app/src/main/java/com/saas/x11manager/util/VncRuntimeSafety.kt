@@ -10,57 +10,57 @@ internal object VncRuntimeSafety {
 
     fun stopOwnedRuntime(stateDir: String): String = """
         owned_pid() {
-            role="$1"
-            pidfile="$stateDir/$1.pid"
-            startfile="$stateDir/$1.start"
-            [ -f "$pidfile" ] || return 1
-            pid=$(cat "$pidfile" 2>/dev/null)
-            case "$pid" in ''|*[!0-9]*) return 1 ;; esac
-            kill -0 "$pid" 2>/dev/null || return 1
-            actual=$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null)
-            case "$actual" in ''|*[!0-9]*) return 1 ;; esac
-            expected=$(cat "$startfile" 2>/dev/null || true)
-            if [ -n "$expected" ]; then
-                [ "$actual" = "$expected" ] || return 2
+            role="${'$'}1"
+            pidfile="$stateDir/${'$'}1.pid"
+            startfile="$stateDir/${'$'}1.start"
+            [ -f "${'$'}pidfile" ] || return 1
+            pid=${'$'}(cat "${'$'}pidfile" 2>/dev/null)
+            case "${'$'}pid" in ''|*[!0-9]*) return 1 ;; esac
+            kill -0 "${'$'}pid" 2>/dev/null || return 1
+            actual=${'$'}(awk '{print ${'$'}22}' "/proc/${'$'}pid/stat" 2>/dev/null)
+            case "${'$'}actual" in ''|*[!0-9]*) return 1 ;; esac
+            expected=${'$'}(cat "${'$'}startfile" 2>/dev/null || true)
+            if [ -n "${'$'}expected" ]; then
+                [ "${'$'}actual" = "${'$'}expected" ] || return 2
             else
-                cmd=$(tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
-                case "$role:$cmd" in
+                cmd=${'$'}(tr '\000' ' ' < "/proc/${'$'}pid/cmdline" 2>/dev/null || true)
+                case "${'$'}role:${'$'}cmd" in
                     server:*Xtigervnc*|server:*Xvnc*|server:*x0vncserver*|session:*saas-vnc-session*) ;;
                     *) return 2 ;;
                 esac
             fi
-            if [ "$role" = server ]; then
-                cmd=$(tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
-                case "$cmd" in *Xtigervnc*|*Xvnc*|*x0vncserver*) ;; *) return 2 ;; esac
+            if [ "${'$'}role" = server ]; then
+                cmd=${'$'}(tr '\000' ' ' < "/proc/${'$'}pid/cmdline" 2>/dev/null || true)
+                case "${'$'}cmd" in *Xtigervnc*|*Xvnc*|*x0vncserver*) ;; *) return 2 ;; esac
             fi
-            printf '%s\n' "$pid"
+            printf '%s\n' "${'$'}pid"
         }
 
         unsafe=0
         for role in session server; do
-            pid=$(owned_pid "$role"); rc=$?
-            if [ "$rc" -eq 0 ]; then
-                kill "$pid" 2>/dev/null || true
-            elif [ "$rc" -eq 2 ]; then
+            pid=${'$'}(owned_pid "${'$'}role"); rc=${'$'}?
+            if [ "${'$'}rc" -eq 0 ]; then
+                kill "${'$'}pid" 2>/dev/null || true
+            elif [ "${'$'}rc" -eq 2 ]; then
                 unsafe=1
             fi
         done
         sleep 1
         for role in session server; do
-            pid=$(owned_pid "$role"); rc=$?
-            if [ "$rc" -eq 0 ]; then
-                kill -9 "$pid" 2>/dev/null || true
-            elif [ "$rc" -eq 2 ]; then
+            pid=${'$'}(owned_pid "${'$'}role"); rc=${'$'}?
+            if [ "${'$'}rc" -eq 0 ]; then
+                kill -9 "${'$'}pid" 2>/dev/null || true
+            elif [ "${'$'}rc" -eq 2 ]; then
                 unsafe=1
             fi
         done
         sleep 1
         for role in session server; do
-            owned_pid "$role" >/dev/null 2>&1; rc=$?
-            [ "$rc" -eq 0 ] && unsafe=1
-            [ "$rc" -eq 2 ] && unsafe=1
+            owned_pid "${'$'}role" >/dev/null 2>&1; rc=${'$'}?
+            [ "${'$'}rc" -eq 0 ] && unsafe=1
+            [ "${'$'}rc" -eq 2 ] && unsafe=1
         done
-        if [ "$unsafe" -eq 0 ]; then
+        if [ "${'$'}unsafe" -eq 0 ]; then
             rm -rf "$stateDir"
             exit 0
         fi
