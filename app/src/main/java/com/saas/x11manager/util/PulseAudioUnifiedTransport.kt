@@ -7,9 +7,10 @@ import kotlinx.coroutines.withContext
 /**
  * Final HOST/NAT data-path adapter for the single Manager-owned PulseAudio core.
  *
- * A finite authenticated PCM stream is the authoritative data-path proof.
- * `pactl info` remains useful control-plane diagnostics, but a transient recheck
- * after successful PCM playback must not invalidate a working transport.
+ * Validation status:
+ * - HOST uses the authenticated loopback transport from the working shell script.
+ * - NAT uses the DroidSpaces runtime topology and remains experimental until
+ *   the complete APK path is physically verified on-device.
  *
  * This object never starts another PulseAudio daemon and never owns container,
  * X11, VNC, or graphical-session lifecycle.
@@ -27,6 +28,8 @@ object PulseAudioUnifiedTransport {
 
     private const val BASE_PORT = 4713
     private const val MAX_PORT_SHIFT = 64
+
+    // DroidSpaces v6.5.0 uses this address in both full-bridge and bridgeless NAT.
     private const val DROIDSPACES_NAT_GATEWAY = "172.28.0.1"
 
     private const val MANAGED = "SaaS X11 Manager Audio Configuration"
@@ -34,11 +37,13 @@ object PulseAudioUnifiedTransport {
     private const val END = "# END $MANAGED"
 
     private data class TermuxOwner(val uid: Int)
+
     private data class DirectResult(
         val exitCode: Int,
         val stdout: List<String>,
         val stderr: List<String>
     )
+
     private data class Listener(
         val port: Int,
         val moduleId: Int,
@@ -55,6 +60,7 @@ object PulseAudioUnifiedTransport {
 
         val info = ContainerManager.getContainerInfo(containerName)
             ?: return@withContext fail(logger, "Container $containerName was not found")
+
         val mode = info.netMode.trim().lowercase()
         if (mode != "host" && mode != "nat") {
             return@withContext fail(
@@ -63,52 +69,98 @@ object PulseAudioUnifiedTransport {
             )
         }
         if (!info.isRunning) {
-            return@withContext fail(logger, "Container $containerName is not running; audio client was not changed")
+            return@withContext fail(
+                logger,
+                "Container $containerName is not running; audio client was not changed"
+            )
         }
 
-        val owner = termuxOwner() ?: return@withContext fail(logger, "Termux owner could not be resolved")
+        val owner = termuxOwner()
+            ?: return@withContext fail(logger, "Termux owner could not be resolved")
+
         logger?.i("[CTX] Audio control executor: private UNIX socket via Termux UID ${owner.uid}")
         logger?.i("[CTX] TCP self-probe from Manager: disabled")
         logger?.i("[CTX] Listener verifier: PulseAudio module table + DroidSpaces container data path")
 
         val sink = verifyCore(owner, logger)
-            ?: return@withContext fail(logger, "Manager audio core is not reachable through the private UNIX control socket")
+            ?: return@withContext fail(
+                logger,
+                "Manager audio core is not reachable through the private UNIX control socket"
+            )
+
         val endpoint = when (mode) {
             "host" -> "127.0.0.1"
             else -> resolveNatEndpoint(info, logger)
         } ?: return@withContext fail(logger, "Automatic NAT audio endpoint discovery failed")
+
         val cookieOctal = cookieOctal(owner, logger)
-            ?: return@withContext fail(logger, "Could not prepare the private PulseAudio cookie for the container")
+            ?: return@withContext fail(
+                logger,
+                "Could not prepare the private PulseAudio cookie for the container"
+            )
 
         logger?.i("[CTX] Audio net_mode: $mode")
         logger?.i("[CTX] Audio host endpoint: $endpoint (port selected automatically)")
-        if (mode == "nat") logNatEndpointDiagnostics(endpoint, logger)
+        if (mode == "nat") {
+            logger?.i("[CTX] NAT transport status: experimental until physical APK verification")
+            logNatEndpointDiagnostics(endpoint, logger)
+        }
 
         val maxPort = (BASE_PORT + MAX_PORT_SHIFT).coerceAtMost(65535)
         var firstLoadFailureLogged = false
+
         for (port in BASE_PORT..maxPort) {
             val reservedBy = if (mode == "nat") configuredPortForwardOwner(port) else null
             if (reservedBy != null) {
-                if (port == BASE_PORT) logger?.w("[!] Port $port is reserved by DroidSpaces TCP port-forward in $reservedBy; selecting another audio port automatically")
+                if (port == BASE_PORT) {
+                    logger?.w(
+                        "[!] Port $port is reserved by DroidSpaces TCP port-forward in $reservedBy; " +
+                            "selecting another audio port automatically"
+                    )
+                }
                 continue
             }
 
-            val listener = loadOrReuseListener(owner, endpoint, port, sink, logger, !firstLoadFailureLogged)
+            val listener = loadOrReuseListener(
+                owner = owner,
+                ip = endpoint,
+                port = port,
+                expectedSink = sink,
+                logger = logger,
+                emitFullFailure = !firstLoadFailureLogged
+            )
+
             if (listener == null) {
                 firstLoadFailureLogged = true
-                if (port == BASE_PORT) logger?.w("[!] Port $port could not load an authenticated listener on $endpoint; selecting another audio port automatically")
+                if (port == BASE_PORT) {
+                    logger?.w(
+                        "[!] Port $port could not load an authenticated listener on $endpoint; " +
+                            "selecting another audio port automatically"
+                    )
+                }
                 continue
             }
 
             val server = "tcp:$endpoint:$port"
-            if (!installContainerClient(containerName, server, cookieOctal, logger)) {
+            val configured = installContainerClient(containerName, server, cookieOctal, logger)
+
+            if (!configured) {
                 if (listener.createdNow) unloadListener(owner, listener.moduleId, logger)
                 logCoreDiagnostics(owner, logger)
                 return@withContext false
             }
 
             if (!verifyContainerClientDetailed(containerName, server, sink, logger)) {
-                logger?.w("[AUDIO] ! Post-PCM pactl control-plane recheck was not confirmed; verified PCM transport is retained")
+                logger?.w(
+                    "[!] Listener module ${listener.moduleId} exists, but the container could not " +
+                        "reach/authenticate $server"
+                )
+                if (listener.createdNow) unloadListener(owner, listener.moduleId, logger)
+                logCoreDiagnostics(owner, logger)
+                return@withContext fail(
+                    logger,
+                    "PulseAudio listener was loaded but the DroidSpaces container data path failed"
+                )
             }
 
             if (port != BASE_PORT) logger?.i("[+] Selected audio port: $port")
@@ -119,7 +171,11 @@ object PulseAudioUnifiedTransport {
         }
 
         logCoreDiagnostics(owner, logger)
-        fail(logger, "Could not create an authenticated PulseAudio listener on $endpoint using ports $BASE_PORT-$maxPort")
+        fail(
+            logger,
+            "Could not create an authenticated PulseAudio listener on $endpoint " +
+                "using ports $BASE_PORT-$maxPort"
+        )
     }
 
     private suspend fun fail(logger: ContainerLogger?, message: String): Boolean {
@@ -138,8 +194,12 @@ object PulseAudioUnifiedTransport {
         return try {
             val result = Shell.cmd(command).exec()
             if (!result.isSuccess) null
-            else result.out.firstOrNull()?.trim()?.toIntOrNull()?.takeIf { it > 0 }?.let(::TermuxOwner)
-        } catch (_: Exception) { null }
+            else result.out.firstOrNull()?.trim()?.toIntOrNull()
+                ?.takeIf { it > 0 }
+                ?.let(::TermuxOwner)
+        } catch (_: Exception) {
+            null
+        }
     }
 
     internal const val DIRECT_RC_MARKER = "__SAAS_DIRECT_RC__"
@@ -159,20 +219,34 @@ object PulseAudioUnifiedTransport {
             exit 0
         """.trimIndent()
 
+    /**
+     * Run as the Termux UID while keeping control on the already-running core's
+     * private UNIX socket. Changing UID does not intentionally enter a network
+     * namespace here.
+     */
     private fun execAsTermux(owner: TermuxOwner, command: String): DirectResult {
         val marker = DIRECT_RC_MARKER
         val wrapped = buildTermuxCommand(command)
+
         return try {
             val shellResult = Shell.cmd("su ${owner.uid} -c ${q(wrapped)}").exec()
             val rawOut = shellResult.out.toList()
             val markerLine = rawOut.lastOrNull { it.trim().startsWith(marker) }?.trim()
-            val exitCode = markerLine?.removePrefix(marker)?.toIntOrNull() ?: if (shellResult.isSuccess) 0 else 255
-            DirectResult(exitCode, rawOut.filterNot { it.trim().startsWith(marker) }, shellResult.err.toList())
-        } catch (e: Exception) { DirectResult(255, emptyList(), listOf(e.message ?: e.javaClass.simpleName)) }
+            val exitCode = markerLine?.removePrefix(marker)?.toIntOrNull()
+                ?: if (shellResult.isSuccess) 0 else 255
+            val out = rawOut.filterNot { it.trim().startsWith(marker) }
+            DirectResult(exitCode, out, shellResult.err.toList())
+        } catch (e: Exception) {
+            DirectResult(255, emptyList(), listOf(e.message ?: e.javaClass.simpleName))
+        }
     }
 
     private fun unixPactl(owner: TermuxOwner, arguments: String): DirectResult =
-        execAsTermux(owner, "PULSE_SERVER=${q("unix:$CONTROL")} PULSE_COOKIE=${q(COOKIE)} timeout 5 pactl $arguments")
+        execAsTermux(
+            owner,
+            "PULSE_SERVER=${q("unix:$CONTROL")} " +
+                "PULSE_COOKIE=${q(COOKIE)} timeout 5 pactl $arguments"
+        )
 
     private suspend fun verifyCore(owner: TermuxOwner, logger: ContainerLogger?): String? {
         val info = unixPactl(owner, "info")
@@ -183,26 +257,33 @@ object PulseAudioUnifiedTransport {
             logCoreDiagnostics(owner, logger)
             return null
         }
+
         val sinks = unixPactl(owner, "list short sinks")
         if (sinks.exitCode != 0) {
             logger?.w("[PA-CORE] timeout 5 pactl list short sinks exit=${sinks.exitCode}")
             logLines(logger, "[PA-CORE][stderr]", sinks.stderr)
             return null
         }
+
         val sink = when {
-            sinks.stdout.any { Regex("""\sAAudio_sink\s""").containsMatchIn(" $it ") } -> "AAudio_sink"
-            sinks.stdout.any { Regex("""\sOpenSL_ES_sink\s""").containsMatchIn(" $it ") } -> "OpenSL_ES_sink"
+            sinks.stdout.any { Regex("""\sAAudio_sink\s""").containsMatchIn(" $it ") } ->
+                "AAudio_sink"
+            sinks.stdout.any { Regex("""\sOpenSL_ES_sink\s""").containsMatchIn(" $it ") } ->
+                "OpenSL_ES_sink"
             else -> null
         } ?: run {
             logger?.w("[PA-CORE] No Android audio sink found")
             logLines(logger, "[PA-CORE][sinks]", sinks.stdout)
             return null
         }
+
         val setDefault = unixPactl(owner, "set-default-sink ${q(sink)}")
         if (setDefault.exitCode != 0) {
             logger?.w("[PA-CORE] Could not set default sink $sink")
+            logLines(logger, "[PA-CORE][stderr]", setDefault.stderr)
             return null
         }
+
         logger?.i("[+] Manager audio core ready ($sink, private UNIX control socket)")
         return sink
     }
@@ -217,30 +298,79 @@ object PulseAudioUnifiedTransport {
     ): Listener? {
         val before = unixPactl(owner, "list short modules")
         if (before.exitCode != 0) {
-            if (emitFullFailure) logLines(logger, "[PA-LOAD][stderr]", before.stderr)
+            if (emitFullFailure) {
+                logger?.w("[PA-LOAD] Could not list PulseAudio modules before listener load")
+                logLines(logger, "[PA-LOAD][stderr]", before.stderr)
+            }
             return null
         }
-        findListenerModule(before.stdout, ip, port)?.let {
-            logger?.i("[+] Reusing PulseAudio listener module $it on $ip:$port")
-            return Listener(port, it, expectedSink, false)
+
+        findListenerModule(before.stdout, ip, port)?.let { existing ->
+            logger?.i("[+] Reusing PulseAudio listener module $existing on $ip:$port")
+            return Listener(port, existing, expectedSink, createdNow = false)
         }
-        val load = unixPactl(owner, "load-module module-native-protocol-tcp ${q("listen=$ip")} ${q("port=$port")} ${q("auth-cookie=$COOKIE")}")
-        val id = load.stdout.asSequence().map { it.trim() }.firstOrNull { it.matches(Regex("""\d+""")) }?.toIntOrNull()
+
+        val arguments =
+            "load-module module-native-protocol-tcp " +
+                "${q("listen=$ip")} ${q("port=$port")} ${q("auth-cookie=$COOKIE")}"
+
+        logger?.i("[PA-LOAD] endpoint=$ip:$port")
+        val load = unixPactl(owner, arguments)
+        logger?.i("[PA-LOAD] exit=${load.exitCode}")
+        if (load.stdout.isNotEmpty()) {
+            logger?.i("[PA-LOAD] stdout=${load.stdout.joinToString(" ").take(400)}")
+        }
+        if (load.stderr.isNotEmpty()) {
+            logger?.w("[PA-LOAD] stderr=${load.stderr.joinToString(" ").take(400)}")
+        }
+
+        val id = load.stdout.asSequence()
+            .map { it.trim() }
+            .firstOrNull { it.matches(Regex("""\d+""")) }
+            ?.toIntOrNull()
+
         if (load.exitCode != 0 || id == null) {
             if (emitFullFailure) logCoreDiagnostics(owner, logger)
             return null
         }
+
         val after = unixPactl(owner, "list short modules")
-        if (after.exitCode != 0 || findListenerModule(after.stdout, ip, port, id) != id) {
+        if (after.exitCode != 0) {
+            logger?.w("[PA-MODULE] Could not verify module id=$id through UNIX control socket")
             unloadListener(owner, id, logger)
             if (emitFullFailure) logCoreDiagnostics(owner, logger)
             return null
         }
+
+        val verified = findListenerModule(after.stdout, ip, port, requiredId = id)
+        if (verified != id) {
+            logger?.w("[PA-MODULE] id=$id was returned but is missing from the server module table")
+            logLines(
+                logger,
+                "[PA-MODULE]",
+                after.stdout.filter { it.contains("module-native-protocol-tcp") }
+            )
+            unloadListener(owner, id, logger)
+            if (emitFullFailure) logCoreDiagnostics(owner, logger)
+            return null
+        }
+
+        after.stdout.firstOrNull { line ->
+            val fields = line.trim().split(Regex("""\s+"""), limit = 3)
+            fields.getOrNull(0) == id.toString() &&
+                fields.getOrNull(1) == "module-native-protocol-tcp"
+        }?.let { logger?.i("[PA-MODULE] $it") }
+
         logger?.i("[+] PulseAudio listener module loaded: id=$id endpoint=$ip:$port")
-        return Listener(port, id, expectedSink, true)
+        return Listener(port, id, expectedSink, createdNow = true)
     }
 
-    private fun findListenerModule(lines: List<String>, ip: String, port: Int, requiredId: Int? = null): Int? {
+    private fun findListenerModule(
+        lines: List<String>,
+        ip: String,
+        port: Int,
+        requiredId: Int? = null
+    ): Int? {
         for (line in lines) {
             val fields = line.trim().split(Regex("""\s+"""), limit = 3)
             val id = fields.getOrNull(0)?.toIntOrNull() ?: continue
@@ -254,12 +384,19 @@ object PulseAudioUnifiedTransport {
 
     private suspend fun unloadListener(owner: TermuxOwner, moduleId: Int, logger: ContainerLogger?) {
         val result = unixPactl(owner, "unload-module ${q(moduleId.toString())}")
-        if (result.exitCode != 0) logger?.w("[PA-UNLOAD] module=$moduleId exit=${result.exitCode}")
+        if (result.exitCode != 0) {
+            logger?.w("[PA-UNLOAD] module=$moduleId exit=${result.exitCode}")
+            logLines(logger, "[PA-UNLOAD][stderr]", result.stderr)
+        }
     }
 
     private suspend fun cookieOctal(owner: TermuxOwner, logger: ContainerLogger?): String? {
-        val result = execAsTermux(owner, PulseAudioCookieTransport.encodeCommand(COOKIE))
+        val result = execAsTermux(
+            owner,
+            PulseAudioCookieTransport.encodeCommand(COOKIE)
+        )
         if (result.exitCode != 0) {
+            logger?.w("[PA-COOKIE] encode exit=${result.exitCode}")
             logLines(logger, "[PA-COOKIE][stderr]", result.stderr)
             return null
         }
@@ -268,23 +405,60 @@ object PulseAudioUnifiedTransport {
 
     private suspend fun logCoreDiagnostics(owner: TermuxOwner, logger: ContainerLogger?) {
         val modules = unixPactl(owner, "list short modules")
-        modules.stdout.filter { it.contains("module-native-protocol-tcp") }.takeLast(12)
+        modules.stdout.filter { it.contains("module-native-protocol-tcp") }
+            .takeLast(12)
             .forEach { logger?.w("[PA-DIAG][module] $it") }
-        val result = execAsTermux(owner, "tail -n 80 ${q(PULSE_LOG)} 2>/dev/null || true")
-        result.stdout.filter { it.isNotBlank() }.takeLast(80).forEach { logger?.w("[PA-DIAG][log] $it") }
+
+        val result = execAsTermux(
+            owner,
+            "tail -n 80 ${q(PULSE_LOG)} 2>/dev/null || true"
+        )
+        result.stdout.filter { it.isNotBlank() }
+            .takeLast(80)
+            .forEach { logger?.w("[PA-DIAG][log] $it") }
     }
 
-    private suspend fun logLines(logger: ContainerLogger?, prefix: String, lines: List<String>, max: Int = 12) {
-        lines.filter { it.isNotBlank() }.takeLast(max).forEach { logger?.w("$prefix $it") }
+    private suspend fun logLines(
+        logger: ContainerLogger?,
+        prefix: String,
+        lines: List<String>,
+        max: Int = 12
+    ) {
+        lines.filter { it.isNotBlank() }
+            .takeLast(max)
+            .forEach { logger?.w("$prefix $it") }
     }
 
-    private suspend fun resolveNatEndpoint(info: ContainerInfo, logger: ContainerLogger?): String? {
+    /**
+     * DroidSpaces v6.5.0 defines 172.28.0.1 as the NAT gateway in both:
+     * - full bridge: ds-br0 owns 172.28.0.1/16;
+     * - bridgeless fallback: ds-v<PID> owns 172.28.0.1/32.
+     *
+     * Prefer the live container route so future compatible DroidSpaces layouts
+     * can still work. If route inspection is unavailable, use the v6.5.0
+     * canonical gateway. Host address enumeration is intentionally not a gate:
+     * the exact PulseAudio bind is the authoritative local-address test.
+     */
+    private suspend fun resolveNatEndpoint(
+        info: ContainerInfo,
+        logger: ContainerLogger?
+    ): String? {
         val discovered = discoverContainerDefaultGateway(info)
         if (usableIpv4(discovered)) {
             logger?.i("[CTX] NAT route gateway: $discovered")
+            if (discovered != DROIDSPACES_NAT_GATEWAY) {
+                logger?.w(
+                    "[!] NAT gateway differs from DroidSpaces v6.5.0 canonical " +
+                        "$DROIDSPACES_NAT_GATEWAY; using the live route value"
+                )
+            }
             return discovered
         }
-        logger?.w("[!] Live NAT route was not readable; using DroidSpaces v6.5.0 gateway $DROIDSPACES_NAT_GATEWAY")
+
+        logger?.w(
+            "[!] Live NAT route was not readable; using DroidSpaces v6.5.0 " +
+                "gateway $DROIDSPACES_NAT_GATEWAY"
+        )
         return DROIDSPACES_NAT_GATEWAY
     }
 
@@ -299,39 +473,114 @@ object PulseAudioUnifiedTransport {
                     sed -n 's/^default via \([0-9.][0-9.]*\).*/\1/p' | sed -n '1p')
             fi
             if [ -z "${'$'}gw" ]; then
-                hex=${'$'}(while read ifc dst g rest; do [ "${'$'}dst" = 00000000 ] || continue; printf '%s\n' "${'$'}g"; break; done < "/proc/${'$'}pid/net/route" 2>/dev/null)
+                hex=${'$'}(while read ifc dst g rest; do
+                    [ "${'$'}dst" = 00000000 ] || continue
+                    printf '%s\n' "${'$'}g"
+                    break
+                done < "/proc/${'$'}pid/net/route" 2>/dev/null)
                 case "${'$'}hex" in
                     ????????)
-                        b1=${'$'}(printf '%s' "${'$'}hex" | cut -c7-8); b2=${'$'}(printf '%s' "${'$'}hex" | cut -c5-6)
-                        b3=${'$'}(printf '%s' "${'$'}hex" | cut -c3-4); b4=${'$'}(printf '%s' "${'$'}hex" | cut -c1-2)
-                        gw=${'$'}(printf '%d.%d.%d.%d' "0x${'$'}b1" "0x${'$'}b2" "0x${'$'}b3" "0x${'$'}b4" 2>/dev/null || true) ;;
+                        b1=${'$'}(printf '%s' "${'$'}hex" | cut -c7-8)
+                        b2=${'$'}(printf '%s' "${'$'}hex" | cut -c5-6)
+                        b3=${'$'}(printf '%s' "${'$'}hex" | cut -c3-4)
+                        b4=${'$'}(printf '%s' "${'$'}hex" | cut -c1-2)
+                        gw=${'$'}(printf '%d.%d.%d.%d' "0x${'$'}b1" "0x${'$'}b2" "0x${'$'}b3" "0x${'$'}b4" 2>/dev/null || true)
+                        ;;
                 esac
             fi
             printf '%s\n' "${'$'}gw"
         """.trimIndent()
-        return try { Shell.cmd(command).exec().out.firstOrNull()?.trim().orEmpty() } catch (_: Exception) { "" }
+
+        return try {
+            Shell.cmd(command).exec().out.firstOrNull()?.trim().orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
     }
 
-    private suspend fun logNatEndpointDiagnostics(endpoint: String, logger: ContainerLogger?) {
+    /** Diagnostic only. Never blocks listener creation. */
+    private suspend fun logNatEndpointDiagnostics(
+        endpoint: String,
+        logger: ContainerLogger?
+    ) {
         val busybox = "${Constants.DS_BASE_DIR}/bin/busybox"
         val command = """
             endpoint=${q(endpoint)}
             found=''
-            if [ -x /system/bin/ip ]; then found=${'$'}(/system/bin/ip -4 -o addr show 2>/dev/null | grep -F " inet ${'$'}endpoint/" | sed -n '1p' || true); fi
-            if [ -z "${'$'}found" ] && [ -x ${q(busybox)} ]; then found=${'$'}(${q(busybox)} ip -4 -o addr show 2>/dev/null | grep -F " inet ${'$'}endpoint/" | sed -n '1p' || true); fi
+            if [ -x /system/bin/ip ]; then
+                found=${'$'}(/system/bin/ip -4 -o addr show 2>/dev/null |
+                    grep -F " inet ${'$'}endpoint/" | sed -n '1p' || true)
+            fi
+            if [ -z "${'$'}found" ] && [ -x ${q(busybox)} ]; then
+                found=${'$'}(${q(busybox)} ip -4 -o addr show 2>/dev/null |
+                    grep -F " inet ${'$'}endpoint/" | sed -n '1p' || true)
+            fi
+            if [ -z "${'$'}found" ] && command -v ip >/dev/null 2>&1; then
+                found=${'$'}(ip -4 -o addr show 2>/dev/null |
+                    grep -F " inet ${'$'}endpoint/" | sed -n '1p' || true)
+            fi
+
             core_pid=${'$'}(sed -n 's/^pid=//p' ${q(CORE_PID_FILE)} 2>/dev/null | sed -n '1p')
-            printf 'ADDR=%s\nCORE_PID=%s\n' "${'$'}found" "${'$'}core_pid"
+            case "${'$'}core_pid" in ''|*[!0-9]*) core_pid='' ;; esac
+            host_net=${'$'}(readlink /proc/1/ns/net 2>/dev/null || true)
+            core_net=''
+            [ -n "${'$'}core_pid" ] && core_net=${'$'}(readlink "/proc/${'$'}core_pid/ns/net" 2>/dev/null || true)
+            nonlocal=${'$'}(cat /proc/sys/net/ipv4/ip_nonlocal_bind 2>/dev/null || printf '?')
+
+            printf 'ADDR=%s\n' "${'$'}found"
+            printf 'HOST_NETNS=%s\n' "${'$'}host_net"
+            printf 'CORE_PID=%s\n' "${'$'}core_pid"
+            printf 'CORE_NETNS=%s\n' "${'$'}core_net"
+            printf 'IP_NONLOCAL_BIND=%s\n' "${'$'}nonlocal"
         """.trimIndent()
-        val result = try { Shell.cmd(command).exec() } catch (_: Exception) { null }
+
+        val result = try {
+            Shell.cmd(command).exec()
+        } catch (_: Exception) {
+            null
+        }
+
         val lines = result?.out.orEmpty()
-        val address = lines.firstOrNull { it.startsWith("ADDR=") }?.removePrefix("ADDR=").orEmpty()
-        val corePid = lines.firstOrNull { it.startsWith("CORE_PID=") }?.removePrefix("CORE_PID=").orEmpty()
-        if (address.isNotBlank()) logger?.i("[CTX] Android endpoint observation: $address")
-        else logger?.w("[!] Android address enumeration did not show $endpoint; the exact PulseAudio bind will be authoritative")
+        val address = lines.firstOrNull { it.startsWith("ADDR=") }
+            ?.removePrefix("ADDR=")
+            .orEmpty()
+        val hostNet = lines.firstOrNull { it.startsWith("HOST_NETNS=") }
+            ?.removePrefix("HOST_NETNS=")
+            .orEmpty()
+        val corePid = lines.firstOrNull { it.startsWith("CORE_PID=") }
+            ?.removePrefix("CORE_PID=")
+            .orEmpty()
+        val coreNet = lines.firstOrNull { it.startsWith("CORE_NETNS=") }
+            ?.removePrefix("CORE_NETNS=")
+            .orEmpty()
+        val nonlocal = lines.firstOrNull { it.startsWith("IP_NONLOCAL_BIND=") }
+            ?.removePrefix("IP_NONLOCAL_BIND=")
+            .orEmpty()
+
+        if (address.isNotBlank()) {
+            logger?.i("[CTX] Android endpoint observation: $address")
+        } else {
+            logger?.w(
+                "[!] Android address enumeration did not show $endpoint; " +
+                    "the exact PulseAudio bind will be authoritative"
+            )
+        }
+
         if (corePid.isNotBlank()) logger?.i("[CTX] PulseAudio core PID: $corePid")
+        if (hostNet.isNotBlank() || coreNet.isNotBlank()) {
+            logger?.i(
+                "[CTX] Network namespace: host=${hostNet.ifBlank { "unknown" }} " +
+                    "core=${coreNet.ifBlank { "unknown" }}"
+            )
+        }
+        if (nonlocal.isNotBlank()) logger?.i("[CTX] IPv4 ip_nonlocal_bind: $nonlocal")
     }
 
-    private fun usableIpv4(value: String): Boolean = validIpv4(value) && value != "0.0.0.0" && value != "255.255.255.255"
+    private fun usableIpv4(value: String): Boolean {
+        if (!validIpv4(value)) return false
+        return value != "0.0.0.0" && value != "255.255.255.255"
+    }
+
     private fun validIpv4(value: String): Boolean {
         val parts = value.split('.')
         return parts.size == 4 && parts.all { it.toIntOrNull() in 0..255 }
@@ -342,25 +591,73 @@ object PulseAudioUnifiedTransport {
             wanted=$port
             for cfg in ${q(Constants.CONTAINERS_DIR)}/*/${q(Constants.CONFIG_FILE)}; do
                 [ -f "${'$'}cfg" ] || continue
-                net=${'$'}(sed -n 's/^net_mode=//p' "${'$'}cfg" | tail -n 1); [ "${'$'}net" = nat ] || continue
-                name=${'$'}(sed -n 's/^name=//p' "${'$'}cfg" | sed -n '1p'); [ -n "${'$'}name" ] || { d=${'$'}{cfg%/${Constants.CONFIG_FILE}}; name=${'$'}{d##*/}; }
-                value=${'$'}(sed -n 's/^port_forwards=//p' "${'$'}cfg" | sed -n '1p'); oldifs=${'$'}IFS; IFS=,
+                net=${'$'}(sed -n 's/^net_mode=//p' "${'$'}cfg" | tail -n 1)
+                [ "${'$'}net" = nat ] || continue
+                name=${'$'}(sed -n 's/^name=//p' "${'$'}cfg" | sed -n '1p')
+                [ -n "${'$'}name" ] || { d=${'$'}{cfg%/${Constants.CONFIG_FILE}}; name=${'$'}{d##*/}; }
+                value=${'$'}(sed -n 's/^port_forwards=//p' "${'$'}cfg" | sed -n '1p')
+                oldifs=${'$'}IFS
+                IFS=,
                 for tok in ${'$'}value; do
-                    IFS=${'$'}oldifs; tok=${'$'}(printf '%s' "${'$'}tok" | tr -d '[:space:]'); [ -n "${'$'}tok" ] || { IFS=,; continue; }
-                    case "${'$'}tok" in */*) proto=${'$'}{tok##*/}; body=${'$'}{tok%/*} ;; *) proto=tcp; body=${'$'}tok ;; esac
-                    [ "${'$'}proto" = tcp ] || { IFS=,; continue; }; host=${'$'}{body%%:*}
-                    case "${'$'}host" in *-*) start=${'$'}{host%-*}; end=${'$'}{host#*-} ;; *) start=${'$'}host; end=${'$'}host ;; esac
-                    case "${'$'}start:${'$'}end" in *[!0-9:]*|'':*) : ;; *) if [ "${'$'}wanted" -ge "${'$'}start" ] 2>/dev/null && [ "${'$'}wanted" -le "${'$'}end" ] 2>/dev/null; then printf '%s\n' "${'$'}name"; exit 0; fi ;; esac
+                    IFS=${'$'}oldifs
+                    tok=${'$'}(printf '%s' "${'$'}tok" | tr -d '[:space:]')
+                    [ -n "${'$'}tok" ] || { IFS=,; continue; }
+                    case "${'$'}tok" in
+                        */*) proto=${'$'}{tok##*/}; body=${'$'}{tok%/*} ;;
+                        *) proto=tcp; body=${'$'}tok ;;
+                    esac
+                    [ "${'$'}proto" = tcp ] || { IFS=,; continue; }
+                    host=${'$'}{body%%:*}
+                    case "${'$'}host" in
+                        *-*) start=${'$'}{host%-*}; end=${'$'}{host#*-} ;;
+                        *) start=${'$'}host; end=${'$'}host ;;
+                    esac
+                    case "${'$'}start:${'$'}end" in
+                        *[!0-9:]*|'':*) : ;;
+                        *)
+                            if [ "${'$'}wanted" -ge "${'$'}start" ] 2>/dev/null &&
+                               [ "${'$'}wanted" -le "${'$'}end" ] 2>/dev/null; then
+                                printf '%s\n' "${'$'}name"
+                                exit 0
+                            fi
+                            ;;
+                    esac
                     IFS=,
                 done
                 IFS=${'$'}oldifs
             done
             exit 1
         """.trimIndent()
+
         return try {
             val result = Shell.cmd(command).exec()
-            if (result.isSuccess) result.out.firstOrNull()?.trim()?.takeIf { it.isNotBlank() } else null
-        } catch (_: Exception) { null }
+            if (result.isSuccess) {
+                result.out.firstOrNull()?.trim()?.takeIf { it.isNotBlank() }
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun verifyContainerClient(containerName: String, server: String): Boolean {
+        val payload = """
+            server=${q(server)}
+            cookie=/root/.config/pulse/saas-audio.cookie
+            command -v pactl >/dev/null 2>&1 || exit 70
+            [ -f "${'$'}cookie" ] || exit 71
+            [ "${'$'}(wc -c < "${'$'}cookie" 2>/dev/null | tr -d ' ')" = 256 ] || exit 72
+            info=${'$'}(PULSE_SERVER="${'$'}server" PULSE_COOKIE="${'$'}cookie" timeout 5 pactl info 2>/dev/null) || exit 73
+            printf '%s\n' "${'$'}info" | grep -Fq "Server String: ${'$'}server" || exit 74
+            printf '%s\n' "${'$'}info" | grep -Eq '^Default Sink: (AAudio_sink|OpenSL_ES_sink)$'
+        """.trimIndent()
+        val command = PulseAudioContainerCommand.build(containerName, payload)
+        return try {
+            Shell.cmd(command).exec().isSuccess
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private suspend fun verifyContainerClientDetailed(
@@ -375,16 +672,24 @@ object PulseAudioUnifiedTransport {
             expected=${q(expectedSink)}
             command -v pactl >/dev/null 2>&1 || { echo 'pactl missing'; exit 80; }
             [ -f "${'$'}cookie" ] || { echo 'cookie missing'; exit 81; }
-            info=${'$'}(PULSE_SERVER="${'$'}server" PULSE_COOKIE="${'$'}cookie" timeout 5 pactl info 2>&1) || { printf '%s\n' "${'$'}info"; exit 82; }
+            info=${'$'}(PULSE_SERVER="${'$'}server" PULSE_COOKIE="${'$'}cookie" timeout 5 pactl info 2>&1) || {
+                printf '%s\n' "${'$'}info"
+                exit 82
+            }
             printf '%s\n' "${'$'}info" | grep -E '^(Server String|Server Version|Default Sink|Default Source):' || true
             printf '%s\n' "${'$'}info" | grep -Fq "Server String: ${'$'}server" || exit 83
             printf '%s\n' "${'$'}info" | grep -Fq "Default Sink: ${'$'}expected" || exit 84
         """.trimIndent()
+
         val command = PulseAudioContainerCommand.build(containerName, payload)
         return try {
             val result = Shell.cmd(command).exec()
             result.out.filter { it.isNotBlank() }.takeLast(12).forEach { logger?.i(it) }
-            result.err.filter { it.isNotBlank() }.takeLast(12).forEach { logger?.w("[CONTAINER] $it") }
+            result.err.filter { it.isNotBlank() }.takeLast(12)
+                .forEach { logger?.w("[CONTAINER] $it") }
+            if (!result.isSuccess) {
+                logger?.w("[CONTAINER] timeout 5 pactl verification failed for $server")
+            }
             result.isSuccess
         } catch (e: Exception) {
             logger?.w("[CONTAINER] ${e.message ?: e.javaClass.simpleName}")
@@ -398,20 +703,26 @@ object PulseAudioUnifiedTransport {
         octal: String,
         logger: ContainerLogger?
     ): Boolean {
-        val command = PulseAudioContainerCommand.build(containerName, buildContainerPayload(server, octal))
+        val payload = buildContainerPayload(server, octal)
+
+        val command = PulseAudioContainerCommand.build(containerName, payload)
+
         return try {
             val result = Shell.cmd(command).exec()
             result.out.forEach { line ->
                 when {
-                    line.trim() == "__APT__" -> logger?.i("[*] Installing missing Debian/Ubuntu audio clients...")
-                    line.trim() == "__APK__" -> logger?.i("[*] Installing missing Alpine audio clients...")
-                    line.startsWith("Server String:") || line.startsWith("Server Version:") || line.startsWith("Default Sink:") || line.startsWith("Default Source:") -> logger?.i(line)
+                    line.trim() == "__APT__" ->
+                        logger?.i("[*] Installing missing Debian/Ubuntu audio clients...")
+                    line.trim() == "__APK__" ->
+                        logger?.i("[*] Installing missing Alpine audio clients...")
+                    line.startsWith("Server String:") ||
+                        line.startsWith("Server Version:") ||
+                        line.startsWith("Default Sink:") ||
+                        line.startsWith("Default Source:") -> logger?.i(line)
                 }
             }
-            result.err.filter { it.isNotBlank() && !PulseAudioClientConfig.isFailureMarker(it) }.take(12).forEach { line ->
-                if (PulseAudioClientConfig.isWarningMarker(line)) logger?.w("[AUDIO] ! pactl control-plane probe was not confirmed after retries; verified PCM remains authoritative")
-                else logger?.w("[CONTAINER] $line")
-            }
+            result.err.filter { it.isNotBlank() && !PulseAudioClientConfig.isFailureMarker(it) }.take(12)
+                .forEach { logger?.w("[CONTAINER] $it") }
             val ready = result.isSuccess && result.out.any { it.trim() == "__READY__" }
             if (!ready) {
                 val failure = PulseAudioClientConfig.failureSummary(result.code, result.out + result.err)
@@ -434,16 +745,19 @@ object PulseAudioUnifiedTransport {
             command -v pactl >/dev/null 2>&1 || need=1
             command -v pacat >/dev/null 2>&1 || need=1
             command -v speaker-test >/dev/null 2>&1 || need=1
+
             if [ "${'$'}need" -eq 1 ]; then
                 if command -v apt-get >/dev/null 2>&1; then
                     echo __APT__
                     DEBIAN_FRONTEND=noninteractive apt-get update >/dev/null 2>&1 || true
-                    DEBIAN_FRONTEND=noninteractive apt-get install -y pulseaudio-utils libasound2-plugins alsa-utils >/dev/null 2>&1 || true
+                    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                        pulseaudio-utils libasound2-plugins alsa-utils >/dev/null 2>&1 || true
                 elif command -v apk >/dev/null 2>&1; then
                     echo __APK__
                     apk add --no-cache pulseaudio-utils alsa-utils alsa-plugins-pulse >/dev/null 2>&1 || true
                 fi
             fi
+
             command -v pactl >/dev/null 2>&1 || exit 60
             command -v pacat >/dev/null 2>&1 || exit 60
             mkdir -p /root/.config/pulse /etc/profile.d || exit 61
@@ -456,9 +770,12 @@ object PulseAudioUnifiedTransport {
 
             saas_audio_step=client-config
             client=/root/.config/pulse/client.conf
-            if [ -f "${'$'}client" ] && ! grep -Fq ${q(MANAGED)} "${'$'}client" 2>/dev/null && [ ! -e "${'$'}client.saas-x11-manager.bak" ]; then
+            if [ -f "${'$'}client" ] &&
+               ! grep -Fq ${q(MANAGED)} "${'$'}client" 2>/dev/null &&
+               [ ! -e "${'$'}client.saas-x11-manager.bak" ]; then
                 cp -p "${'$'}client" "${'$'}client.saas-x11-manager.bak" || exit 64
             fi
+
             cat > "${'$'}client" <<EOF_CLIENT
 $BEGIN
 default-server = $server
@@ -467,6 +784,7 @@ autospawn = no
 enable-shm = no
 $END
 EOF_CLIENT
+
             cat > /etc/profile.d/saas-x11-audio.sh <<EOF_PROFILE
 $BEGIN
 export PULSE_SERVER=$server
@@ -476,8 +794,12 @@ EOF_PROFILE
             chmod 644 /etc/profile.d/saas-x11-audio.sh 2>/dev/null || true
 
             asound=/etc/asound.conf
-            if command -v aplay >/dev/null 2>&1 && PULSE_SERVER="${'$'}SERVER" PULSE_COOKIE="${'$'}cookie" aplay -L 2>/dev/null | grep -q '^pulse'; then
-                if [ -f "${'$'}asound" ] && ! grep -Fq ${q(MANAGED)} "${'$'}asound" 2>/dev/null && [ ! -e "${'$'}asound.saas-x11-manager.bak" ]; then
+            if command -v aplay >/dev/null 2>&1 &&
+               PULSE_SERVER="${'$'}SERVER" PULSE_COOKIE="${'$'}cookie" aplay -L 2>/dev/null |
+                    grep -q '^pulse'; then
+                if [ -f "${'$'}asound" ] &&
+                   ! grep -Fq ${q(MANAGED)} "${'$'}asound" 2>/dev/null &&
+                   [ ! -e "${'$'}asound.saas-x11-manager.bak" ]; then
                     cp -p "${'$'}asound" "${'$'}asound.saas-x11-manager.bak" || true
                 fi
                 cat > "${'$'}asound" <<EOF_ASOUND
@@ -489,23 +811,20 @@ EOF_ASOUND
             fi
 
             ${PulseAudioClientConfig.install(server)}
+            saas_audio_step=client-auth
 
-            info=''; info_ok=0; info_try=0
-            while [ "${'$'}info_try" -lt 3 ]; do
-                info=${'$'}(PULSE_SERVER="${'$'}SERVER" PULSE_COOKIE="${'$'}cookie" timeout 5 pactl info 2>&1) && {
-                    printf '%s\n' "${'$'}info" | grep -Fq "Server String: ${'$'}SERVER" &&
-                    printf '%s\n' "${'$'}info" | grep -Eq '^Default Sink: (AAudio_sink|OpenSL_ES_sink)$' && info_ok=1
-                }
-                [ "${'$'}info_ok" -eq 1 ] && break
-                info_try=${'$'}((info_try + 1)); [ "${'$'}info_try" -lt 3 ] && sleep 1
-            done
-            if [ "${'$'}info_ok" -eq 1 ]; then
-                printf '%s\n' "${'$'}info" | grep -E '^(Server String|Server Version|Default Sink|Default Source):' || true
-            else
-                printf '__SAAS_AUDIO_WARNING__:post-pcm-control-probe\n' >&2
-            fi
+            info=${'$'}(PULSE_SERVER="${'$'}SERVER" PULSE_COOKIE="${'$'}cookie" timeout 5 pactl info 2>&1) || {
+                printf '%s\n' "${'$'}info" >&2
+                exit 65
+            }
+            printf '%s\n' "${'$'}info" |
+                grep -E '^(Server String|Server Version|Default Sink|Default Source):' || true
+            printf '%s\n' "${'$'}info" | grep -Fq "Server String: ${'$'}SERVER" || exit 66
+            printf '%s\n' "${'$'}info" |
+                grep -Eq '^Default Sink: (AAudio_sink|OpenSL_ES_sink)$' || exit 67
             echo __READY__
         """.trimIndent()
 
-    private fun q(value: String): String = "'" + value.replace("'", "'\\''") + "'"
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
 }
