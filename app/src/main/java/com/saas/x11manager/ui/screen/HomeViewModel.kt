@@ -183,19 +183,11 @@ class HomeViewModel : ViewModel() {
         _containers.value = snapshot.containers
         _x11ServerStatus.value = snapshot.x11Status
         _x11ServerPid.value = snapshot.x11Pid
-
-        // Active VNC connection details are intentionally in-memory only. If a
-        // container is stopped externally, remove the pinned credential/endpoint
-        // block as soon as the runtime snapshot confirms that lifecycle change.
         snapshot.containers.filterNot { it.isRunning }.forEach { container ->
             containerLogs[container.name]?.let(::removePinnedVncSummary)
         }
     }
 
-    /**
-     * Fixed X11-0nly runtime snapshot. Keep the current X11APP serialization
-     * policy, but read only the single Manager-owned :0/X0 server and PID.
-     */
     private suspend fun readRuntimeSnapshot(): RuntimeRefreshSnapshot = runtimeSnapshotMutex.withLock {
         withContext(Dispatchers.IO) {
             val containers = ContainerManager.listContainers()
@@ -276,7 +268,7 @@ class HomeViewModel : ViewModel() {
                 logger.e("Error: ${e.message}")
             } finally {
                 logger.flush()
-                operation.finish(succeeded, if (succeeded) "Session started" else "Session start was not confirmed — view logs")
+                operation.finishDurably(succeeded, if (succeeded) "Session started" else "Session start was not confirmed — view logs")
                 runningOperationContainer = null
                 refreshRuntimeAfterOperation()
             }
@@ -293,9 +285,6 @@ class HomeViewModel : ViewModel() {
         if (!tryBeginOperation(container.name)) return
         viewModelScope.launch {
             val logs = logsFor(container.name)
-            // Keep the active VNC connection block visible while Stop is actually
-            // running. Other historical lines are cleared so the terminal remains
-            // focused on the current lifecycle operation.
             val pinnedAtStopStart = VncConnectionGuide.retainPinnedSummary(logs)
             val operation = logOperation(container.name)
             operation.begin("Stopping ${container.name}", initialLogs = pinnedAtStopStart)
@@ -330,7 +319,7 @@ class HomeViewModel : ViewModel() {
                 logger.e("Error: ${e.message}")
             } finally {
                 logger.flush()
-                operation.finish(succeeded, if (succeeded) "Container stopped" else "Container stop was not confirmed — view logs")
+                operation.finishDurably(succeeded, if (succeeded) "Container stopped" else "Container stop was not confirmed — view logs")
                 runningOperationContainer = null
                 refreshRuntimeAfterOperation()
             }
@@ -366,7 +355,7 @@ class HomeViewModel : ViewModel() {
                 logger.e("[-] ${e.message ?: "Stop all failed"}")
             } finally {
                 logger.flush()
-                operation.finish(succeeded, if (succeeded) "All containers and X11 stopped" else "Stop all was not fully confirmed — view logs")
+                operation.finishDurably(succeeded, if (succeeded) "All containers and X11 stopped" else "Stop all was not fully confirmed — view logs")
                 runningOperationContainer = null
                 refreshRuntimeAfterOperation()
             }
