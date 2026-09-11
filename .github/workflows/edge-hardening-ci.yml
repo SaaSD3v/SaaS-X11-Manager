@@ -1,18 +1,18 @@
-name: X11-0nly Edge Hardening CI
+name: X11-X0TEST CI
 
 on:
   push:
     branches:
-      - "agent/x11-only-edge-hardening"
+      - "X11-X0TEST"
   workflow_dispatch:
 
 concurrency:
-  group: x11-only-edge-hardening-${{ github.ref }}
+  group: x11-x0test-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    name: Test and build X11-0nly hardening APKs
+    name: Test and build X11-X0TEST APKs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: embedded-lorie/.cxx
-          key: ${{ runner.os }}-x11-only-edge-native-${{ hashFiles('embedded-lorie/build.gradle', 'third_party/termux-x11/lorie/src/main/cpp/**') }}
+          key: ${{ runner.os }}-x11-x0test-native-${{ hashFiles('embedded-lorie/build.gradle', 'third_party/termux-x11/lorie/src/main/cpp/**') }}
 
       - name: Verify fixed X0 source contract
         run: bash scripts/verify-x11-only.sh
@@ -64,7 +64,7 @@ jobs:
           set -euo pipefail
           chmod +x gradlew
           ./gradlew testReleaseUnitTest assembleRelease \
-            -PVERSION_NAME="1.0.0-edge-x0" \
+            -PVERSION_NAME="1.0.0-x0test" \
             -PVERSION_CODE=${{ github.run_number }} \
             2>&1 | tee edge-gradle.log
 
@@ -80,7 +80,7 @@ jobs:
         if: ${{ success() }}
         uses: actions/upload-artifact@v4
         with:
-          name: x11-only-edge-apk-${{ github.run_id }}
+          name: x11-x0test-apk-${{ github.run_id }}
           retention-days: 30
           if-no-files-found: error
           path: |
@@ -92,7 +92,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: x11-only-edge-ci-${{ github.run_id }}
+          name: x11-x0test-ci-${{ github.run_id }}
           retention-days: 30
           if-no-files-found: warn
           path: |
