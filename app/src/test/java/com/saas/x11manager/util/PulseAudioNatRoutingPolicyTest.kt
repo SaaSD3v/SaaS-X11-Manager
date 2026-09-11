@@ -63,7 +63,7 @@ class PulseAudioNatRoutingPolicyTest {
         assertTrue(transport.contains("default-server = \$server"))
         assertTrue(transport.contains("__SAAS_AUDIO_TRANSPORT_READY__"))
         assertTrue(transport.contains("Default Sink: (AAudio_sink|OpenSL_ES_sink)"))
-        assertTrue(transport.contains("NAT audio transport verified from inside the container"))
+        assertTrue(transport.contains("NAT audio PCM transport verified from inside the container"))
     }
 
     @Test
