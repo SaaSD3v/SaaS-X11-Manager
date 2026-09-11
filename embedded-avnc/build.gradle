@@ -1,0 +1,118 @@
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+def upstreamRoot = rootProject.file('third_party/avnc')
+def upstream = new File(upstreamRoot, 'app')
+def upstreamCommit = 'f30406514ef8880097e960da7dc1d8dc4c713d7f'
+def generatedUpstreamJava = layout.buildDirectory.dir('generated/embeddedAvnc/upstreamJava')
+def generatedAssets = layout.buildDirectory.dir('generated/embeddedAvnc/assets')
+
+android {
+    namespace 'com.gaurav.avnc'
+    compileSdkVersion 34
+    ndkVersion '29.0.14206865'
+
+    defaultConfig {
+        minSdkVersion 26
+        targetSdkVersion 34
+        buildConfigField 'String', 'AVNC_VERSION', '"3.3.1"'
+        buildConfigField 'String', 'AVNC_COMMIT', '"' + upstreamCommit + '"'
+        consumerProguardFiles 'consumer-rules.pro'
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=none'
+                targets 'native-vnc'
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    externalNativeBuild {
+        cmake {
+            version '3.22.1'
+            path new File(upstream, 'CMakeLists.txt')
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile 'src/main/AndroidManifest.xml'
+            java.srcDirs generatedUpstreamJava, 'src/main/java'
+            assets.srcDirs generatedAssets
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging false
+        }
+    }
+}
+
+dependencies {
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.22'
+    implementation 'androidx.annotation:annotation:1.7.1'
+}
+
+tasks.register('prepareEmbeddedAvncSources') {
+    inputs.dir new File(upstream, 'src/main/java')
+    inputs.file new File(upstreamRoot, 'COPYING.txt')
+    outputs.dir generatedUpstreamJava
+    outputs.dir generatedAssets
+
+    doLast {
+        if (!upstreamRoot.exists())
+            throw new GradleException('AVNC submodule is missing. Run git submodule update --init --recursive.')
+
+        def output = generatedUpstreamJava.get().asFile
+        delete output
+        copy {
+            from new File(upstream, 'src/main/java')
+            into output
+            include 'com/gaurav/avnc/vnc/**'
+            include 'com/gaurav/avnc/ui/vnc/FrameState.kt'
+            include 'com/gaurav/avnc/ui/vnc/gl/**'
+            exclude 'com/gaurav/avnc/vnc/VncUri.kt'
+            exclude 'com/gaurav/avnc/ui/vnc/gl/Renderer.kt'
+        }
+
+        def client = new File(output, 'com/gaurav/avnc/vnc/VncClient.kt')
+        def cmake = new File(upstream, 'CMakeLists.txt')
+        if (!client.isFile() || !cmake.isFile())
+            throw new GradleException('Pinned AVNC 3.3.1 source contract is incomplete')
+        def source = client.getText('UTF-8')
+        for (def marker : ['nativeClientCreate', 'setFrameBufferUpdatesPaused', 'sendCutText', 'nativeUploadFrameTexture']) {
+            if (!source.contains(marker))
+                throw new GradleException('Pinned AVNC VncClient contract changed: missing ' + marker)
+        }
+
+        def licenseDir = new File(generatedAssets.get().asFile, 'licenses')
+        delete generatedAssets.get().asFile
+        licenseDir.mkdirs()
+        copy {
+            from new File(upstreamRoot, 'COPYING.txt')
+            into licenseDir
+            rename { 'AVNC-GPL-3.0.txt' }
+        }
+        new File(licenseDir, 'AVNC-PROVENANCE.txt').text =
+            'Embedded VNC engine: AVNC v3.3.1\n' +
+            'Upstream: https://github.com/gujjwal00/avnc\n' +
+            'Pinned commit: ' + upstreamCommit + '\n' +
+            'License: GPL-3.0-or-later\n' +
+            'Native dependencies are pinned by the AVNC git tree.\n'
+    }
+}
+
+preBuild.dependsOn tasks.named('prepareEmbeddedAvncSources')

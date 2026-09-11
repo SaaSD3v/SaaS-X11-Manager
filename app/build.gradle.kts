@@ -31,9 +31,8 @@ android {
     }
 
     // Keep the universal APK for maximum compatibility while also producing
-    // lightweight per-ABI APKs. libXlorie is by far the largest part of the
-    // application, so ABI-specific artifacts cut download/install size without
-    // dropping support for any architecture.
+    // lightweight per-ABI APKs. Native Lorie + AVNC engines are the largest
+    // parts of the application, so ABI-specific artifacts save install size.
     splits {
         abi {
             isEnable = true
@@ -67,9 +66,6 @@ android {
             if (keystoreFile.exists()) {
                 signingConfig = signingConfigs.getByName("release")
             } else {
-                // Branch CI intentionally remains installable without exposing a
-                // production key. The release workflow separately requires the
-                // real signing material before it is allowed to publish assets.
                 signingConfig = signingConfigs.getByName("debug")
             }
         }
@@ -112,7 +108,10 @@ dependencies {
     // Local compatibility wrapper around the pinned Termux:X11/Lorie sources.
     implementation(project(":embedded-lorie"))
 
-    // Compose BOM
+    // AVNC v3.3.1 / LibVNCClient engine only. The Manager owns all VNC UI,
+    // profiles and lifecycle around this generic standalone viewer.
+    implementation(project(":embedded-avnc"))
+
     implementation(platform("androidx.compose:compose-bom:2024.02.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
@@ -120,31 +119,24 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
-    // Material Design (XML themes support)
     implementation("com.google.android.material:material:1.11.0")
 
-    // Core Android
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
     implementation("androidx.activity:activity-compose:1.8.2")
 
-    // ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
 
-    // Root execution - libsu core owns Shell/CallbackList used by the Manager.
     implementation("com.github.topjohnwu.libsu:core:5.2.1")
 
-    // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
 
-    // Unit tests
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.12.2")
 
-    // Exercise the actual Compose controls and Android window rendering on API 26/31/34.
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.02.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test:runner:1.5.2")
@@ -152,7 +144,6 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
 
-    // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

@@ -35,6 +35,8 @@ import com.saas.x11manager.ui.screen.HomeScreen
 import com.saas.x11manager.ui.screen.HomeViewModel
 import com.saas.x11manager.ui.screen.ManagedDisplayScreen
 import com.saas.x11manager.ui.screen.RequirementsScreen
+import com.saas.x11manager.ui.screen.vnc.VncLauncherScreen
+import com.saas.x11manager.ui.screen.vnc.VncLauncherViewModel
 import com.saas.x11manager.ui.theme.ManagerAppearanceSettings
 import com.saas.x11manager.ui.theme.readableOn
 import kotlinx.coroutines.launch
@@ -42,6 +44,7 @@ import kotlinx.coroutines.launch
 enum class TabItem(val title: String, val icon: ImageVector) {
     Home("Home", Icons.Default.Home),
     Display("Display", Icons.Default.DisplaySettings),
+    VNC("VNC", Icons.Default.DesktopWindows),
     Requirements("Requirements", Icons.Default.FactCheck),
     Config("Config", Icons.Default.Settings)
 }
@@ -60,6 +63,9 @@ fun AppNavigation(
     val scope = rememberCoroutineScope()
     var displayScreenOpen by remember { mutableStateOf(false) }
     var fixesScreenContainer by remember { mutableStateOf<String?>(null) }
+    val vncViewModel = remember {
+        ViewModelProvider(X11Application.instance)[VncLauncherViewModel::class.java]
+    }
 
     val operationStore = X11Application.instance.operationLogs
     val openLogRequest = operationStore.openRequest
@@ -137,6 +143,7 @@ fun AppNavigation(
                                     imageVector = when (selectedTab) {
                                         TabItem.Home -> Icons.Default.Computer
                                         TabItem.Display -> Icons.Default.DisplaySettings
+                                        TabItem.VNC -> Icons.Default.DesktopWindows
                                         TabItem.Requirements -> Icons.Default.FactCheck
                                         TabItem.Config -> Icons.Default.Settings
                                     },
@@ -182,6 +189,7 @@ fun AppNavigation(
                             viewModel = viewModel,
                             onOpenScreen = { displayScreenOpen = true }
                         )
+                        TabItem.VNC -> VncLauncherScreen(vncViewModel)
                         TabItem.Requirements -> RequirementsScreen(viewModel = viewModel)
                         TabItem.Config -> ConfigScreen(
                             settings = appearanceSettings,
