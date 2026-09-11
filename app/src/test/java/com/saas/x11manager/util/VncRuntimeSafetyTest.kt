@@ -56,10 +56,10 @@ class VncRuntimeSafetyTest {
     @Test
     fun `standalone stability validates both recorded leases and listener`() {
         val script = VncRuntimeSafety.stableStandaloneRuntime("/run/test-vnc", 5901)
-        assertTrue(script.contains("server.pid"))
-        assertTrue(script.contains("session.pid"))
-        assertTrue(script.contains("server.start"))
-        assertTrue(script.contains("session.start"))
+        assertTrue(script.contains("/run/test-vnc/${'$'}role.pid"))
+        assertTrue(script.contains("/run/test-vnc/${'$'}role.start"))
+        assertTrue(script.contains("owned_role server"))
+        assertTrue(script.contains("owned_role session"))
         assertTrue(script.contains("/proc/${'$'}pid/stat"))
         assertTrue(script.contains("port_listening"))
         assertTrue(script.contains("sample=0"))
