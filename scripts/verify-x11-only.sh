@@ -63,15 +63,16 @@ for token in "${forbidden[@]}"; do
   done < <(grep -RFn -- "$token" "${roots[@]}" 2>/dev/null || true)
 done
 
-# Positive contract: the fixed runtime constants and launcher must remain explicit.
+# Positive contract: fixed X0 runtime plus one fixed standalone VNC display/profile.
 grep -Fq 'const val X11_DISPLAY = ":0"' app/src/main/java/com/saas/x11manager/util/Constants.kt
 grep -Fq 'const val X11_SERVER_PROCESS = "saas-x11"' app/src/main/java/com/saas/x11manager/util/Constants.kt
 grep -Fq 'const val X11_SOCK_FILE = "$X11_SOCK_DIR/X0"' app/src/main/java/com/saas/x11manager/util/Constants.kt
 grep -Fq '"export DISPLAY=:0\n"' app/src/main/java/com/saas/x11manager/util/GraphicSessionInitFiles.kt
 grep -Fq 'private const val CONTAINER_X0_SOCKET = "/tmp/.X11-unix/X0"' app/src/main/java/com/saas/x11manager/util/GraphicSessionRuntimeController.kt
+grep -Fq 'val singleDisplayMode: Boolean = true' app/src/main/java/com/saas/x11manager/ui/screen/vnc/VncLauncherViewModel.kt
 
 if [ "$failed" -ne 0 ]; then
   exit 1
 fi
 
-echo "X11-0nly recursive audit passed: production, tests and docs use fixed display :0 / X0 only."
+echo "X11-0nly recursive audit passed: production, tests and docs use fixed display :0 / X0 only, with one VNC display/profile."

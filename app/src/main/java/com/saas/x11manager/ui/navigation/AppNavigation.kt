@@ -37,6 +37,7 @@ import com.saas.x11manager.ui.screen.ManagedDisplayScreen
 import com.saas.x11manager.ui.screen.RequirementsScreen
 import com.saas.x11manager.ui.screen.vnc.VncLauncherScreen
 import com.saas.x11manager.ui.screen.vnc.VncLauncherViewModel
+import com.saas.x11manager.ui.screen.vnc.VncManagedScreen
 import com.saas.x11manager.ui.theme.ManagerAppearanceSettings
 import com.saas.x11manager.ui.theme.readableOn
 import kotlinx.coroutines.launch
@@ -62,6 +63,7 @@ fun AppNavigation(
     val selectedTab = tabs[pagerState.currentPage]
     val scope = rememberCoroutineScope()
     var displayScreenOpen by remember { mutableStateOf(false) }
+    var vncScreenOpen by remember { mutableStateOf(false) }
     var fixesScreenContainer by remember { mutableStateOf<String?>(null) }
     val vncViewModel = remember {
         ViewModelProvider(X11Application.instance)[VncLauncherViewModel::class.java]
@@ -75,9 +77,10 @@ fun AppNavigation(
         fixesScreenContainer = null
         viewModel.onEditNavigated()
         displayScreenOpen = false
+        vncScreenOpen = false
         when (request.owner.area) {
             OperationArea.HOME -> {
-                pagerState.scrollToPage(0)
+                pagerState.scrollToPage(tabs.indexOf(TabItem.Home))
                 viewModel.openSavedLogs(request.owner.target)
             }
             OperationArea.SETUP -> {
@@ -91,6 +94,11 @@ fun AppNavigation(
                 val monitor = ViewModelProvider(X11Application.instance)[ManagedDisplayViewModel::class.java]
                 monitor.openLogs()
                 displayScreenOpen = true
+            }
+            OperationArea.VNC -> {
+                pagerState.scrollToPage(tabs.indexOf(TabItem.VNC))
+                vncViewModel.openLogs(request.owner.target)
+                vncScreenOpen = true
             }
         }
         operationStore.get(request.owner).takeUnless { it.running }?.let {
@@ -111,7 +119,6 @@ fun AppNavigation(
                 }
             )
         }
-
         fixesScreenContainer != null -> {
             val containerName = requireNotNull(fixesScreenContainer)
             FixesScreen(
@@ -122,14 +129,18 @@ fun AppNavigation(
                 }
             )
         }
-
         displayScreenOpen -> {
             ManagedDisplayScreen(
                 viewModel = viewModel,
                 onClose = { displayScreenOpen = false }
             )
         }
-
+        vncScreenOpen -> {
+            VncManagedScreen(
+                viewModel = vncViewModel,
+                onClose = { vncScreenOpen = false }
+            )
+        }
         else -> {
             Scaffold(
                 containerColor = Color.Transparent,
@@ -162,9 +173,7 @@ fun AppNavigation(
                     MainBottomBar(
                         selectedTab = selectedTab,
                         onTabSelected = { tab ->
-                            scope.launch {
-                                pagerState.animateScrollToPage(tabs.indexOf(tab))
-                            }
+                            scope.launch { pagerState.animateScrollToPage(tabs.indexOf(tab)) }
                         }
                     )
                 },
@@ -172,22 +181,21 @@ fun AppNavigation(
             ) { innerPadding ->
                 HorizontalPager(
                     state = pagerState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding)
+                    modifier = Modifier.fillMaxSize().padding(innerPadding)
                 ) { page ->
                     when (tabs[page]) {
                         TabItem.Home -> HomeScreen(
                             viewModel = viewModel,
-                            onOpenFixes = { containerName ->
-                                fixesScreenContainer = containerName
-                            }
+                            onOpenFixes = { containerName -> fixesScreenContainer = containerName }
                         )
                         TabItem.Display -> DisplayScreen(
                             viewModel = viewModel,
                             onOpenScreen = { displayScreenOpen = true }
                         )
-                        TabItem.VNC -> VncLauncherScreen(vncViewModel)
+                        TabItem.VNC -> VncLauncherScreen(
+                            viewModel = vncViewModel,
+                            onOpenScreen = { vncScreenOpen = true }
+                        )
                         TabItem.Requirements -> RequirementsScreen(viewModel = viewModel)
                         TabItem.Config -> ConfigScreen(
                             settings = appearanceSettings,
@@ -240,7 +248,6 @@ private fun MainBottomBar(
                         ),
                         label = "IndicatorOffset"
                     )
-
                     Surface(
                         modifier = Modifier
                             .width(tabWidth)
@@ -259,11 +266,9 @@ private fun MainBottomBar(
                     tabs.forEach { tab ->
                         val isSelected = selectedTab == tab
                         val contentColor by animateColorAsState(
-                            targetValue = if (isSelected) selectedContentColor
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            targetValue = if (isSelected) selectedContentColor else MaterialTheme.colorScheme.onSurfaceVariant,
                             label = "IconColor"
                         )
-
                         Surface(
                             onClick = { onTabSelected(tab) },
                             modifier = Modifier

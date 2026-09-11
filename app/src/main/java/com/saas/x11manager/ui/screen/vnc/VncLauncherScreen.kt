@@ -1,9 +1,10 @@
 package com.saas.x11manager.ui.screen.vnc
 
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -13,258 +14,152 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import com.gaurav.avnc.vnc.XKeySym
-import com.saas.x11manager.embeddedvnc.EmbeddedVncFrameView
 import com.saas.x11manager.embeddedvnc.EmbeddedVncState
 import java.util.UUID
 
-/**
- * Standalone VNC viewer/launcher. No DroidSpaces or Integrated X11 state is read
- * or changed from this screen.
- */
 @Composable
-fun VncLauncherScreen(viewModel: VncLauncherViewModel) {
+fun VncLauncherScreen(
+    viewModel: VncLauncherViewModel,
+    onOpenScreen: () -> Unit
+) {
     val profiles by viewModel.profiles.collectAsState()
     val selectedId by viewModel.selectedProfileId.collectAsState()
     val state by viewModel.connectionState.collectAsState()
-    val detail by viewModel.connectionDetail.collectAsState()
     val screenEnabled by viewModel.screenEnabled.collectAsState()
     val framebuffer by viewModel.framebufferSize.collectAsState()
-    val selected = profiles.firstOrNull { it.id == selectedId }
     val active = viewModel.activeProfile()
+    val selected = profiles.firstOrNull { it.id == selectedId }
 
+    var showConnections by remember { mutableStateOf(false) }
     var editor by remember { mutableStateOf<VncLauncherProfile?>(null) }
-    var viewerExpanded by remember { mutableStateOf(false) }
-    var keyboardText by remember { mutableStateOf("") }
-    var resizeWidth by remember { mutableStateOf("") }
-    var resizeHeight by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<String?>(null) }
 
-    Column(
+    val connectionSubtitle = when {
+        active != null && state == EmbeddedVncState.CONNECTED ->
+            "${active.name} · ${active.host}:${active.port}"
+        active != null && state == EmbeddedVncState.CONNECTING ->
+            "Connecting to ${active.name}"
+        profiles.isEmpty() ->
+            if (viewModel.singleDisplayMode) "Register the VNC display" else "Add a VNC connection"
+        viewModel.singleDisplayMode ->
+            "${profiles.first().name} · ${profiles.first().host}:${profiles.first().port}"
+        profiles.size == 1 ->
+            "1 saved connection · ${profiles.first().name}"
+        else -> "${profiles.size} saved connections"
+    }
+
+    val screenSubtitle = when (state) {
+        EmbeddedVncState.CONNECTED -> buildString {
+            append(if (screenEnabled) "Connected · screen on" else "Connected · screen off")
+            framebuffer?.let { append(" · ${it.first} × ${it.second}") }
+        }
+        EmbeddedVncState.CONNECTING -> "Connecting · screen waiting"
+        EmbeddedVncState.ERROR -> "Connection error · open Screen for details"
+        EmbeddedVncState.OFF -> selected?.let { "Ready for ${it.name}" } ?: "No connection selected"
+    }
+
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        if (!viewerExpanded) {
-            VncStatusCard(
-                profile = active ?: selected,
-                state = state,
-                detail = detail,
-                screenEnabled = screenEnabled,
-                framebuffer = framebuffer
+        item {
+            Text(
+                "VNC Viewer",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (viewModel.singleDisplayMode) {
+                    "One fixed VNC display with its own connection, screen and client controls."
+                } else {
+                    "Register VNC endpoints here and open the dedicated screen only when you want to render one."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
-        if (state == EmbeddedVncState.CONNECTED) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                shape = RoundedCornerShape(22.dp),
-                color = Color.Black,
-                tonalElevation = 1.dp
-            ) {
-                if (screenEnabled) {
-                    AndroidView(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .testTag("vnc-frame"),
-                        factory = { context ->
-                            EmbeddedVncFrameView(context).apply {
-                                attachSession(viewModel.session)
-                                directTouch = active?.directTouch ?: false
-                                inputEnabled = !(active?.viewOnly ?: false)
-                            }
-                        },
-                        update = { frame ->
-                            frame.directTouch = active?.directTouch ?: false
-                            frame.inputEnabled = !(active?.viewOnly ?: false)
-                        }
-                    )
-                } else {
-                    Box(
-                        Modifier.fillMaxSize().background(Color.Black),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.VisibilityOff, contentDescription = null, tint = Color.White)
-                            Spacer(Modifier.height(8.dp))
-                            Text("VNC screen is off", color = Color.White, fontWeight = FontWeight.Bold)
-                            Text("The connection stays open without framebuffer updates.", color = Color.LightGray)
-                        }
-                    }
-                }
-            }
+        item {
+            VncLauncherCard(
+                index = "01",
+                icon = Icons.Default.Link,
+                title = if (viewModel.singleDisplayMode) "Connection" else "Connections",
+                subtitle = connectionSubtitle,
+                onClick = { showConnections = true }
+            )
+        }
 
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilledTonalButton(
-                    onClick = { viewModel.setScreenEnabled(!screenEnabled) },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(if (screenEnabled) Icons.Default.VisibilityOff else Icons.Default.Visibility, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (screenEnabled) "Screen off" else "Screen on")
-                }
-                FilledTonalButton(
-                    onClick = { viewerExpanded = !viewerExpanded },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(if (viewerExpanded) Icons.Default.FullscreenExit else Icons.Default.Fullscreen, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (viewerExpanded) "Controls" else "Expand")
-                }
-                Button(
-                    onClick = {
-                        viewerExpanded = false
-                        viewModel.disconnect()
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.LinkOff, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Disconnect")
-                }
-            }
-
-            if (!viewerExpanded) {
-                VncLiveControls(
-                    viewModel = viewModel,
-                    keyboardText = keyboardText,
-                    onKeyboardText = { keyboardText = it },
-                    resizeWidth = resizeWidth,
-                    onResizeWidth = { resizeWidth = it },
-                    resizeHeight = resizeHeight,
-                    onResizeHeight = { resizeHeight = it },
-                    onMessage = { message = it }
-                )
-            }
-        } else if (!viewerExpanded) {
-            Text("Connections", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-
-            if (profiles.isEmpty()) {
-                OutlinedCard(Modifier.fillMaxWidth()) {
-                    Column(
-                        Modifier.padding(18.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(Icons.Default.DesktopWindows, null, Modifier.size(38.dp))
-                        Spacer(Modifier.height(10.dp))
-                        Text("No VNC connections yet", fontWeight = FontWeight.Bold)
-                        Text(
-                            "Add any VNC server just like a desktop viewer. This launcher is independent from DroidSpaces.",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-            } else {
-                Column(
-                    modifier = Modifier
-                        .weight(1f, fill = false)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    profiles.forEach { profile ->
-                        ElevatedCard(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { viewModel.selectProfile(profile.id) }
-                        ) {
-                            Row(
-                                Modifier.padding(14.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    if (selectedId == profile.id) Icons.Default.RadioButtonChecked else Icons.Default.RadioButtonUnchecked,
-                                    null
-                                )
-                                Spacer(Modifier.width(12.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(profile.name, fontWeight = FontWeight.Bold)
-                                    Text("${profile.host}:${profile.port}", style = MaterialTheme.typography.bodySmall)
-                                    val extras = buildList {
-                                        if (profile.viewOnly) add("view-only")
-                                        if (profile.rawEncodingOnly) add("raw") else add("auto/Tight")
-                                        if (profile.autoReconnect) add("reconnect")
-                                        if (profile.repeaterId != null) add("repeater ${profile.repeaterId}")
-                                    }
-                                    Text(extras.joinToString(" • "), style = MaterialTheme.typography.labelSmall)
-                                }
-                                IconButton(onClick = { editor = profile }) {
-                                    Icon(Icons.Default.Settings, "Edit connection")
-                                }
-                                IconButton(onClick = { viewModel.connect(profile) }) {
-                                    Icon(Icons.Default.PlayArrow, "Connect")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = {
-                        editor = VncLauncherProfile(
-                            id = UUID.randomUUID().toString(),
-                            name = "VNC connection"
-                        )
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Add, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Add connection")
-                }
-                if (selected != null) {
-                    FilledTonalButton(
-                        onClick = { viewModel.connect(selected) },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.PowerSettingsNew, null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Turn on")
-                    }
-                    if (selected.wakeMac.isNotBlank()) {
-                        FilledTonalButton(
-                            onClick = {
-                                viewModel.wake(selected) { result ->
-                                    message = result.fold(
-                                        onSuccess = { "Wake-on-LAN packet sent" },
-                                        onFailure = { it.message ?: "Wake-on-LAN failed" }
-                                    )
-                                }
-                            }
-                        ) {
-                            Icon(Icons.Default.Power, "Wake-on-LAN")
-                        }
-                    }
-                }
-            }
+        item {
+            VncLauncherCard(
+                index = "02",
+                icon = Icons.Default.DesktopWindows,
+                title = "Screen",
+                subtitle = screenSubtitle,
+                onClick = onOpenScreen
+            )
         }
 
         message?.let { value ->
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.secondaryContainer
-            ) {
-                Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(value, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                    IconButton(onClick = { message = null }) { Icon(Icons.Default.Close, "Dismiss") }
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    tonalElevation = 0.dp
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(value, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        IconButton(onClick = { message = null }) {
+                            Icon(Icons.Default.Close, "Dismiss")
+                        }
+                    }
                 }
             }
         }
+    }
+
+    if (showConnections) {
+        VncConnectionsDialog(
+            viewModel = viewModel,
+            onDismiss = { showConnections = false },
+            onAdd = {
+                showConnections = false
+                editor = VncLauncherProfile(
+                    id = UUID.randomUUID().toString(),
+                    name = "VNC connection"
+                )
+            },
+            onEdit = {
+                showConnections = false
+                editor = it
+            },
+            onConnect = { profile ->
+                showConnections = false
+                viewModel.connect(profile)
+            },
+            onDisconnect = {
+                showConnections = false
+                viewModel.disconnect()
+            },
+            onWakeResult = { result ->
+                message = result.fold(
+                    onSuccess = { "Wake-on-LAN packet sent" },
+                    onFailure = { it.message ?: "Wake-on-LAN failed" }
+                )
+            }
+        )
     }
 
     editor?.let { profile ->
@@ -272,7 +167,10 @@ fun VncLauncherScreen(viewModel: VncLauncherViewModel) {
             initial = profile,
             onDismiss = { editor = null },
             onDelete = if (profiles.any { it.id == profile.id }) {
-                { viewModel.deleteProfile(profile.id); editor = null }
+                {
+                    viewModel.deleteProfile(profile.id)
+                    editor = null
+                }
             } else null,
             onSave = {
                 runCatching { viewModel.saveProfile(it) }
@@ -284,136 +182,174 @@ fun VncLauncherScreen(viewModel: VncLauncherViewModel) {
 }
 
 @Composable
-private fun VncStatusCard(
-    profile: VncLauncherProfile?,
-    state: EmbeddedVncState,
-    detail: String?,
-    screenEnabled: Boolean,
-    framebuffer: Pair<Int, Int>?
+private fun VncLauncherCard(
+    index: String,
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
 ) {
-    ElevatedCard(Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                when (state) {
-                    EmbeddedVncState.CONNECTED -> Icons.Default.DesktopWindows
-                    EmbeddedVncState.CONNECTING -> Icons.Default.Sync
-                    EmbeddedVncState.ERROR -> Icons.Default.ErrorOutline
-                    EmbeddedVncState.OFF -> Icons.Default.DesktopAccessDisabled
-                },
-                null,
-                Modifier.size(30.dp)
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(profile?.name ?: "VNC Viewer", fontWeight = FontWeight.Bold)
-                Text(
-                    when (state) {
-                        EmbeddedVncState.CONNECTED -> if (screenEnabled) "Connected • screen on" else "Connected • screen off"
-                        EmbeddedVncState.CONNECTING -> "Connecting…"
-                        EmbeddedVncState.ERROR -> "Connection error"
-                        EmbeddedVncState.OFF -> "Off • no VNC resources active"
-                    },
-                    style = MaterialTheme.typography.bodySmall
-                )
-                profile?.let { Text("${it.host}:${it.port}", style = MaterialTheme.typography.labelSmall) }
-                framebuffer?.let { Text("Framebuffer ${it.first} × ${it.second}", style = MaterialTheme.typography.labelSmall) }
-                detail?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
-            }
-            if (state == EmbeddedVncState.CONNECTING) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-        }
-    }
-}
-
-@Composable
-private fun VncLiveControls(
-    viewModel: VncLauncherViewModel,
-    keyboardText: String,
-    onKeyboardText: (String) -> Unit,
-    resizeWidth: String,
-    onResizeWidth: (String) -> Unit,
-    resizeHeight: String,
-    onResizeHeight: (String) -> Unit,
-    onMessage: (String) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(onClick = { viewModel.refreshFramebuffer() }, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(4.dp)); Text("Refresh")
-            }
-            FilledTonalButton(onClick = { viewModel.sendClipboardFromAndroid() }, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Default.ContentPaste, null); Spacer(Modifier.width(4.dp)); Text("Clipboard")
-            }
-            FilledTonalButton(onClick = { expanded = !expanded }, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Default.Tune, null); Spacer(Modifier.width(4.dp)); Text("Tools")
-            }
-        }
-        if (expanded) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(
-                    "Esc" to XKeySym.XK_Escape,
-                    "Tab" to XKeySym.XK_Tab,
-                    "Ctrl" to XKeySym.XK_Control_L,
-                    "Alt" to XKeySym.XK_Alt_L,
-                    "Super" to XKeySym.XK_Super_L
-                ).forEach { (label, key) ->
-                    OutlinedButton(
-                        onClick = { viewModel.tapKeySym(key) },
-                        modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(horizontal = 4.dp)
-                    ) { Text(label, maxLines = 1) }
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 0.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 15.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                tonalElevation = 0.dp
+            ) {
+                Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = keyboardText,
-                    onValueChange = onKeyboardText,
-                    label = { Text("Send text") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
-                )
-                Button(
-                    onClick = {
-                        viewModel.sendText(keyboardText)
-                        onKeyboardText("")
-                    },
-                    enabled = keyboardText.isNotEmpty(),
-                    modifier = Modifier.align(Alignment.CenterVertically)
-                ) { Text("Send") }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(index, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(2.dp))
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = resizeWidth,
-                    onValueChange = { if (it.all(Char::isDigit)) onResizeWidth(it) },
-                    label = { Text("Remote width") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedTextField(
-                    value = resizeHeight,
-                    onValueChange = { if (it.all(Char::isDigit)) onResizeHeight(it) },
-                    label = { Text("Remote height") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
-                )
-                FilledTonalButton(
-                    onClick = {
-                        val w = resizeWidth.toIntOrNull()
-                        val h = resizeHeight.toIntOrNull()
-                        if (w != null && h != null && w > 0 && h > 0) viewModel.resizeRemote(w, h)
-                        else onMessage("Enter a valid remote width and height")
-                    },
-                    modifier = Modifier.align(Alignment.CenterVertically)
-                ) { Text("Resize") }
-            }
+            Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 @Composable
-private fun VncProfileEditor(
+private fun VncConnectionsDialog(
+    viewModel: VncLauncherViewModel,
+    onDismiss: () -> Unit,
+    onAdd: () -> Unit,
+    onEdit: (VncLauncherProfile) -> Unit,
+    onConnect: (VncLauncherProfile) -> Unit,
+    onDisconnect: () -> Unit,
+    onWakeResult: (Result<Unit>) -> Unit
+) {
+    val profiles by viewModel.profiles.collectAsState()
+    val selectedId by viewModel.selectedProfileId.collectAsState()
+    val state by viewModel.connectionState.collectAsState()
+    val active = viewModel.activeProfile()
+    val canAdd = !viewModel.singleDisplayMode || profiles.isEmpty()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Link, null) },
+        title = { Text(if (viewModel.singleDisplayMode) "VNC connection" else "VNC connections") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 540.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (profiles.isEmpty()) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        tonalElevation = 0.dp
+                    ) {
+                        Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.DesktopWindows, null, modifier = Modifier.size(34.dp))
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                if (viewModel.singleDisplayMode) "No VNC display registered" else "No VNC connections yet",
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                } else {
+                    profiles.forEach { profile ->
+                        val isActive = active?.id == profile.id
+                        val isSelected = selectedId == profile.id
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.selectProfile(profile.id) },
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            tonalElevation = 0.dp,
+                            border = BorderStroke(
+                                if (isSelected) 2.dp else 1.dp,
+                                if (isSelected) MaterialTheme.colorScheme.outline
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                            )
+                        ) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(profile.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                        Text("${profile.host}:${profile.port}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    IconButton(onClick = { onEdit(profile) }) {
+                                        Icon(Icons.Default.Settings, "Edit connection")
+                                    }
+                                }
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        when {
+                                            isActive && state == EmbeddedVncState.CONNECTED -> "Connected"
+                                            isActive && state == EmbeddedVncState.CONNECTING -> "Connecting"
+                                            isActive && state == EmbeddedVncState.ERROR -> "Error"
+                                            else -> "Saved"
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    if (profile.wakeMac.isNotBlank() && !isActive) {
+                                        IconButton(onClick = { viewModel.wake(profile, onWakeResult) }) {
+                                            Icon(Icons.Default.Power, "Wake-on-LAN")
+                                        }
+                                    }
+                                    if (isActive && (state == EmbeddedVncState.CONNECTED || state == EmbeddedVncState.CONNECTING)) {
+                                        OutlinedButton(onClick = onDisconnect, shape = RoundedCornerShape(7.dp)) {
+                                            Icon(Icons.Default.Stop, null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Disconnect")
+                                        }
+                                    } else {
+                                        FilledTonalButton(onClick = { onConnect(profile) }, shape = RoundedCornerShape(7.dp)) {
+                                            Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(17.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Connect")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (canAdd) {
+                    OutlinedButton(onClick = onAdd, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(9.dp)) {
+                        Icon(Icons.Default.Add, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (viewModel.singleDisplayMode) "Register VNC display" else "Add connection")
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        shape = RoundedCornerShape(26.dp)
+    )
+}
+
+@Composable
+internal fun VncProfileEditor(
     initial: VncLauncherProfile,
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)?,
@@ -437,6 +373,8 @@ private fun VncProfileEditor(
     var trustAll by remember(initial.id) { mutableStateOf(initial.trustAllCertificates) }
     var certificate by remember(initial.id) { mutableStateOf(initial.trustedCertificateSha256) }
     var wakeMac by remember(initial.id) { mutableStateOf(initial.wakeMac) }
+    var viewerExpanded by remember(initial.id) { mutableStateOf(false) }
+    var advancedExpanded by remember(initial.id) { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -446,7 +384,7 @@ private fun VncProfileEditor(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 520.dp)
+                    .heightIn(max = 540.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -471,56 +409,52 @@ private fun VncProfileEditor(
                 )
                 SettingSwitch("Remember password", rememberPassword) { rememberPassword = it }
 
-                HorizontalDivider()
-                Text("Protocol", fontWeight = FontWeight.Bold)
-                OutlinedTextField(
-                    securityType,
-                    { if (it.all { c -> c.isDigit() }) securityType = it },
-                    label = { Text("RFB security type (0 = automatic)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Text("Image quality: ${imageQuality.toInt()}", style = MaterialTheme.typography.bodySmall)
-                Slider(value = imageQuality, onValueChange = { imageQuality = it }, valueRange = 0f..9f, steps = 8)
-                SettingSwitch("Raw encoding only (debug/compatibility)", raw) { raw = it }
-                SettingSwitch("Local cursor", localCursor) { localCursor = it }
-                SettingSwitch("View only", viewOnly) { viewOnly = it }
-                SettingSwitch("Direct touch instead of touchpad", directTouch) { directTouch = it }
-                SettingSwitch("Clipboard sync", clipboardSync) { clipboardSync = it }
-                SettingSwitch("Reconnect automatically", autoReconnect) { autoReconnect = it }
+                ExpandableSettingsSection("Viewer", viewerExpanded, { viewerExpanded = it }) {
+                    Text("Image quality: ${imageQuality.toInt()}", style = MaterialTheme.typography.bodySmall)
+                    Slider(value = imageQuality, onValueChange = { imageQuality = it }, valueRange = 0f..9f, steps = 8)
+                    SettingSwitch("Raw encoding only", raw) { raw = it }
+                    SettingSwitch("Local cursor", localCursor) { localCursor = it }
+                    SettingSwitch("View only", viewOnly) { viewOnly = it }
+                    SettingSwitch("Direct touch", directTouch) { directTouch = it }
+                    SettingSwitch("Clipboard sync", clipboardSync) { clipboardSync = it }
+                    SettingSwitch("Reconnect automatically", autoReconnect) { autoReconnect = it }
+                }
 
-                HorizontalDivider()
-                Text("Advanced", fontWeight = FontWeight.Bold)
-                OutlinedTextField(
-                    repeaterId,
-                    { if (it.all { c -> c.isDigit() }) repeaterId = it },
-                    label = { Text("VNC Repeater ID (optional)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                SettingSwitch("Trust all TLS certificates", trustAll) { trustAll = it }
-                if (!trustAll) {
+                ExpandableSettingsSection("Security & advanced", advancedExpanded, { advancedExpanded = it }) {
                     OutlinedTextField(
-                        certificate,
-                        { certificate = it },
-                        label = { Text("Trusted certificate SHA-256") },
-                        minLines = 2,
+                        securityType,
+                        { if (it.all { c -> c.isDigit() }) securityType = it },
+                        label = { Text("RFB security type (0 = automatic)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        repeaterId,
+                        { if (it.all { c -> c.isDigit() }) repeaterId = it },
+                        label = { Text("VNC Repeater ID (optional)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    SettingSwitch("Trust all TLS certificates", trustAll) { trustAll = it }
+                    if (!trustAll) {
+                        OutlinedTextField(
+                            certificate,
+                            { certificate = it },
+                            label = { Text("Trusted certificate SHA-256") },
+                            minLines = 2,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    OutlinedTextField(
+                        wakeMac,
+                        { wakeMac = it },
+                        label = { Text("Wake-on-LAN MAC (optional)") },
+                        singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
-                OutlinedTextField(
-                    wakeMac,
-                    { wakeMac = it },
-                    label = { Text("Wake-on-LAN MAC (optional)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Text(
-                    "AVNC/LibVNCClient is embedded only as the VNC protocol/rendering engine. These settings belong to this standalone viewer and do not modify any DroidSpaces container.",
-                    style = MaterialTheme.typography.labelSmall
-                )
             }
         },
         confirmButton = {
@@ -564,7 +498,46 @@ private fun VncProfileEditor(
 }
 
 @Composable
-private fun SettingSwitch(label: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
+private fun ExpandableSettingsSection(
+    title: String,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 0.dp
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onExpandedChange(!expanded) }
+                    .padding(horizontal = 12.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
+            }
+            if (expanded) {
+                Column(
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    content = content
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun SettingSwitch(
+    label: String,
+    checked: Boolean,
+    onChecked: (Boolean) -> Unit
+) {
     Row(
         Modifier
             .fillMaxWidth()
