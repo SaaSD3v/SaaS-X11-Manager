@@ -152,9 +152,11 @@ object VncServerManager {
                 return@withContext VncStartResult(false, port, displayName)
             }
 
-            delay(750)
-            if (!isPortListening(containerName, port)) {
-                logger?.e("[-] TigerVNC stopped after the graphical session launch")
+            // The previous path slept a fixed 750 ms and then checked only the
+            // TCP port. Verify the recorded server/session identities plus LISTEN
+            // state across a short stability window inside one container command.
+            if (!isStandaloneRuntimeStable(containerName, port)) {
+                logger?.e("[-] TigerVNC or its graphical session became unstable after launch")
                 logContainerFileTail(containerName, SERVER_LOG, logger)
                 logContainerFileTail(containerName, SESSION_LOG, logger)
                 stopManagedVnc(containerName, logger)
@@ -529,18 +531,23 @@ object VncServerManager {
         return runContainerCapture(containerName, command).firstOrNull()?.trim()?.toIntOrNull()
     }
 
-    private suspend fun waitForPort(
+    private fun waitForPort(
         containerName: String,
         port: Int,
         timeoutMillis: Long = 10_000L
     ): Boolean {
-        val deadline = System.nanoTime() + timeoutMillis * 1_000_000L
-        while (true) {
-            if (isPortListening(containerName, port)) return true
-            if (System.nanoTime() >= deadline) return false
-            delay(250)
-        }
+        val attempts = ((timeoutMillis + 99L) / 100L).coerceAtLeast(1L).toInt()
+        return probeContainer(
+            containerName,
+            VncRuntimeSafety.waitForListeningPort(port, attempts)
+        )
     }
+
+    private fun isStandaloneRuntimeStable(containerName: String, port: Int): Boolean =
+        probeContainer(
+            containerName,
+            VncRuntimeSafety.stableStandaloneRuntime(STATE_DIR, port)
+        )
 
     private fun isPortListening(containerName: String, port: Int): Boolean =
         probeContainer(containerName, portListeningCommand(port))

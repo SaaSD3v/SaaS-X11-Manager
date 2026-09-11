@@ -44,6 +44,28 @@ class VncRuntimeSafetyTest {
     }
 
     @Test
+    fun `port wait performs bounded polling inside one shell script`() {
+        val script = VncRuntimeSafety.waitForListeningPort(5901, attempts = 100)
+        assertTrue(script.contains("port_listening()"))
+        assertTrue(script.contains("attempt=0"))
+        assertTrue(script.contains("-lt 100"))
+        assertTrue(script.contains("sleep 0.1"))
+        assertTrue(script.contains("return 0"))
+    }
+
+    @Test
+    fun `standalone stability validates both recorded leases and listener`() {
+        val script = VncRuntimeSafety.stableStandaloneRuntime("/run/test-vnc", 5901)
+        assertTrue(script.contains("server.pid"))
+        assertTrue(script.contains("session.pid"))
+        assertTrue(script.contains("server.start"))
+        assertTrue(script.contains("session.start"))
+        assertTrue(script.contains("/proc/${'$'}pid/stat"))
+        assertTrue(script.contains("port_listening"))
+        assertTrue(script.contains("sample=0"))
+    }
+
+    @Test
     fun `integrated service stop verifies both systemd units`() {
         val script = VncRuntimeSafety.stopIntegratedGraphicService()
         assertTrue(script.contains("x11-session.service"))

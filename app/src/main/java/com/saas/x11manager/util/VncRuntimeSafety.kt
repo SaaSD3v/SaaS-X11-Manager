@@ -54,8 +54,6 @@ internal object VncRuntimeSafety {
             fi
         done
 
-        # No owned process means there is nothing to wait for. When TERM was sent,
-        # poll for at most one second and stop as soon as both leases are gone.
         if [ "${'$'}had_owned" -eq 1 ]; then
             try=0
             while [ "${'$'}try" -lt 10 ]; do
@@ -82,8 +80,6 @@ internal object VncRuntimeSafety {
             fi
         done
 
-        # SIGKILL normally completes immediately. Bound the verification wait and
-        # skip it entirely when no forced kill was necessary.
         if [ "${'$'}forced" -eq 1 ]; then
             try=0
             while [ "${'$'}try" -lt 5 ]; do
@@ -119,6 +115,86 @@ internal object VncRuntimeSafety {
             "[ \"\$state\" = 0A ] || continue; " +
             "case \"\$local\" in *:\$hex) exit 0 ;; esac; " +
             "done < \"\$table\"; done; exit 1"
+
+    /** Polls the container-local TCP tables inside one DroidSpaces invocation. */
+    fun waitForListeningPort(
+        port: Int,
+        attempts: Int,
+        sleepSeconds: String = "0.1"
+    ): String {
+        require(attempts > 0)
+        return """
+            port_listening() {
+                hex=${'$'}(printf '%04X' $port)
+                for table in /proc/net/tcp /proc/net/tcp6; do
+                    [ -r "${'$'}table" ] || continue
+                    while read -r sl local remote state rest; do
+                        [ "${'$'}state" = 0A ] || continue
+                        case "${'$'}local" in *:${'$'}hex) return 0 ;; esac
+                    done < "${'$'}table"
+                done
+                return 1
+            }
+            attempt=0
+            while [ "${'$'}attempt" -lt $attempts ]; do
+                port_listening && exit 0
+                attempt=${'$'}((attempt + 1))
+                [ "${'$'}attempt" -ge $attempts ] && break
+                sleep $sleepSeconds
+            done
+            exit 1
+        """.trimIndent()
+    }
+
+    /**
+     * Confirms that both Manager leases survive a short stability window after
+     * the desktop launcher starts. This replaces a blind fixed delay with direct
+     * process-identity and listener observations.
+     */
+    fun stableStandaloneRuntime(
+        stateDir: String,
+        port: Int,
+        samples: Int = 3,
+        sleepSeconds: String = "0.1"
+    ): String {
+        require(samples > 0)
+        return """
+            owned_role() {
+                role="${'$'}1"
+                pid=${'$'}(cat "$stateDir/${'$'}role.pid" 2>/dev/null) || return 1
+                expected=${'$'}(cat "$stateDir/${'$'}role.start" 2>/dev/null) || return 1
+                case "${'$'}pid:${'$'}expected" in *[!0-9:]*|'':*|*:) return 1 ;; esac
+                kill -0 "${'$'}pid" 2>/dev/null || return 1
+                actual=${'$'}(awk '{print ${'$'}22}' "/proc/${'$'}pid/stat" 2>/dev/null) || return 1
+                [ "${'$'}actual" = "${'$'}expected" ] || return 1
+                if [ "${'$'}role" = server ]; then
+                    cmd=${'$'}(tr '\000' ' ' < "/proc/${'$'}pid/cmdline" 2>/dev/null || true)
+                    case "${'$'}cmd" in *Xtigervnc*|*Xvnc*) ;; *) return 1 ;; esac
+                fi
+            }
+            port_listening() {
+                hex=${'$'}(printf '%04X' $port)
+                for table in /proc/net/tcp /proc/net/tcp6; do
+                    [ -r "${'$'}table" ] || continue
+                    while read -r sl local remote state rest; do
+                        [ "${'$'}state" = 0A ] || continue
+                        case "${'$'}local" in *:${'$'}hex) return 0 ;; esac
+                    done < "${'$'}table"
+                done
+                return 1
+            }
+            sample=0
+            while [ "${'$'}sample" -lt $samples ]; do
+                owned_role server || exit 1
+                owned_role session || exit 1
+                port_listening || exit 1
+                sample=${'$'}((sample + 1))
+                [ "${'$'}sample" -ge $samples ] && exit 0
+                sleep $sleepSeconds
+            done
+            exit 1
+        """.trimIndent()
+    }
 
     fun stopIntegratedGraphicService(): String = """
         if command -v systemctl >/dev/null 2>&1; then
