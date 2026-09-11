@@ -263,11 +263,17 @@ object ContainerSettingsManager {
 
         return try {
             tmpFile.writeText(lines.joinToString("\n") + "\n")
+            val targetTmp = "$settingsPath.tmp.${android.os.Process.myPid()}"
             val result = Shell.cmd(
                 "mkdir -p ${shellQuote(containerDir)} && " +
-                    "cp ${shellQuote(tmpFile.absolutePath)} ${shellQuote(settingsPath)} && " +
-                    "chmod 600 ${shellQuote(settingsPath)}"
+                    "rm -f ${shellQuote(targetTmp)} && " +
+                    "cp ${shellQuote(tmpFile.absolutePath)} ${shellQuote(targetTmp)} && " +
+                    "chmod 600 ${shellQuote(targetTmp)} && " +
+                    "mv -f ${shellQuote(targetTmp)} ${shellQuote(settingsPath)}"
             ).exec()
+            if (!result.isSuccess) {
+                Shell.cmd("rm -f ${shellQuote(targetTmp)} 2>/dev/null || true").exec()
+            }
             if (result.isSuccess) {
                 invalidateSnapshot(containerName)
                 true
