@@ -5,8 +5,10 @@ internal object PulseAudioClientConfig {
     private const val STATE = "/etc/saas-x11-manager/audio"
     private const val OWNER = "SaaS X11 Manager Audio Configuration"
     private const val FAILURE = "__SAAS_AUDIO_FAILURE__:"
+    private const val WARNING = "__SAAS_AUDIO_WARNING__:"
 
     fun isFailureMarker(line: String): Boolean = line.trim().startsWith(FAILURE)
+    fun isWarningMarker(line: String): Boolean = line.trim().startsWith(WARNING)
 
     fun failureTrap(): String = """
         saas_audio_step=packages
@@ -138,14 +140,47 @@ internal object PulseAudioClientConfig {
                 export HOME="${'$'}selected_home" USER="${'$'}selected"
                 . $STATE/prepare-session.sh
             ) || exit 94
-            selected_info=${'$'}(su -s /bin/sh "${'$'}selected" -c '. /etc/profile.d/saas-x11-audio.sh; LC_ALL=C timeout 5 pactl info') || exit 95
-            printf '%s\n' "${'$'}selected_info"
-            printf '%s\n' "${'$'}selected_info" | grep -Fxq 'Server String: $server' || exit 95
+
+            # pactl is a useful control-plane health signal, but it can race the
+            # freshly configured client on real DroidSpaces NAT. Retry it and
+            # report a warning instead of declaring audio dead. The finite pacat
+            # probe below remains the authoritative data-path check.
+            selected_info=''
+            selected_ok=0
+            selected_try=0
+            while [ "${'$'}selected_try" -lt 3 ]; do
+                selected_info=${'$'}(su -s /bin/sh "${'$'}selected" -c '. /etc/profile.d/saas-x11-audio.sh; LC_ALL=C timeout 5 pactl info' 2>&1) && {
+                    printf '%s\n' "${'$'}selected_info" | grep -Fxq 'Server String: $server' && selected_ok=1
+                }
+                [ "${'$'}selected_ok" -eq 1 ] && break
+                selected_try=${'$'}((selected_try + 1))
+                [ "${'$'}selected_try" -lt 3 ] && sleep 1
+            done
+            if [ "${'$'}selected_ok" -eq 1 ]; then
+                printf '%s\n' "${'$'}selected_info"
+            else
+                printf '$WARNING%s\n' "desktop-user-control-probe:${'$'}selected" >&2
+            fi
         fi
+
         saas_audio_step=client-auth
         HOME=/root
         . /etc/profile.d/saas-x11-audio.sh
-        LC_ALL=C timeout 5 pactl info || exit 95
+        root_info=''
+        root_ok=0
+        root_try=0
+        while [ "${'$'}root_try" -lt 3 ]; do
+            root_info=${'$'}(LC_ALL=C timeout 5 pactl info 2>&1) && {
+                printf '%s\n' "${'$'}root_info" | grep -Fxq 'Server String: $server' && root_ok=1
+            }
+            [ "${'$'}root_ok" -eq 1 ] && break
+            root_try=${'$'}((root_try + 1))
+            [ "${'$'}root_try" -lt 3 ] && sleep 1
+        done
+        if [ "${'$'}root_ok" -eq 0 ]; then
+            printf '$WARNING%s\n' 'root-control-probe' >&2
+        fi
+
         saas_audio_step=pcm-playback
         ${playbackProbe(server, "/root/.config/pulse/saas-audio.cookie", "$STATE/client.conf").prependIndent("        ")} || exit 96
         printf '%s\n' __SAAS_AUDIO_PCM_DRAINED__
