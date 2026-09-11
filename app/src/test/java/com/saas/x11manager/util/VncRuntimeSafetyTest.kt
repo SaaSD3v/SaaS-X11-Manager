@@ -1,5 +1,6 @@
 package com.saas.x11manager.util
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -25,11 +26,43 @@ class VncRuntimeSafetyTest {
     }
 
     @Test
+    fun `stop waits only when an owned process actually existed`() {
+        val script = VncRuntimeSafety.stopOwnedRuntime("/run/test-vnc")
+        assertTrue(script.contains("had_owned=0"))
+        assertTrue(script.contains("if [ \"${'$'}had_owned\" -eq 1 ]"))
+        assertTrue(script.contains("if [ \"${'$'}forced\" -eq 1 ]"))
+        assertTrue(script.contains("sleep 0.1"))
+        assertFalse(script.contains("sleep 1\n"))
+    }
+
+    @Test
     fun `port probe accepts only TCP LISTEN state`() {
         val script = VncRuntimeSafety.listeningPort(5901)
         assertTrue(script.contains("[ \"${'$'}state\" = 0A ]"))
         assertTrue(script.contains("/proc/net/tcp"))
         assertTrue(script.contains("/proc/net/tcp6"))
+    }
+
+    @Test
+    fun `port wait performs bounded polling inside one shell script`() {
+        val script = VncRuntimeSafety.waitForListeningPort(5901, attempts = 100)
+        assertTrue(script.contains("port_listening()"))
+        assertTrue(script.contains("attempt=0"))
+        assertTrue(script.contains("-lt 100"))
+        assertTrue(script.contains("sleep 0.1"))
+        assertTrue(script.contains("return 0"))
+    }
+
+    @Test
+    fun `standalone stability validates both recorded leases and listener`() {
+        val script = VncRuntimeSafety.stableStandaloneRuntime("/run/test-vnc", 5901)
+        assertTrue(script.contains("/run/test-vnc/${'$'}role.pid"))
+        assertTrue(script.contains("/run/test-vnc/${'$'}role.start"))
+        assertTrue(script.contains("owned_role server"))
+        assertTrue(script.contains("owned_role session"))
+        assertTrue(script.contains("/proc/${'$'}pid/stat"))
+        assertTrue(script.contains("port_listening"))
+        assertTrue(script.contains("sample=0"))
     }
 
     @Test

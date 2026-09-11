@@ -11,12 +11,18 @@ class PulseAudioClientHealthPolicyTest {
 
         assertTrue(script.contains("desktop-user-control-probe"))
         assertTrue(script.contains("root-control-probe"))
-        assertTrue(script.contains("selected_try"))
-        assertTrue(script.contains("root_try"))
         assertTrue(script.contains("pacat"))
         assertTrue(script.contains("|| exit 96"))
         assertTrue(script.contains("__SAAS_AUDIO_PCM_DRAINED__"))
+        assertTrue(script.contains("timeout 1 pactl info"))
+        assertFalse(script.contains("selected_try"))
+        assertFalse(script.contains("root_try"))
         assertFalse(script.contains("exit 95"))
+
+        val pcm = script.indexOf("__SAAS_AUDIO_PCM_DRAINED__")
+        val userDiagnostic = script.indexOf("desktop-user-control-probe")
+        val rootDiagnostic = script.indexOf("root-control-probe")
+        assertTrue(pcm >= 0 && userDiagnostic > pcm && rootDiagnostic > pcm)
     }
 
     @Test

@@ -114,15 +114,21 @@ object GraphicSessionUserManager {
             logger?.e("[-] Could not resolve container while preparing graphical user")
             return@withContext null
         }
+
+        // Persisted selection used to be read twice here: once to choose the
+        // effective account and again to compute rollback state. On stopped image
+        // rootfs that meant a second mount/unmount cycle in the same Start. Keep
+        // one immutable read and use it for both decisions.
+        val persisted = readPersistedSelection(info)
         val requested = selectedForStart[containerName]
-            ?: readPersistedSelection(info)
+            ?: persisted
             ?: GraphicSessionUserSelection.ROOT
         if (!isValidUserName(requested.userName)) {
             logger?.e("[-] Invalid graphical user name: ${requested.userName}")
             return@withContext null
         }
 
-        val previous = readPersistedSelection(info)
+        val previous = persisted
         // The launcher is derived state. Commit it first and make the persisted
         // selection the final source-of-truth write. Both files use same-directory
         // temp + rename so a process interruption never exposes a truncated file.
@@ -192,7 +198,8 @@ object GraphicSessionUserManager {
                     "tmp=$SETTINGS_FILE.tmp.\$\$; " +
                     "trap 'rm -f \"\$tmp\"' EXIT HUP INT TERM; " +
                     "printf '%s' ${shellQuote(body)} > \"\$tmp\" && chmod 600 \"\$tmp\" && " +
-                    "mv -f \"\$tmp\" $SETTINGS_FILE"
+                    "if command -v cmp >/dev/null 2>&1 && cmp -s \"\$tmp\" $SETTINGS_FILE 2>/dev/null; then " +
+                    "rm -f \"\$tmp\"; else mv -f \"\$tmp\" $SETTINGS_FILE; fi"
             runContainerCommand(info.name, command).isSuccess
         } else {
             RootfsAccessor.use(
@@ -206,7 +213,8 @@ object GraphicSessionUserManager {
                         "tmp=${shellQuote(file)}.tmp.\$\$; " +
                         "trap 'rm -f \"\$tmp\"' EXIT HUP INT TERM; " +
                         "printf '%s' ${shellQuote(body)} > \"\$tmp\" && chmod 600 \"\$tmp\" && " +
-                        "mv -f \"\$tmp\" ${shellQuote(file)}"
+                        "if command -v cmp >/dev/null 2>&1 && cmp -s \"\$tmp\" ${shellQuote(file)} 2>/dev/null; then " +
+                        "rm -f \"\$tmp\"; else mv -f \"\$tmp\" ${shellQuote(file)}; fi"
                 ).exec().isSuccess
             } ?: false
         }
@@ -258,7 +266,9 @@ object GraphicSessionUserManager {
                     "tmp=$SESSION_LAUNCHER.tmp.\$\$; " +
                     "trap 'rm -f \"\$tmp\"' EXIT HUP INT TERM; " +
                     "printf '%s' ${shellQuote(script)} > \"\$tmp\" && " +
-                    "chmod 755 \"\$tmp\" && mv -f \"\$tmp\" $SESSION_LAUNCHER"
+                    "chmod 755 \"\$tmp\" && " +
+                    "if command -v cmp >/dev/null 2>&1 && cmp -s \"\$tmp\" $SESSION_LAUNCHER 2>/dev/null; then " +
+                    "rm -f \"\$tmp\"; else mv -f \"\$tmp\" $SESSION_LAUNCHER; fi"
             runContainerCommand(info.name, command).isSuccess
         } else {
             RootfsAccessor.use(
@@ -273,7 +283,9 @@ object GraphicSessionUserManager {
                         "tmp=${shellQuote(launcher)}.tmp.\$\$; " +
                         "trap 'rm -f \"\$tmp\"' EXIT HUP INT TERM; " +
                         "printf '%s' ${shellQuote(script)} > \"\$tmp\" && " +
-                        "chmod 755 \"\$tmp\" && mv -f \"\$tmp\" ${shellQuote(launcher)}"
+                        "chmod 755 \"\$tmp\" && " +
+                        "if command -v cmp >/dev/null 2>&1 && cmp -s \"\$tmp\" ${shellQuote(launcher)} 2>/dev/null; then " +
+                        "rm -f \"\$tmp\"; else mv -f \"\$tmp\" ${shellQuote(launcher)}; fi"
                 ).exec().isSuccess
             } ?: false
         }

@@ -35,6 +35,8 @@ internal object PulseAudioClientConfig {
         return "$step (exit $code)"
     }
 
+    // Init services do not read /etc/profile. Run this after HOME/USER have been
+    // selected and before dropping privileges or exec'ing the desktop.
     fun sessionEnvironment(): String = """
         if [ -r $STATE/prepare-session.sh ]; then
             . $STATE/prepare-session.sh
@@ -58,6 +60,8 @@ internal object PulseAudioClientConfig {
         chmod 644 $STATE/client.conf.tmp || exit 91
         mv $STATE/client.conf.tmp $STATE/client.conf || exit 91
 
+        # Retired profiles can otherwise overwrite HOST with an old NAT endpoint
+        # (or vice versa), depending on the login shell's glob order.
         for old in /etc/profile.d/saas-droidspaces-audio.sh /etc/profile.d/android-audio.sh; do
             if [ -f "${'$'}old" ] && grep -Eq 'SaaS (X11 Manager|DroidSpaces Audio)' "${'$'}old"; then
                 rm -f "${'$'}old" || exit 92
@@ -66,6 +70,8 @@ internal object PulseAudioClientConfig {
         cat > /etc/profile.d/saas-x11-audio.sh <<'SAAS_PROFILE'
         # $OWNER
         if [ -r $STATE/client.conf ] && [ -r "${'$'}HOME/.config/pulse/saas-audio.cookie" ]; then
+            # Read the current endpoint from disk, including after a network-mode
+            # change. Never retain DroidSpaces' inherited native socket endpoint.
             unset PULSE_SERVER
             export PULSE_CLIENTCONFIG=$STATE/client.conf
             export PULSE_COOKIE="${'$'}HOME/.config/pulse/saas-audio.cookie"
@@ -73,6 +79,9 @@ internal object PulseAudioClientConfig {
         SAAS_PROFILE
         chmod 644 /etc/profile.d/saas-x11-audio.sh || exit 92
 
+        # Write inside a user's home as that user. The root-only cookie is passed
+        # on stdin, so neither world-readable credentials nor root writes through
+        # a user-controlled .config symlink are needed.
         cat > $STATE/write-client.sh <<'SAAS_WRITE_CLIENT'
         # $OWNER
         set -e
@@ -115,6 +124,8 @@ internal object PulseAudioClientConfig {
         SAAS_SESSION
         chmod 644 $STATE/prepare-session.sh || exit 93
 
+        # Configure root and the actual graphical account. An account created by
+        # the next launcher is handled by the same helper after user creation.
         saas_audio_step=root-client
         (
             export HOME=/root USER=root
@@ -129,18 +140,20 @@ internal object PulseAudioClientConfig {
                 export HOME="${'$'}selected_home" USER="${'$'}selected"
                 . $STATE/prepare-session.sh
             ) || exit 94
-            selected_info=''
-            selected_ok=0
-            selected_try=0
-            while [ "${'$'}selected_try" -lt 3 ]; do
-                selected_info=${'$'}(su -s /bin/sh "${'$'}selected" -c '. /etc/profile.d/saas-x11-audio.sh; LC_ALL=C timeout 5 pactl info' 2>&1) && {
-                    printf '%s\n' "${'$'}selected_info" | grep -Fxq 'Server String: $server' && selected_ok=1
-                }
-                [ "${'$'}selected_ok" -eq 1 ] && break
-                selected_try=${'$'}((selected_try + 1))
-                [ "${'$'}selected_try" -lt 3 ] && sleep 1
-            done
-            if [ "${'$'}selected_ok" -eq 1 ]; then
+        fi
+
+        # The finite PCM stream is the authoritative data-path proof. Run it
+        # before advisory pactl diagnostics so a stale/slow control query cannot
+        # delay or invalidate audio that is already capable of real playback.
+        saas_audio_step=pcm-playback
+        ${playbackProbe(server, "/root/.config/pulse/saas-audio.cookie", "$STATE/client.conf").prependIndent("        ")} || exit 96
+        printf '%s\n' __SAAS_AUDIO_PCM_DRAINED__
+
+        # Control-plane snapshots are diagnostics only. Keep them bounded to one
+        # short attempt each; callers already have a proven PCM data path here.
+        if [ -n "${'$'}selected" ] && [ "${'$'}selected" != root ] && id "${'$'}selected" >/dev/null 2>&1; then
+            selected_info=${'$'}(su -s /bin/sh "${'$'}selected" -c '. /etc/profile.d/saas-x11-audio.sh; LC_ALL=C timeout 1 pactl info' 2>&1) || true
+            if printf '%s\n' "${'$'}selected_info" | grep -Fxq 'Server String: $server'; then
                 printf '%s\n' "${'$'}selected_info"
             else
                 printf '$WARNING%s\n' "desktop-user-control-probe:${'$'}selected" >&2
@@ -150,26 +163,15 @@ internal object PulseAudioClientConfig {
         saas_audio_step=client-auth
         HOME=/root
         . /etc/profile.d/saas-x11-audio.sh
-        root_info=''
-        root_ok=0
-        root_try=0
-        while [ "${'$'}root_try" -lt 3 ]; do
-            root_info=${'$'}(LC_ALL=C timeout 5 pactl info 2>&1) && {
-                printf '%s\n' "${'$'}root_info" | grep -Fxq 'Server String: $server' && root_ok=1
-            }
-            [ "${'$'}root_ok" -eq 1 ] && break
-            root_try=${'$'}((root_try + 1))
-            [ "${'$'}root_try" -lt 3 ] && sleep 1
-        done
-        if [ "${'$'}root_ok" -eq 0 ]; then
+        root_info=${'$'}(LC_ALL=C timeout 1 pactl info 2>&1) || true
+        if printf '%s\n' "${'$'}root_info" | grep -Fxq 'Server String: $server'; then
+            printf '%s\n' "${'$'}root_info"
+        else
             printf '$WARNING%s\n' 'root-control-probe' >&2
         fi
-
-        saas_audio_step=pcm-playback
-        ${playbackProbe(server, "/root/.config/pulse/saas-audio.cookie", "$STATE/client.conf").prependIndent("        ")} || exit 96
-        printf '%s\n' __SAAS_AUDIO_PCM_DRAINED__
     """.trimIndent()
 
+    /** A real finite stream must drain; a responsive control socket is insufficient. */
     fun playbackProbe(server: String, cookie: String, clientConfig: String): String = """
         dd if=/dev/zero bs=9600 count=5 2>/dev/null |
             PULSE_SERVER='$server' PULSE_COOKIE='$cookie' PULSE_CLIENTCONFIG='$clientConfig' \
