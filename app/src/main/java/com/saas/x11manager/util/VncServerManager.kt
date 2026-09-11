@@ -89,14 +89,20 @@ object VncServerManager {
 
             logger?.i(LogLayout.SPACER)
             logger?.i("[VNC] Launching standalone VNC runtime")
-            stopManagedVnc(containerName, logger)
+            if (!stopManagedVnc(containerName, logger)) {
+                logger?.e("[-] Refusing to replace an unverified VNC PID lease")
+                return@withContext VncStartResult(false, port)
+            }
             if (isPortListening(containerName, port)) {
                 logger?.e("[-] Port $port is already in use inside the container network namespace")
                 logger?.e("[-] Choose another VNC port in General settings")
                 return@withContext VncStartResult(false, port)
             }
 
-            stopIntegratedGraphicService(containerName, logger)
+            if (!stopIntegratedGraphicService(containerName, logger)) {
+                logger?.e("[-] Integrated X11 startup service is still active; standalone VNC was not started")
+                return@withContext VncStartResult(false, port)
+            }
 
             val displayNumber = findFreeVirtualDisplay(containerName)
             if (displayNumber == null) {
@@ -133,7 +139,8 @@ object VncServerManager {
             val sessionLaunch =
                 "DISPLAY=${shellQuote(displayName)} " +
                     "nohup $SESSION_SCRIPT >$SESSION_LOG 2>&1 & " +
-                    "session_pid=\$!; printf '%s\\n' \"\$session_pid\" > $STATE_DIR/session.pid"
+                    "session_pid=\$!; " +
+                    VncRuntimeSafety.recordLease(STATE_DIR, "session", "session_pid")
             if (!runContainerCommand(
                     containerName,
                     "Launching ${session.label} on VNC $displayName",
@@ -215,7 +222,10 @@ object VncServerManager {
                 return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
             }
 
-            stopManagedVnc(containerName, logger)
+            if (!stopManagedVnc(containerName, logger)) {
+                logger?.e("[-] Refusing to replace an unverified VNC PID lease")
+                return@withContext VncStartResult(false, port, mirroredDisplayName = integratedDisplayName)
+            }
             if (isPortListening(containerName, port)) {
                 logger?.e("[-] Port $port is already in use inside the container network namespace")
                 logger?.e("[-] Choose another VNC port in General settings")
@@ -271,22 +281,15 @@ object VncServerManager {
         containerName: String,
         logger: ContainerLogger? = null
     ): Boolean = withContext(Dispatchers.IO) {
-        val command =
-            "for pidfile in $STATE_DIR/session.pid $STATE_DIR/server.pid; do " +
-                "[ -f \"\$pidfile\" ] || continue; " +
-                "pid=\$(cat \"\$pidfile\" 2>/dev/null); " +
-                "case \"\$pid\" in ''|*[!0-9]*) continue ;; esac; " +
-                "if kill -0 \"\$pid\" 2>/dev/null; then kill \"\$pid\" 2>/dev/null || true; fi; " +
-                "done; " +
-                "sleep 1; " +
-                "for pidfile in $STATE_DIR/session.pid $STATE_DIR/server.pid; do " +
-                "[ -f \"\$pidfile\" ] || continue; " +
-                "pid=\$(cat \"\$pidfile\" 2>/dev/null); " +
-                "case \"\$pid\" in ''|*[!0-9]*) continue ;; esac; " +
-                "if kill -0 \"\$pid\" 2>/dev/null; then kill -9 \"\$pid\" 2>/dev/null || true; fi; " +
-                "done; rm -rf $STATE_DIR"
-        val result = runContainerCommandRaw(containerName, command)
-        if (result) logger?.i("[+] Previous Manager-owned VNC runtime cleared")
+        val result = runContainerCommandRaw(
+            containerName,
+            VncRuntimeSafety.stopOwnedRuntime(STATE_DIR)
+        )
+        if (result) {
+            logger?.i("[+] Previous Manager-owned VNC runtime cleared")
+        } else {
+            logger?.w("[!] VNC PID state did not match the recorded Manager lease; no unverified PID was killed")
+        }
         result
     }
 
@@ -455,16 +458,17 @@ object VncServerManager {
     private suspend fun stopIntegratedGraphicService(
         containerName: String,
         logger: ContainerLogger?
-    ) {
-        val command =
-            "if command -v systemctl >/dev/null 2>&1; then " +
-                "systemctl stop x11-session.service setup-x11-socket.service >/dev/null 2>&1 || true; " +
-                "elif command -v rc-service >/dev/null 2>&1; then " +
-                "rc-service x11-session stop >/dev/null 2>&1 || true; " +
-                "fi"
-        if (runContainerCommandRaw(containerName, command)) {
+    ): Boolean {
+        val stopped = runContainerCommandRaw(
+            containerName,
+            VncRuntimeSafety.stopIntegratedGraphicService()
+        )
+        if (stopped) {
             logger?.i("[+] Standalone VNC isolated from the Integrated X11 startup service")
+        } else {
+            logger?.w("[!] Integrated X11 startup service stop could not be confirmed")
         }
+        return stopped
     }
 
     private fun sessionLauncher(session: GraphicSession): String =
@@ -488,7 +492,8 @@ object VncServerManager {
             "[ -n \"\$server\" ] || exit 1; " +
             "rm -f /tmp/.X${displayNumber}-lock; " +
             "nohup \"\$server\" $argv >$SERVER_LOG 2>&1 & " +
-            "server_pid=\$!; printf '%s\\n' \"\$server_pid\" > $STATE_DIR/server.pid; " +
+            "server_pid=\$!; " +
+            VncRuntimeSafety.recordLease(STATE_DIR, "server", "server_pid") + "; " +
             "printf '%s\\n' standalone > $STATE_DIR/mode; " +
             "printf '%s\\n' $port > $STATE_DIR/port; " +
             "printf '%s\\n' $displayNumber > $STATE_DIR/display"
@@ -509,7 +514,8 @@ object VncServerManager {
         return "mkdir -p /root/.vnc $STATE_DIR && " +
             "server=\$(command -v x0vncserver 2>/dev/null); [ -n \"\$server\" ] || exit 1; " +
             "nohup \"\$server\" $argv >$SERVER_LOG 2>&1 & " +
-            "server_pid=\$!; printf '%s\\n' \"\$server_pid\" > $STATE_DIR/server.pid; " +
+            "server_pid=\$!; " +
+            VncRuntimeSafety.recordLease(STATE_DIR, "server", "server_pid") + "; " +
             "printf '%s\\n' mirror > $STATE_DIR/mode; " +
             "printf '%s\\n' $port > $STATE_DIR/port; " +
             "printf '%s\\n' ${shellQuote(displayName)} > $STATE_DIR/display"
@@ -540,12 +546,7 @@ object VncServerManager {
         probeContainer(containerName, portListeningCommand(port))
 
     internal fun portListeningCommand(port: Int): String =
-        "hex=\$(printf '%04X' $port); " +
-            "for table in /proc/net/tcp /proc/net/tcp6; do " +
-            "[ -r \"\$table\" ] || continue; " +
-            "while read -r sl local rest; do " +
-            "case \"\$local\" in *:\$hex) exit 0 ;; esac; " +
-            "done < \"\$table\"; done; exit 1"
+        VncRuntimeSafety.listeningPort(port)
 
     private suspend fun detectPlatform(containerName: String): ContainerPlatform? = when {
         probeContainer(containerName, "command -v apk >/dev/null 2>&1") -> ContainerPlatform.ALPINE
