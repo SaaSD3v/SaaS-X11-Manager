@@ -54,8 +54,17 @@ internal object VncRuntimeSafety {
                 unsafe=1
             fi
         done
-        rm -rf "$stateDir"
-        [ "$unsafe" -eq 0 ]
+        sleep 1
+        for role in session server; do
+            owned_pid "$role" >/dev/null 2>&1; rc=$?
+            [ "$rc" -eq 0 ] && unsafe=1
+            [ "$rc" -eq 2 ] && unsafe=1
+        done
+        if [ "$unsafe" -eq 0 ]; then
+            rm -rf "$stateDir"
+            exit 0
+        fi
+        exit 1
     """.trimIndent()
 
     fun listeningPort(port: Int): String =
@@ -70,7 +79,8 @@ internal object VncRuntimeSafety {
     fun stopIntegratedGraphicService(): String = """
         if command -v systemctl >/dev/null 2>&1; then
             systemctl stop x11-session.service setup-x11-socket.service >/dev/null 2>&1 || true
-            ! systemctl is-active --quiet x11-session.service
+            ! systemctl is-active --quiet x11-session.service &&
+                ! systemctl is-active --quiet setup-x11-socket.service
         elif command -v rc-service >/dev/null 2>&1; then
             rc-service x11-session stop >/dev/null 2>&1 || true
             ! rc-service x11-session status >/dev/null 2>&1
