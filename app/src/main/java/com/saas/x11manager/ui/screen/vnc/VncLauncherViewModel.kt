@@ -56,6 +56,7 @@ data class VncLauncherProfile(
 class VncLauncherViewModel : ViewModel() {
     private val context = X11Application.instance
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val secrets = VncSecretStore(context)
     private val clipboard = context.getSystemService(ClipboardManager::class.java)
     private val operationStore get() = context.operationLogs
 
@@ -198,6 +199,15 @@ class VncLauncherViewModel : ViewModel() {
         require(profile.host.isNotBlank()) { "Host is required" }
         require(profile.port in 1..65535) { "Port must be between 1 and 65535" }
         require(profile.securityType >= 0) { "Security type cannot be negative" }
+
+        if (profile.rememberPassword) {
+            check(secrets.write(profile.id, profile.password)) {
+                "Could not securely store the VNC password"
+            }
+        } else {
+            secrets.remove(profile.id)
+        }
+
         val current = _profiles.value.toMutableList()
         val index = current.indexOfFirst { it.id == profile.id }
         if (index >= 0) current[index] = profile else current += profile
@@ -211,6 +221,7 @@ class VncLauncherViewModel : ViewModel() {
 
     fun deleteProfile(id: String) {
         if (activeProfileId == id) disconnect()
+        secrets.remove(id)
         operationFor(id)?.takeUnless { it.running }?.let { OperationNotifications.dismiss(context, it) }
         _profiles.value = _profiles.value.filterNot { it.id == id }
         persistProfiles()
@@ -389,17 +400,40 @@ class VncLauncherViewModel : ViewModel() {
         val raw = prefs.getString(KEY_PROFILES, null) ?: return emptyList()
         return runCatching {
             val array = JSONArray(raw)
-            buildList {
+            var metadataNeedsSanitizing = false
+            val loaded = buildList {
                 for (i in 0 until array.length()) {
                     val o = array.getJSONObject(i)
+                    val id = o.optString("id").ifBlank { UUID.randomUUID().toString() }
+                    var remember = o.optBoolean("rememberPassword", false)
+                    var password = if (remember) secrets.read(id).orEmpty() else ""
+
+                    if (o.has("password")) {
+                        metadataNeedsSanitizing = true
+                        if (remember && password.isEmpty()) {
+                            val legacy = o.optString("password")
+                            if (legacy.isNotEmpty()) {
+                                if (secrets.write(id, legacy)) {
+                                    password = legacy
+                                } else {
+                                    // Fail closed: never keep plaintext credentials
+                                    // just because secure migration was unavailable.
+                                    remember = false
+                                    secrets.remove(id)
+                                }
+                            }
+                        }
+                    }
+                    if (!remember) secrets.remove(id)
+
                     add(VncLauncherProfile(
-                        id = o.optString("id").ifBlank { UUID.randomUUID().toString() },
+                        id = id,
                         name = o.optString("name", "VNC connection"),
                         host = o.optString("host"),
                         port = o.optInt("port", 5900).coerceIn(1, 65535),
                         username = o.optString("username"),
-                        password = if (o.optBoolean("rememberPassword", false)) o.optString("password") else "",
-                        rememberPassword = o.optBoolean("rememberPassword", false),
+                        password = password,
+                        rememberPassword = remember,
                         securityType = o.optInt("securityType", 0).coerceAtLeast(0),
                         imageQuality = o.optInt("imageQuality", 6).coerceIn(0, 9),
                         rawEncodingOnly = o.optBoolean("rawEncodingOnly", false),
@@ -415,12 +449,21 @@ class VncLauncherViewModel : ViewModel() {
                     ))
                 }
             }
+            if (metadataNeedsSanitizing) {
+                prefs.edit().putString(KEY_PROFILES, encodeProfiles(loaded)).apply()
+            }
+            loaded
         }.getOrDefault(emptyList())
     }
 
     private fun persistProfiles() {
+        prefs.edit().putString(KEY_PROFILES, encodeProfiles(_profiles.value)).apply()
+    }
+
+    /** Profile JSON deliberately contains no password field. */
+    private fun encodeProfiles(profiles: List<VncLauncherProfile>): String {
         val array = JSONArray()
-        _profiles.value.forEach { p ->
+        profiles.forEach { p ->
             array.put(JSONObject().apply {
                 put("id", p.id)
                 put("name", p.name)
@@ -428,7 +471,6 @@ class VncLauncherViewModel : ViewModel() {
                 put("port", p.port)
                 put("username", p.username)
                 put("rememberPassword", p.rememberPassword)
-                put("password", if (p.rememberPassword) p.password else "")
                 put("securityType", p.securityType)
                 put("imageQuality", p.imageQuality)
                 put("rawEncodingOnly", p.rawEncodingOnly)
@@ -443,7 +485,7 @@ class VncLauncherViewModel : ViewModel() {
                 put("wakeMac", p.wakeMac)
             })
         }
-        prefs.edit().putString(KEY_PROFILES, array.toString()).apply()
+        return array.toString()
     }
 
     override fun onCleared() {
