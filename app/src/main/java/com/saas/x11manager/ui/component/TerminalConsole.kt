@@ -203,8 +203,10 @@ fun TerminalConsole(
                                     errorColor,
                                     warnColor
                                 ) {
+                                    // DS_BINARY_PATH is a literal path. A literal replacement
+                                    // avoids compiling a Regex for every rendered terminal row.
                                     val processedMessage = message.replace(
-                                        Regex(Regex.escape(Constants.DS_BINARY_PATH)),
+                                        Constants.DS_BINARY_PATH,
                                         "droidspaces"
                                     )
                                     val displayMessage = processedMessage.ifEmpty { "\u00A0" }

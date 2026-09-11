@@ -7,6 +7,8 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 
 object AnsiColorParser {
+    private val ansiPattern = Regex("""\u001B\[([0-9;]*)m""")
+
     private val ansiColors = mapOf(
         30 to Color(0xFF000000), 31 to Color(0xFFCD3131), 32 to Color(0xFF0DBC79),
         33 to Color(0xFFE5E510), 34 to Color(0xFF2472C8), 35 to Color(0xFFBC3FBC),
@@ -36,7 +38,6 @@ object AnsiColorParser {
             var isItalic = false
             var isUnderline = false
             var currentIndex = 0
-            val ansiPattern = Regex("""\u001B\[([0-9;]*)m""")
 
             for (match in ansiPattern.findAll(text)) {
                 if (match.range.first > currentIndex) {
@@ -100,5 +101,8 @@ object AnsiColorParser {
         textDecoration = if (underline) androidx.compose.ui.text.style.TextDecoration.Underline else null
     )
 
-    fun stripAnsi(text: String): String = text.replace(Regex("""\u001B\[([0-9;]*)m"""), "")
+    fun stripAnsi(text: String): String {
+        if (!text.contains("\u001B[")) return text
+        return text.replace(ansiPattern, "")
+    }
 }

@@ -1,5 +1,6 @@
 package com.saas.x11manager.util
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -22,6 +23,16 @@ class VncRuntimeSafetyTest {
         assertTrue(script.contains("x0vncserver"))
         assertTrue(script.contains("unsafe=1"))
         assertTrue(script.indexOf("if [ \"${'$'}unsafe\" -eq 0 ]") < script.indexOf("rm -rf \"/run/test-vnc\""))
+    }
+
+    @Test
+    fun `stop waits only when an owned process actually existed`() {
+        val script = VncRuntimeSafety.stopOwnedRuntime("/run/test-vnc")
+        assertTrue(script.contains("had_owned=0"))
+        assertTrue(script.contains("if [ \"${'$'}had_owned\" -eq 1 ]"))
+        assertTrue(script.contains("if [ \"${'$'}forced\" -eq 1 ]"))
+        assertTrue(script.contains("sleep 0.1"))
+        assertFalse(script.contains("sleep 1\n"))
     }
 
     @Test

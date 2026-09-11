@@ -140,23 +140,20 @@ internal object PulseAudioClientConfig {
                 export HOME="${'$'}selected_home" USER="${'$'}selected"
                 . $STATE/prepare-session.sh
             ) || exit 94
+        fi
 
-            # pactl is a useful control-plane health signal, but it can race the
-            # freshly configured client on real DroidSpaces NAT. Retry it and
-            # report a warning instead of declaring audio dead. The finite pacat
-            # probe below remains the authoritative data-path check.
-            selected_info=''
-            selected_ok=0
-            selected_try=0
-            while [ "${'$'}selected_try" -lt 3 ]; do
-                selected_info=${'$'}(su -s /bin/sh "${'$'}selected" -c '. /etc/profile.d/saas-x11-audio.sh; LC_ALL=C timeout 5 pactl info' 2>&1) && {
-                    printf '%s\n' "${'$'}selected_info" | grep -Fxq 'Server String: $server' && selected_ok=1
-                }
-                [ "${'$'}selected_ok" -eq 1 ] && break
-                selected_try=${'$'}((selected_try + 1))
-                [ "${'$'}selected_try" -lt 3 ] && sleep 1
-            done
-            if [ "${'$'}selected_ok" -eq 1 ]; then
+        # The finite PCM stream is the authoritative data-path proof. Run it
+        # before advisory pactl diagnostics so a stale/slow control query cannot
+        # delay or invalidate audio that is already capable of real playback.
+        saas_audio_step=pcm-playback
+        ${playbackProbe(server, "/root/.config/pulse/saas-audio.cookie", "$STATE/client.conf").prependIndent("        ")} || exit 96
+        printf '%s\n' __SAAS_AUDIO_PCM_DRAINED__
+
+        # Control-plane snapshots are diagnostics only. Keep them bounded to one
+        # short attempt each; callers already have a proven PCM data path here.
+        if [ -n "${'$'}selected" ] && [ "${'$'}selected" != root ] && id "${'$'}selected" >/dev/null 2>&1; then
+            selected_info=${'$'}(su -s /bin/sh "${'$'}selected" -c '. /etc/profile.d/saas-x11-audio.sh; LC_ALL=C timeout 1 pactl info' 2>&1) || true
+            if printf '%s\n' "${'$'}selected_info" | grep -Fxq 'Server String: $server'; then
                 printf '%s\n' "${'$'}selected_info"
             else
                 printf '$WARNING%s\n' "desktop-user-control-probe:${'$'}selected" >&2
@@ -166,24 +163,12 @@ internal object PulseAudioClientConfig {
         saas_audio_step=client-auth
         HOME=/root
         . /etc/profile.d/saas-x11-audio.sh
-        root_info=''
-        root_ok=0
-        root_try=0
-        while [ "${'$'}root_try" -lt 3 ]; do
-            root_info=${'$'}(LC_ALL=C timeout 5 pactl info 2>&1) && {
-                printf '%s\n' "${'$'}root_info" | grep -Fxq 'Server String: $server' && root_ok=1
-            }
-            [ "${'$'}root_ok" -eq 1 ] && break
-            root_try=${'$'}((root_try + 1))
-            [ "${'$'}root_try" -lt 3 ] && sleep 1
-        done
-        if [ "${'$'}root_ok" -eq 0 ]; then
+        root_info=${'$'}(LC_ALL=C timeout 1 pactl info 2>&1) || true
+        if printf '%s\n' "${'$'}root_info" | grep -Fxq 'Server String: $server'; then
+            printf '%s\n' "${'$'}root_info"
+        else
             printf '$WARNING%s\n' 'root-control-probe' >&2
         fi
-
-        saas_audio_step=pcm-playback
-        ${playbackProbe(server, "/root/.config/pulse/saas-audio.cookie", "$STATE/client.conf").prependIndent("        ")} || exit 96
-        printf '%s\n' __SAAS_AUDIO_PCM_DRAINED__
     """.trimIndent()
 
     /** A real finite stream must drain; a responsive control socket is insufficient. */

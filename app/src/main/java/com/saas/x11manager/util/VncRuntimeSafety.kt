@@ -8,6 +8,12 @@ internal object VncRuntimeSafety {
             "printf '%s\\n' \"\$$pidVariable\" > $stateDir/$role.pid; " +
             "printf '%s\\n' \"\$${role}_start\" > $stateDir/$role.start"
 
+    /**
+     * Stops only PIDs whose recorded process identity still matches the Manager
+     * lease. The old implementation paid two unconditional one-second sleeps even
+     * when no VNC process existed. Keep the same fail-closed identity checks, but
+     * wait only while an owned process is actually alive and poll in short bursts.
+     */
     fun stopOwnedRuntime(stateDir: String): String = """
         owned_pid() {
             role="${'$'}1"
@@ -37,24 +43,62 @@ internal object VncRuntimeSafety {
         }
 
         unsafe=0
+        had_owned=0
         for role in session server; do
             pid=${'$'}(owned_pid "${'$'}role"); rc=${'$'}?
             if [ "${'$'}rc" -eq 0 ]; then
+                had_owned=1
                 kill "${'$'}pid" 2>/dev/null || true
             elif [ "${'$'}rc" -eq 2 ]; then
                 unsafe=1
             fi
         done
-        sleep 1
+
+        # No owned process means there is nothing to wait for. When TERM was sent,
+        # poll for at most one second and stop as soon as both leases are gone.
+        if [ "${'$'}had_owned" -eq 1 ]; then
+            try=0
+            while [ "${'$'}try" -lt 10 ]; do
+                remaining=0
+                for role in session server; do
+                    owned_pid "${'$'}role" >/dev/null 2>&1; rc=${'$'}?
+                    [ "${'$'}rc" -eq 0 ] && remaining=1
+                    [ "${'$'}rc" -eq 2 ] && unsafe=1
+                done
+                [ "${'$'}remaining" -eq 0 ] && break
+                sleep 0.1
+                try=${'$'}((try + 1))
+            done
+        fi
+
+        forced=0
         for role in session server; do
             pid=${'$'}(owned_pid "${'$'}role"); rc=${'$'}?
             if [ "${'$'}rc" -eq 0 ]; then
+                forced=1
                 kill -9 "${'$'}pid" 2>/dev/null || true
             elif [ "${'$'}rc" -eq 2 ]; then
                 unsafe=1
             fi
         done
-        sleep 1
+
+        # SIGKILL normally completes immediately. Bound the verification wait and
+        # skip it entirely when no forced kill was necessary.
+        if [ "${'$'}forced" -eq 1 ]; then
+            try=0
+            while [ "${'$'}try" -lt 5 ]; do
+                remaining=0
+                for role in session server; do
+                    owned_pid "${'$'}role" >/dev/null 2>&1; rc=${'$'}?
+                    [ "${'$'}rc" -eq 0 ] && remaining=1
+                    [ "${'$'}rc" -eq 2 ] && unsafe=1
+                done
+                [ "${'$'}remaining" -eq 0 ] && break
+                sleep 0.1
+                try=${'$'}((try + 1))
+            done
+        fi
+
         for role in session server; do
             owned_pid "${'$'}role" >/dev/null 2>&1; rc=${'$'}?
             [ "${'$'}rc" -eq 0 ] && unsafe=1
