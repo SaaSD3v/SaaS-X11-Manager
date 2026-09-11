@@ -39,11 +39,12 @@ class VncAccessPolicyTest {
     }
 
     @Test
-    fun portProbeChecksBothIpv4AndIpv6KernelTables() {
+    fun portProbeChecksBothKernelTablesAndRequiresListenState() {
         val command = VncServerManager.portListeningCommand(5901)
         assertTrue(command.contains("/proc/net/tcp"))
         assertTrue(command.contains("/proc/net/tcp6"))
         assertTrue(command.contains("printf '%04X' 5901"))
+        assertTrue(command.contains("[ \"\$state\" = 0A ]"))
         assertTrue(command.contains("exit 0"))
     }
 }
