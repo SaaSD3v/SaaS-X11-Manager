@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.saas.x11manager.X11Application
 import com.saas.x11manager.ui.component.ContainerCard
 import com.saas.x11manager.ui.component.ContainerCardActions
 import com.saas.x11manager.ui.component.TerminalDialog
@@ -32,6 +33,9 @@ fun HomeScreen(
     val context = LocalContext.current
     val containers by viewModel.containers.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    // Do not expose Clear/Minimize against a synthetic in-memory record while the
+    // durable archive is still restoring. This closes the clear-before-restore race.
+    val logsLoaded = X11Application.instance.operationLogs.loadedState
     val expandedContainerName = remember { mutableStateOf<String?>(null) }
     var generalSettingsContainer by remember { mutableStateOf<String?>(null) }
     var pendingUserContainer by remember { mutableStateOf<ContainerInfo?>(null) }
@@ -86,7 +90,7 @@ fun HomeScreen(
         )
     }
 
-    viewModel.showLogViewerFor?.let { containerName ->
+    if (logsLoaded) viewModel.showLogViewerFor?.let { containerName ->
         val memoryLogs: List<Pair<Int, String>> =
             viewModel.containerLogs[containerName] ?: emptyList()
         val isBlocking = activeOperation == containerName || activeOperation == "__all__"

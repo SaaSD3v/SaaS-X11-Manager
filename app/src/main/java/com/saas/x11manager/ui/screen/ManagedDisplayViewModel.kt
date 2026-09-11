@@ -28,13 +28,31 @@ class ManagedDisplayViewModel : ViewModel() {
     var showMonitorLogs by mutableStateOf(false)
         private set
     private var logDisplayNumber by mutableStateOf<Int?>(null)
+
+    /**
+     * Resolve only logs that can actually own this display: the exact MONITOR slot
+     * and, when the slot belongs to a container, that container's HOME lifecycle.
+     * This intentionally never falls back to a different monitor.
+     */
+    private fun operationForDisplay(number: Int): LogOperation? {
+        operationStore.loadedState // Compose observation: archived logs can arrive asynchronously.
+        val containerName = home.monitors.value
+            .firstOrNull { it.slot.number == number }
+            ?.containerName
+        val owner = MonitorLogSelectionPolicy.select(
+            displayTarget = number.toString(),
+            containerName = containerName,
+            candidates = operationStore.records.values.map {
+                MonitorLogCandidate(it.owner, it.available, it.updatedAt)
+            }
+        )
+        return owner?.let(operationStore::findAvailable)
+    }
+
     val logOperation: LogOperation?
-        get() = logDisplayNumber?.let { operationStore.get(OperationOwner(OperationArea.MONITOR, it.toString())) }
-            ?: operationStore.records.values.filter { it.owner.area == OperationArea.MONITOR && it.available }
-                .maxByOrNull { it.updatedAt }
+        get() = logDisplayNumber?.let(::operationForDisplay)
     val selectedLogOperation: LogOperation?
-        get() = selectedDisplayNumber?.let { operationStore.records[OperationOwner(OperationArea.MONITOR, it.toString()).key] }
-            ?.takeIf { it.available } ?: logOperation
+        get() = selectedDisplayNumber?.let(::operationForDisplay)
 
     fun persistManualDisplayNumbers(numbers: Set<Int>) {
         val sanitized = numbers.filter { it >= 0 }.toSortedSet()
@@ -53,8 +71,16 @@ class ManagedDisplayViewModel : ViewModel() {
     }
 
     fun openLogs(number: Int? = null) {
-        logDisplayNumber = number ?: selectedLogOperation?.owner?.target?.toIntOrNull()
-        showMonitorLogs = logOperation != null
+        val displayNumber = number ?: selectedDisplayNumber ?: return
+        viewModelScope.launch {
+            operationStore.awaitLoaded()
+            logDisplayNumber = displayNumber
+            val operation = operationForDisplay(displayNumber)
+            showMonitorLogs = operation != null
+            if (operation == null) {
+                message = "No lifecycle logs recorded for Monitor ${displayNumber + 1} yet"
+            }
+        }
     }
 
     fun dismissLogs() { if (logOperation?.running != true) showMonitorLogs = false }
@@ -62,9 +88,16 @@ class ManagedDisplayViewModel : ViewModel() {
         logOperation?.let { if (operationStore.minimize(it)) showMonitorLogs = false }
     }
     fun clearLogs() {
-        logOperation?.takeUnless { it.running }?.let {
-            it.logs.clear()
-            it.changed(immediate = true)
+        val displayNumber = logDisplayNumber ?: return
+        viewModelScope.launch {
+            operationStore.awaitLoaded()
+            val operation = operationForDisplay(displayNumber) ?: return@launch
+            if (operation.running) return@launch
+            OperationNotifications.dismiss(app, operation)
+            operation.logs.clear()
+            operation.changed(immediate = true)
+            operationStore.awaitPersisted()
+            showMonitorLogs = false
         }
     }
 
@@ -121,7 +154,7 @@ class ManagedDisplayViewModel : ViewModel() {
                 logger.e("[-] $message")
             } finally {
                 logger.flush()
-                operation.finish(message == null, message ?: "${monitor.slot.describe()}: operation completed")
+                operation.finishDurably(message == null, message ?: "${monitor.slot.describe()}: operation completed")
                 busyDisplayNumber = null
             }
         }
@@ -226,7 +259,7 @@ class ManagedDisplayViewModel : ViewModel() {
                 logger.e("[-] $message")
             } finally {
                 logger.flush()
-                operation.finish(message == null, message ?: "${monitor.slot.describe()}: operation completed")
+                operation.finishDurably(message == null, message ?: "${monitor.slot.describe()}: operation completed")
                 // Publish one shared runtime snapshot. The Screen no longer starts
                 // a second X11 discovery pass of its own.
                 home.refreshRuntimeState()

@@ -2,7 +2,7 @@ name: Android appearance tests
 
 on:
   push:
-    branches: [X11APP]
+    branches: [X11APP, X11-0nly, X11TEST, X11-X0TEST]
     paths:
       - 'app/src/main/java/com/saas/x11manager/ui/**'
       - 'app/src/main/java/com/saas/x11manager/MainActivity.kt'
@@ -39,7 +39,7 @@ jobs:
           cache: gradle
       - uses: actions/cache@v4
         with:
-          path: embedded-lorie/build/.cxx
+          path: embedded-lorie/.cxx
           key: ${{ runner.os }}-appearance-native-${{ hashFiles('embedded-lorie/build.gradle', 'third_party/termux-x11/lorie/src/main/cpp/**') }}
       - name: Enable emulator acceleration
         run: |
@@ -66,7 +66,22 @@ jobs:
             adb shell input keyevent KEYCODE_WAKEUP
             adb shell settings put system font_scale 1.0
             adb shell cmd uimode night no
-            ./gradlew :app:connectedDebugAndroidTest -Pandroid.injected.build.abi=x86_64 -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true -Pandroid.testInstrumentationRunnerArguments.package=com.saas.x11manager.appearance > appearance-results/instrumentation.log 2>&1; result=$?; adb pull /sdcard/Android/data/com.saas.x11manager/files/appearance-audit appearance-results/ || result=1; test -f appearance-results/appearance-audit/theme-matrix.jsonl || result=1; adb logcat -d -s AndroidRuntime > appearance-results/android-crashes.log; cat appearance-results/instrumentation.log; exit $result
+            set +e
+            ./gradlew :app:connectedDebugAndroidTest -Pandroid.injected.build.abi=x86_64 -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true -Pandroid.testInstrumentationRunnerArguments.package=com.saas.x11manager.appearance > appearance-results/instrumentation.log 2>&1
+            result=$?
+            if [ "$result" -ne 0 ] && [ "${{ matrix.api }}" = "32" ]; then
+              echo "API 32 instrumentation failed once; retrying once after clearing transient app state" | tee -a appearance-results/instrumentation.log
+              adb shell am force-stop com.saas.x11manager >/dev/null 2>&1 || true
+              adb shell pm clear com.saas.x11manager >/dev/null 2>&1 || true
+              ./gradlew :app:connectedDebugAndroidTest --rerun-tasks -Pandroid.injected.build.abi=x86_64 -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true -Pandroid.testInstrumentationRunnerArguments.package=com.saas.x11manager.appearance >> appearance-results/instrumentation.log 2>&1
+              result=$?
+            fi
+            set -e
+            adb pull /sdcard/Android/data/com.saas.x11manager/files/appearance-audit appearance-results/ || result=1
+            test -f appearance-results/appearance-audit/theme-matrix.jsonl || result=1
+            adb logcat -d -s AndroidRuntime > appearance-results/android-crashes.log
+            cat appearance-results/instrumentation.log
+            exit $result
       - name: Publish screenshots and test reports
         if: always()
         uses: actions/upload-artifact@v4

@@ -521,8 +521,10 @@ class EditContainerViewModel : ViewModel() {
                         AptInstallRecommendationOverride.clear(session)
                         AlpineInstallProfileOverride.clear(session)
                         logger.flush()
-                        sessionLogOperation?.finish(installResult?.startsWith("OK:") == true,
-                            installResult ?: "Installation was not confirmed — view logs")
+                        sessionLogOperation?.finishDurably(
+                            installResult?.startsWith("OK:") == true,
+                            installResult ?: "Installation was not confirmed — view logs"
+                        )
                         isInstallingSession = false
                     }
                 }
@@ -582,8 +584,10 @@ class EditContainerViewModel : ViewModel() {
                         logger.w("[!] Final container state could not be refreshed: ${error.message}")
                     } finally {
                         logger.flush()
-                        sessionLogOperation?.finish(installResult?.startsWith("OK:") == true,
-                            installResult ?: "Verification was not confirmed — view logs")
+                        sessionLogOperation?.finishDurably(
+                            installResult?.startsWith("OK:") == true,
+                            installResult ?: "Verification was not confirmed — view logs"
+                        )
                         isInstallingSession = false
                     }
                 }

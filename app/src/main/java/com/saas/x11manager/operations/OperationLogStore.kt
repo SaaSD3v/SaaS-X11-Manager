@@ -32,7 +32,9 @@ class LogOperation internal constructor(val owner: OperationOwner, private val s
         .take(4).fold(0) { value, byte -> (value shl 8) or (byte.toInt() and 255) }
         and 0x3fffffff) + 4100
     val running get() = status == OperationStatus.RUNNING
-    val available get() = generation.isNotEmpty() || logs.isNotEmpty()
+    // A generation is an archive identity, not proof that there is something to show.
+    // This prevents cleared/completely empty operations from reopening an empty terminal.
+    val available get() = running || logs.isNotEmpty()
     private var dirty = false
 
     fun begin(title: String, detail: String = "", initialLogs: List<Pair<Int, String>> = emptyList()) {
@@ -120,6 +122,8 @@ class OperationLogStore(internal val context: Context) {
     private val writes = Channel<ArchiveWrite>(Channel.UNLIMITED)
     private val pendingWrites = mutableMapOf<String, Job>()
     private val loaded = CompletableDeferred<Unit>()
+    var loadedState by mutableStateOf(false)
+        private set
     internal var observer: (() -> Unit)? = null
     var openRequest by mutableStateOf<OpenLogRequest?>(null); private set
 
@@ -134,6 +138,7 @@ class OperationLogStore(internal val context: Context) {
                 }
             }
             saved.forEach { get(it.owner).restore(it) }
+            loadedState = true
             loaded.complete(Unit)
         }
         scope.launch(Dispatchers.IO) {
@@ -160,10 +165,17 @@ class OperationLogStore(internal val context: Context) {
 
     suspend fun awaitLoaded() = loaded.await()
     fun get(owner: OperationOwner): LogOperation = records.getOrPut(owner.key) { LogOperation(owner, this) }
+    fun find(owner: OperationOwner): LogOperation? = records[owner.key]
+    fun findAvailable(owner: OperationOwner): LogOperation? = find(owner)?.takeIf { it.available }
     fun requestOpen(owner: OperationOwner) { openRequest = OpenLogRequest(owner) }
     fun consumeOpen(request: OpenLogRequest) { if (openRequest == request) openRequest = null }
 
     internal fun changed(operation: LogOperation, immediate: Boolean) {
+        // Clearing a completed log is also an explicit dismissal of any saved
+        // notification that points to that now-empty history.
+        if (!operation.running && operation.logs.isEmpty() && operation.notified) {
+            OperationNotifications.dismiss(context, operation)
+        }
         observer?.invoke()
         pendingWrites.remove(operation.owner.key)?.cancel()
         if (immediate) writes.trySend(ArchiveWrite(operation.snapshot()))
@@ -181,6 +193,8 @@ class OperationLogStore(internal val context: Context) {
     }
 
     fun minimize(operation: LogOperation): Boolean {
+        // Never create a notification for a synthetic/empty operation record.
+        if (!operation.available) return false
         operation.notified = true
         return try {
             OperationNotifications.createChannel(context)
