@@ -56,6 +56,11 @@ object GraphicSessionUserManager {
     fun selectedForNextStart(containerName: String): GraphicSessionUserSelection? =
         selectedForStart[containerName]
 
+    internal fun consumePreparedSelection(
+        containerName: String,
+        selection: GraphicSessionUserSelection
+    ): Boolean = selectedForStart.remove(containerName, selection)
+
     suspend fun currentSelection(containerName: String): GraphicSessionUserSelection? =
         withContext(Dispatchers.IO) {
             selectedForStart[containerName]?.let { return@withContext it }
@@ -118,14 +123,21 @@ object GraphicSessionUserManager {
         }
 
         val previous = readPersistedSelection(info)
-        if (!writePersistedSelection(info, requested)) {
-            logger?.e("[-] Could not persist graphical user selection for $containerName")
-            return@withContext null
-        }
+        // The launcher is derived state. Commit it first and make the persisted
+        // selection the final source-of-truth write. Both files use same-directory
+        // temp + rename so a process interruption never exposes a truncated file.
         if (!writeCurrentSessionLauncher(info, session, requested)) {
             logger?.e("[-] Could not refresh the graphical session launcher")
             return@withContext null
         }
+        if (!writePersistedSelection(info, requested)) {
+            logger?.e("[-] Could not persist graphical user selection for $containerName")
+            return@withContext null
+        }
+
+        // It really is a next-Start override: consume only the exact pending value
+        // that was successfully prepared. A newer concurrent choice is preserved.
+        consumePreparedSelection(containerName, requested)
 
         logger?.i("[CTX] Graphic user: ${requested.userName}")
         if (requested.createIfMissing) {
@@ -170,7 +182,10 @@ object GraphicSessionUserManager {
         return if (info.isRunning) {
             val command =
                 "mkdir -p $SETTINGS_DIR && chmod 755 $SETTINGS_DIR && " +
-                    "printf '%s' ${shellQuote(body)} > $SETTINGS_FILE && chmod 600 $SETTINGS_FILE"
+                    "tmp=$SETTINGS_FILE.tmp.\$\$; " +
+                    "trap 'rm -f \"\$tmp\"' EXIT HUP INT TERM; " +
+                    "printf '%s' ${shellQuote(body)} > \"\$tmp\" && chmod 600 \"\$tmp\" && " +
+                    "mv -f \"\$tmp\" $SETTINGS_FILE"
             runContainerCommand(info.name, command).isSuccess
         } else {
             RootfsAccessor.use(
@@ -178,10 +193,13 @@ object GraphicSessionUserManager {
                 tag = "graphic_user_write_${info.name}"
             ) { root ->
                 val dir = shellQuote("$root$SETTINGS_DIR")
-                val file = shellQuote("$root$SETTINGS_FILE")
+                val file = "$root$SETTINGS_FILE"
                 Shell.cmd(
                     "mkdir -p $dir && chmod 755 $dir && " +
-                        "printf '%s' ${shellQuote(body)} > $file && chmod 600 $file"
+                        "tmp=${shellQuote(file)}.tmp.\$\$; " +
+                        "trap 'rm -f \"\$tmp\"' EXIT HUP INT TERM; " +
+                        "printf '%s' ${shellQuote(body)} > \"\$tmp\" && chmod 600 \"\$tmp\" && " +
+                        "mv -f \"\$tmp\" ${shellQuote(file)}"
                 ).exec().isSuccess
             } ?: false
         }
@@ -229,9 +247,11 @@ object GraphicSessionUserManager {
         return if (info.isRunning) {
             val command =
                 refreshServices("") + " && " +
-                "mkdir -p /usr/local/bin && " +
-                    "printf '%s' ${shellQuote(script)} > $SESSION_LAUNCHER && " +
-                    "chmod 755 $SESSION_LAUNCHER"
+                    "mkdir -p /usr/local/bin && " +
+                    "tmp=$SESSION_LAUNCHER.tmp.\$\$; " +
+                    "trap 'rm -f \"\$tmp\"' EXIT HUP INT TERM; " +
+                    "printf '%s' ${shellQuote(script)} > \"\$tmp\" && " +
+                    "chmod 755 \"\$tmp\" && mv -f \"\$tmp\" $SESSION_LAUNCHER"
             runContainerCommand(info.name, command).isSuccess
         } else {
             RootfsAccessor.use(
@@ -239,12 +259,14 @@ object GraphicSessionUserManager {
                 tag = "graphic_user_launcher_${info.name}"
             ) { root ->
                 val directory = shellQuote("$root/usr/local/bin")
-                val launcher = shellQuote("$root$SESSION_LAUNCHER")
+                val launcher = "$root$SESSION_LAUNCHER"
                 Shell.cmd(
                     refreshServices(root) + " && " +
                         "mkdir -p $directory && " +
-                        "printf '%s' ${shellQuote(script)} > $launcher && " +
-                        "chmod 755 $launcher"
+                        "tmp=${shellQuote(launcher)}.tmp.\$\$; " +
+                        "trap 'rm -f \"\$tmp\"' EXIT HUP INT TERM; " +
+                        "printf '%s' ${shellQuote(script)} > \"\$tmp\" && " +
+                        "chmod 755 \"\$tmp\" && mv -f \"\$tmp\" ${shellQuote(launcher)}"
                 ).exec().isSuccess
             } ?: false
         }
