@@ -22,26 +22,26 @@ This document tracks the runtime-performance pass on the TEST branches. Stable b
 - Terminal path redaction uses literal replacement rather than compiling a regex for every rendered log row.
 - `RuntimePerfTrace` emits Logcat-only `SaaSPerf` stage timings for graphical Start. It deliberately excludes commands and credentials.
 
-### Tranche 2 — collapse readiness polling
+### Tranche 2 — VNC readiness collapse
 
-- Integrated X11 process + filesystem socket + kernel UNIX-socket readiness is polled inside one bounded root-shell transaction instead of repeatedly crossing Kotlin/libsu for `pidof`, `test -S` and `/proc/net/unix`.
-- Integrated X11 Start returns a structured result containing runtime, command-channel and graphical-session confirmation. SessionAccessManager now skips the old second desktop synchronization on the normal success path and retains it only as a recovery retry.
 - TigerVNC LISTEN readiness is polled inside one DroidSpaces invocation instead of entering the container every 250 ms.
 - The fixed 750 ms delay after the VNC desktop launch is removed. The Manager now verifies both recorded server/session PID+start-time leases plus the TCP LISTEN state across a short bounded stability window.
 
 ## Remaining runtime work
 
-1. Make X11 reconciliation return/reuse its container/monitor snapshot instead of immediately listing containers again.
-2. Add a single-operation rootfs access transaction for user/profile edits so image rootfs is mounted once per operation.
-3. Bound PulseAudio host-core startup with a true global deadline; nested control probes must not multiply the outer retry budget.
-4. Reuse Termux UID/network/runtime facts across one graphical Start.
-5. Skip `enable_pulseaudio` config rewrite when the effective value is already correct.
-6. Defer nonessential `droidspaces check` UI diagnostics so they cannot queue ahead of a user Start.
-7. Consolidate Stop/Stop All post-validation snapshots instead of reading the full runtime twice.
-8. Reorder package repository preparation so APT/APK indexes are refreshed only when required and only once per transaction where possible.
-9. Add an offline capability probe for stopped rootfs before temporarily starting a container solely for wizard detection.
-10. Batch durable log change notification per ViewModelLogger flush rather than per retained line.
-11. Port common changes to X11-X0TEST and separately remove its fixed-X0 whole-`/proc` fallback without introducing multi-monitor behavior.
+1. Move Integrated X11 process/socket readiness into one bounded shell transaction instead of repeated `pidof` / socket shell round-trips.
+2. Return a structured X11 Start result so SessionAccessManager can avoid re-running graphical-session confirmation after X11SessionManager already proved it.
+3. Make X11 reconciliation return/reuse its container/monitor snapshot instead of immediately listing containers again.
+4. Add a single-operation rootfs access transaction for user/profile edits so image rootfs is mounted once per operation.
+5. Bound PulseAudio host-core startup with a true global deadline; nested control probes must not multiply the outer retry budget.
+6. Reuse Termux UID/network/runtime facts across one graphical Start.
+7. Skip `enable_pulseaudio` config rewrite when the effective value is already correct.
+8. Defer nonessential `droidspaces check` UI diagnostics so they cannot queue ahead of a user Start.
+9. Consolidate Stop/Stop All post-validation snapshots instead of reading the full runtime twice.
+10. Reorder package repository preparation so APT/APK indexes are refreshed only when required and only once per transaction where possible.
+11. Add an offline capability probe for stopped rootfs before temporarily starting a container solely for wizard detection.
+12. Batch durable log change notification per ViewModelLogger flush rather than per retained line.
+13. Port common changes to X11-X0TEST and separately remove its fixed-X0 whole-`/proc` fallback without introducing multi-monitor behavior.
 
 ## Physical validation
 

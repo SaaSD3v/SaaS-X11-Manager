@@ -52,6 +52,9 @@ object SessionAccessManager {
             logger?.i("[CTX] Access method: ${accessMode.label}")
             logger?.i("[CTX] Session: ${session.label}")
 
+            // Resolve and apply the selected Linux account before transport-specific
+            // output so the terminal reads in user-facing order: session -> user ->
+            // transport -> monitor/runtime.
             val userPreparation = perf.stage("user.prepare") {
                 GraphicSessionUserManager.prepareForStart(
                     containerName = containerName,
@@ -104,6 +107,10 @@ object SessionAccessManager {
                 }
                 vncReservedSlot = reservation.getOrNull()
 
+                // VNC is a clean standalone start mode. If this container already had
+                // Integrated X11 running, stop only that monitor/session while keeping
+                // its lease. The user can turn it back on from Screen afterwards and
+                // run VNC + Integrated X11 independently.
                 val monitorReady = perf.stage("vnc.ensure-x11-stopped") {
                     ensureIntegratedMonitorStoppedForVnc(containerName, vncReservedSlot, logger)
                 }
@@ -115,8 +122,8 @@ object SessionAccessManager {
                     perf.stage("audio.prepare-host") {
                         prepareAudioBeforeGraphicalStart(containerName, logger)
                     }
-                    val start = perf.stage("x11.start-session") {
-                        X11SessionManager.startX11SessionDetailed(
+                    val slot = perf.stage("x11.start-session") {
+                        X11SessionManager.startX11Session(
                             containerName = containerName,
                             logger = logger,
                             beforeGraphicSession = {
@@ -126,29 +133,19 @@ object SessionAccessManager {
                             }
                         )
                     }
-                    if (start == null) {
+                    if (slot == null) {
                         logger?.e("[-] Integrated X11 access failed")
                         false
+                    } else if (!perf.stage("desktop.confirm") {
+                            confirmManagedDesktop(containerName, session, slot)
+                        }
+                    ) {
+                        logger?.e("[-] ${session.label} did not become active on ${slot.describe()}")
+                        false
                     } else {
-                        // X11SessionManager has already performed the authoritative
-                        // managed-desktop synchronization once. Preserve the old
-                        // second check only as a recovery retry when that first
-                        // attempt did not confirm the desktop.
-                        val desktopReady = when {
-                            session == GraphicSession.NONE -> true
-                            start.graphicSessionReady -> true
-                            else -> perf.stage("desktop.retry-confirm") {
-                                confirmManagedDesktop(containerName, session, start.slot)
-                            }
-                        }
-                        if (!desktopReady) {
-                            logger?.e("[-] ${session.label} did not become active on ${start.slot.describe()}")
-                            false
-                        } else {
-                            logger?.i("[X11] ✓ Integrated X11 ready on ${start.slot.describe()}")
-                            logger?.i("[SESSION] ✓ ${session.label} is active through Integrated X11")
-                            true
-                        }
+                        logger?.i("[X11] ✓ Integrated X11 ready on ${slot.describe()}")
+                        logger?.i("[SESSION] ✓ ${session.label} is active through Integrated X11")
+                        true
                     }
                 }
 
