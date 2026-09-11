@@ -171,11 +171,9 @@ class OperationLogStore(internal val context: Context) {
     fun consumeOpen(request: OpenLogRequest) { if (openRequest == request) openRequest = null }
 
     internal fun changed(operation: LogOperation, immediate: Boolean) {
-        // Clearing a completed log is also an explicit dismissal of any saved
-        // notification that points to that now-empty history.
-        if (!operation.running && operation.logs.isEmpty() && operation.notified) {
-            OperationNotifications.dismiss(context, operation)
-        }
+        // Notification lifecycle is deliberately independent from log emptiness:
+        // a minimized operation can legitimately finish before its first visible
+        // log line. Explicit user Clear actions dismiss their own notification.
         observer?.invoke()
         pendingWrites.remove(operation.owner.key)?.cancel()
         if (immediate) writes.trySend(ArchiveWrite(operation.snapshot()))
