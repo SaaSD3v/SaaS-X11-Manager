@@ -27,14 +27,32 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Cache integrated X11 native build
+      - name: Cache native builds
         uses: actions/cache@v4
         with:
-          path: embedded-lorie/.cxx
-          key: ${{ runner.os }}-x11-x0test-native-${{ hashFiles('embedded-lorie/build.gradle', 'third_party/termux-x11/lorie/src/main/cpp/**') }}
+          path: |
+            embedded-lorie/.cxx
+            embedded-avnc/.cxx
+          key: ${{ runner.os }}-x11-x0test-native-${{ hashFiles('embedded-lorie/build.gradle', 'embedded-avnc/build.gradle', 'build.gradle.kts', 'settings.gradle.kts', 'third_party/termux-x11/lorie/src/main/cpp/**', 'third_party/avnc/app/src/main/cpp/**', 'third_party/avnc/app/CMakeLists.txt') }}
 
       - name: Verify fixed X0 source contract
         run: bash scripts/verify-x11-only.sh
+
+      - name: Validate pinned embedded AVNC engine
+        run: |
+          set -euo pipefail
+          expected=f30406514ef8880097e960da7dc1d8dc4c713d7f
+          actual=$(git -C third_party/avnc rev-parse HEAD)
+          [ "$actual" = "$expected" ] || { echo "::error::AVNC pin mismatch: $actual"; exit 1; }
+          test -f third_party/avnc/COPYING.txt
+          test -f third_party/avnc/app/CMakeLists.txt
+          test -f third_party/avnc/app/src/main/cpp/native-vnc.cpp
+          test -f third_party/avnc/app/src/main/java/com/gaurav/avnc/vnc/VncClient.kt
+          test -f third_party/avnc/extern/libvncserver/CMakeLists.txt
+          test -f third_party/avnc/extern/libjpeg-turbo/CMakeLists.txt
+          test -f third_party/avnc/extern/wolfssl/CMakeLists.txt
+          grep -q 'setFrameBufferUpdatesPaused' third_party/avnc/app/src/main/java/com/gaurav/avnc/vnc/VncClient.kt
+          ! grep -R -E 'VncServerManager|ContainerManager|X11SessionManager|Droidspaces' app/src/main/java/com/saas/x11manager/ui/screen/vnc embedded-avnc/src/main/java
 
       - name: Install PulseAudio test dependencies
         run: |
