@@ -2,7 +2,7 @@ name: Rootfs Compatibility Matrix
 
 on:
   push:
-    branches: [ "main", "master", "agent/structural-fixes", "agent/integrated-x11", "agent/multi-display" ]
+    branches: [ "X11APP", "X11-0nly", "X11TEST", "X11-X0TEST", "main", "master", "agent/structural-fixes", "agent/integrated-x11", "agent/multi-display" ]
     paths:
       - "ci/rootfs-compatibility.sh"
       - "ci/wayland-arm64-compatibility.sh"
@@ -17,7 +17,7 @@ on:
       - "app/src/main/java/com/saas/x11manager/util/ApkTransactionSafety.kt"
       - ".github/workflows/rootfs-compatibility.yml"
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "X11APP", "X11-0nly", "X11TEST", "X11-X0TEST", "main", "master" ]
     paths:
       - "ci/rootfs-compatibility.sh"
       - "ci/wayland-arm64-compatibility.sh"

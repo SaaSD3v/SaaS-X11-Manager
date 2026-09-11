@@ -14,22 +14,75 @@ class ManagedDisplayViewModel : ViewModel() {
     private val app get() = X11Application.instance
     private val operationStore get() = app.operationLogs
     private val home get() = ViewModelProvider(app)[HomeViewModel::class.java]
-    val logOperation get() = operationStore.get(OperationOwner(OperationArea.MONITOR, "0"))
-    val busy get() = logOperation.running
+    private val monitorOwner = OperationOwner(OperationArea.MONITOR, "0")
+    private val monitorOperation get() = operationStore.get(monitorOwner)
+
+    private var ownerForLogs by mutableStateOf<String?>(null)
+    val busy get() = monitorOperation.running || relevantLogOperation()?.running == true
     var message by mutableStateOf<String?>(null)
         private set
     var showMonitorLogs by mutableStateOf(false)
         private set
 
-    fun openLogs() { showMonitorLogs = true }
+    init {
+        viewModelScope.launch {
+            operationStore.awaitLoaded()
+            ownerForLogs = runCatching { X11SessionManager.getOwnerContainerName() }.getOrNull()
+        }
+    }
+
+    /**
+     * X0 may have been manipulated directly from Monitor or indirectly by a Home
+     * Start. Select only MONITOR:0 and the current owner's HOME lifecycle; never a
+     * random container/monitor log. When both exist, the newest relevant one wins.
+     */
+    private fun relevantLogOperation(): LogOperation? {
+        operationStore.loadedState // Compose observation for asynchronously restored archives.
+        val owner = MonitorLogSelectionPolicy.select(
+            displayTarget = "0",
+            containerName = ownerForLogs,
+            candidates = operationStore.records.values.map {
+                MonitorLogCandidate(it.owner, it.available, it.updatedAt)
+            }
+        )
+        return owner?.let(operationStore::findAvailable)
+    }
+
+    // Kept non-null because the existing X0 Screen passes this object to the
+    // transient running card. The fallback stays invisible/unopenable while empty.
+    val logOperation: LogOperation
+        get() = relevantLogOperation() ?: monitorOperation
+
+    fun openLogs() {
+        viewModelScope.launch {
+            operationStore.awaitLoaded()
+            ownerForLogs = runCatching { X11SessionManager.getOwnerContainerName() }.getOrNull()
+            val operation = relevantLogOperation()
+            if (operation != null) {
+                message = null
+                showMonitorLogs = true
+            } else {
+                showMonitorLogs = false
+                message = "No lifecycle logs recorded for Monitor 1 yet"
+            }
+        }
+    }
+
     fun dismissLogs() { if (!busy) showMonitorLogs = false }
     fun minimizeLogs() {
-        if (operationStore.minimize(logOperation)) showMonitorLogs = false
+        val operation = relevantLogOperation() ?: return
+        if (operationStore.minimize(operation)) showMonitorLogs = false
     }
     fun clearLogs() {
-        if (!busy) {
-            logOperation.logs.clear()
-            logOperation.changed(immediate = true)
+        viewModelScope.launch {
+            operationStore.awaitLoaded()
+            val operation = relevantLogOperation() ?: return@launch
+            if (operation.running) return@launch
+            OperationNotifications.dismiss(app, operation)
+            operation.logs.clear()
+            operation.changed(immediate = true)
+            operationStore.awaitPersisted()
+            showMonitorLogs = false
         }
     }
 
@@ -39,7 +92,7 @@ class ManagedDisplayViewModel : ViewModel() {
             return
         }
         // Set RUNNING before launching so another screen cannot start a competing action.
-        val operation = logOperation
+        val operation = monitorOperation
         operation.begin("Updating X11 display")
         message = null
         showMonitorLogs = true
@@ -51,6 +104,7 @@ class ManagedDisplayViewModel : ViewModel() {
                 // Resolve the live state after the click, rather than acting on an old UI snapshot.
                 val running = X11SessionManager.getServerStatus() == X11ServerStatus.Running
                 val owner = X11SessionManager.getOwnerContainerName()
+                ownerForLogs = owner
                 logger.i(if (running) "--- Stopping X11 monitor ---" else "--- Starting X11 monitor ---")
                 logger.i("[*] Monitor: 1")
                 logger.i("[*] Display: ${Constants.X11_DISPLAY}")
@@ -85,8 +139,9 @@ class ManagedDisplayViewModel : ViewModel() {
                 logger.e("[-] $message")
             } finally {
                 logger.flush()
-                operation.finish(succeeded, message ?: result)
+                operation.finishDurably(succeeded, message ?: result)
                 home.refreshRuntimeState()
+                ownerForLogs = runCatching { X11SessionManager.getOwnerContainerName() }.getOrNull()
             }
         }
     }

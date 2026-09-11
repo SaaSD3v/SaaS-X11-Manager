@@ -1,6 +1,8 @@
 package com.saas.x11manager.ui.screen
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 
 import android.content.SharedPreferences
 import androidx.compose.foundation.layout.*
@@ -13,6 +15,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
 import com.saas.x11manager.ui.component.SettingsDialog
@@ -25,6 +29,7 @@ internal fun X11ConfigurationDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
 
     fun putBoolean(key: String, value: Boolean) {
         store.edit().putBoolean(key, value).apply()
@@ -157,6 +162,13 @@ internal fun X11ConfigurationDialog(
                             onValueChange = { exactResolution = it },
                             label = { Text("Exact resolution") },
                             singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(
+                                onDone = {
+                                    putString("displayResolutionExact", exactResolution)
+                                    focusManager.clearFocus()
+                                }
+                            ),
                             trailingIcon = {
                                 IconButton(
                                     onClick = {
@@ -176,6 +188,13 @@ internal fun X11ConfigurationDialog(
                             onValueChange = { customResolution = it },
                             label = { Text("Custom resolution") },
                             singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(
+                                onDone = {
+                                    putString("displayResolutionCustom", customResolution)
+                                    focusManager.clearFocus()
+                                }
+                            ),
                             trailingIcon = {
                                 IconButton(
                                     onClick = {

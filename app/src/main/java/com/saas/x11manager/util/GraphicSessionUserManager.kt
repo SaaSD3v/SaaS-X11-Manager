@@ -131,6 +131,13 @@ object GraphicSessionUserManager {
             return@withContext null
         }
         if (!writePersistedSelection(info, requested)) {
+            // The launcher was already replaced, so restore the previous effective
+            // selection before aborting. This keeps a failed Start from leaving a
+            // half-applied user/launcher pair behind.
+            val rollbackSelection = previous ?: GraphicSessionUserSelection.ROOT
+            if (!writeCurrentSessionLauncher(info, session, rollbackSelection)) {
+                logger?.w("[!] Could not roll back the graphical launcher after selection persistence failed")
+            }
             logger?.e("[-] Could not persist graphical user selection for $containerName")
             return@withContext null
         }

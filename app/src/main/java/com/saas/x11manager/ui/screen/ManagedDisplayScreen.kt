@@ -29,7 +29,6 @@ import com.saas.x11manager.X11Application
 import com.saas.x11manager.ui.component.OperationResultCard
 import com.saas.x11manager.ui.component.TerminalDialog
 import com.saas.x11manager.util.Constants
-import com.saas.x11manager.util.ContainerInfo
 import com.saas.x11manager.util.X11ServerStatus
 import com.saas.x11manager.util.X11SessionManager
 import com.termux.x11.EmbeddedDisplayHost
@@ -60,6 +59,7 @@ fun ManagedDisplayScreen(
 
     val busy = displayViewModel.busy
     val message = displayViewModel.message
+    val hasLogs = displayViewModel.logOperation.available
     var connected by remember { mutableStateOf(false) }
     var ownerName by remember { mutableStateOf<String?>(null) }
     var showConfiguration by remember { mutableStateOf(false) }
@@ -222,6 +222,7 @@ fun ManagedDisplayScreen(
                     serverPid = serverPid,
                     connected = connected,
                     ownerName = ownerName,
+                    hasLogs = hasLogs,
                     additionalKeysEnabled = additionalKeysEnabled,
                     additionalKeysVisible = additionalKeysVisible,
                     onClose = ::closeScreen,
@@ -307,6 +308,7 @@ private fun FixedDisplayTopBar(
     serverPid: Int?,
     connected: Boolean,
     ownerName: String?,
+    hasLogs: Boolean,
     additionalKeysEnabled: Boolean,
     additionalKeysVisible: Boolean,
     onClose: () -> Unit,
@@ -350,8 +352,10 @@ private fun FixedDisplayTopBar(
             }
         },
         actions = {
-            IconButton(onClick = onShowLogs) {
-                Icon(Icons.Default.ReceiptLong, contentDescription = "Monitor logs")
+            if (hasLogs) {
+                IconButton(onClick = onShowLogs) {
+                    Icon(Icons.Default.ReceiptLong, contentDescription = "Monitor logs")
+                }
             }
             if (additionalKeysEnabled) {
                 IconButton(
