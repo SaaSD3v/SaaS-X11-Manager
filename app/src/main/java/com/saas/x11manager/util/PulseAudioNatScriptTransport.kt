@@ -16,7 +16,8 @@ import kotlinx.coroutines.withContext
  * - exact-address authenticated TCP listener;
  * - automatic port selection from 4713 through 4777;
  * - exact 256-byte cookie copied into the running container;
- * - real container-side `pactl info` verification.
+ * - finite container-side PCM playback as the authoritative data-path proof;
+ * - `pactl info` retained as a retried, advisory control-plane health signal.
  *
  * It never starts/stops/restarts the container, X11, VNC, desktop, or the
  * Manager PulseAudio core. It does not scan Android /proc process fd tables.
@@ -132,8 +133,12 @@ object PulseAudioNatScriptTransport {
                     logger?.i("[PA-NAT-CONTAINER] $line")
             }
         }
-        result.err.filter { it.isNotBlank() }.forEach {
-            logger?.w("[PA-NAT-CONTAINER][stderr] $it")
+        result.err.filter { it.isNotBlank() }.forEach { line ->
+            if (PulseAudioClientConfig.isWarningMarker(line)) {
+                logger?.w("[AUDIO] ! pactl control-plane probe was not confirmed after retries; verified PCM remains authoritative")
+            } else {
+                logger?.w("[PA-NAT-CONTAINER][stderr] $line")
+            }
         }
 
         val ready = result.isSuccess &&
@@ -152,7 +157,7 @@ object PulseAudioNatScriptTransport {
             ?: "Android sink"
 
         FixSettings.setPulseAudioApplied(X11Application.instance, containerName, true)
-        logger?.i("[+] NAT audio transport verified from inside the container")
+        logger?.i("[+] NAT audio PCM transport verified from inside the container")
         logger?.i("[+] Audio ready ($sink, ${listener.server})")
         true
     }
@@ -226,8 +231,6 @@ object PulseAudioNatScriptTransport {
                 return Listener(ip, port, moduleId)
             }
 
-            // The id belongs to the module created immediately above, so cleanup
-            // does not need module enumeration or process ownership discovery.
             controlPactl(uid, "unload-module $moduleId")
         }
         return null
@@ -271,10 +274,7 @@ object PulseAudioNatScriptTransport {
         }
 
     private fun serializeCookie(uid: Int): String? {
-        val result = execAsTermux(
-            uid,
-            PulseAudioCookieTransport.encodeCommand(COOKIE)
-        )
+        val result = execAsTermux(uid, PulseAudioCookieTransport.encodeCommand(COOKIE))
         if (!result.success) return null
         return PulseAudioCookieTransport.fromOutput(result.out)
     }
@@ -296,7 +296,6 @@ object PulseAudioNatScriptTransport {
             val discovered = hexGatewayToIpv4(hex)
             if (discovered != null && hostOwnsIpv4(discovered)) return discovered
         }
-
         return VERIFIED_NAT_GATEWAY.takeIf(::hostOwnsIpv4)
     }
 
@@ -308,9 +307,7 @@ object PulseAudioNatScriptTransport {
             val c = hex.substring(2, 4).toInt(16)
             val d = hex.substring(0, 2).toInt(16)
             "$a.$b.$c.$d"
-        } catch (_: Exception) {
-            null
-        }
+        } catch (_: Exception) { null }
     }
 
     private fun hostOwnsIpv4(ip: String): Boolean {
@@ -325,11 +322,7 @@ object PulseAudioNatScriptTransport {
                 ip -4 -o addr show 2>/dev/null || true
             fi | grep -Fq ${q(" $ip/")}
         """.trimIndent()
-        return try {
-            Shell.cmd(command).exec().isSuccess
-        } catch (_: Exception) {
-            false
-        }
+        return try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
     }
 
     private fun validIpv4(value: String): Boolean {
@@ -345,36 +338,20 @@ object PulseAudioNatScriptTransport {
                 net=${'$'}(sed -n 's/^net_mode=//p' "${'$'}cfg" | tail -n 1)
                 [ "${'$'}net" = nat ] || continue
                 name=${'$'}(sed -n 's/^name=//p' "${'$'}cfg" | sed -n '1p')
-                [ -n "${'$'}name" ] || {
-                    dir=${'$'}{cfg%/${Constants.CONFIG_FILE}}
-                    name=${'$'}{dir##*/}
-                }
+                [ -n "${'$'}name" ] || { dir=${'$'}{cfg%/${Constants.CONFIG_FILE}}; name=${'$'}{dir##*/}; }
                 value=${'$'}(sed -n 's/^port_forwards=//p' "${'$'}cfg" | sed -n '1p')
-                oldifs=${'$'}IFS
-                IFS=,
+                oldifs=${'$'}IFS; IFS=,
                 for token in ${'$'}value; do
                     IFS=${'$'}oldifs
                     token=${'$'}(printf '%s' "${'$'}token" | tr -d '[:space:]')
                     [ -n "${'$'}token" ] || { IFS=,; continue; }
-                    case "${'$'}token" in
-                        */*) proto=${'$'}{token##*/}; body=${'$'}{token%/*} ;;
-                        *) proto=tcp; body=${'$'}token ;;
-                    esac
+                    case "${'$'}token" in */*) proto=${'$'}{token##*/}; body=${'$'}{token%/*} ;; *) proto=tcp; body=${'$'}token ;; esac
                     [ "${'$'}proto" = tcp ] || { IFS=,; continue; }
                     host=${'$'}{body%%:*}
-                    case "${'$'}host" in
-                        *-*) first=${'$'}{host%-*}; last=${'$'}{host#*-} ;;
-                        *) first=${'$'}host; last=${'$'}host ;;
-                    esac
+                    case "${'$'}host" in *-*) first=${'$'}{host%-*}; last=${'$'}{host#*-} ;; *) first=${'$'}host; last=${'$'}host ;; esac
                     case "${'$'}first:${'$'}last" in
                         *[!0-9:]*|'':*) : ;;
-                        *)
-                            if [ "${'$'}wanted" -ge "${'$'}first" ] 2>/dev/null && \
-                               [ "${'$'}wanted" -le "${'$'}last" ] 2>/dev/null; then
-                                printf '%s\n' "${'$'}name"
-                                exit 0
-                            fi
-                            ;;
+                        *) if [ "${'$'}wanted" -ge "${'$'}first" ] 2>/dev/null && [ "${'$'}wanted" -le "${'$'}last" ] 2>/dev/null; then printf '%s\n' "${'$'}name"; exit 0; fi ;;
                     esac
                     IFS=,
                 done
@@ -382,52 +359,33 @@ object PulseAudioNatScriptTransport {
             done
             exit 1
         """.trimIndent()
-
         return try {
             val result = Shell.cmd(command).exec()
-            if (result.isSuccess) {
-                result.out.firstOrNull()?.trim()?.takeIf { it.isNotBlank() }
-            } else {
-                null
-            }
-        } catch (_: Exception) {
-            null
-        }
+            if (result.isSuccess) result.out.firstOrNull()?.trim()?.takeIf { it.isNotBlank() } else null
+        } catch (_: Exception) { null }
     }
 
     private fun termuxUid(): Int? {
-        val command =
-            "test -x ${q(TERMUX_SH)} || exit 1; " +
-                "uid=\$(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || " +
-                "toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null); " +
-                "case \"\$uid\" in ''|*[!0-9]*) exit 2 ;; esac; " +
-                "printf '%s\\n' \"\$uid\""
-
+        val command = "test -x ${q(TERMUX_SH)} || exit 1; uid=\$(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null); case \"\$uid\" in ''|*[!0-9]*) exit 2 ;; esac; printf '%s\\n' \"\$uid\""
         return try {
             val result = Shell.cmd(command).exec()
-            if (!result.isSuccess) null
-            else result.out.firstOrNull()?.trim()?.toIntOrNull()?.takeIf { it > 0 }
-        } catch (_: Exception) {
-            null
-        }
+            if (!result.isSuccess) null else result.out.firstOrNull()?.trim()?.toIntOrNull()?.takeIf { it > 0 }
+        } catch (_: Exception) { null }
     }
 
     private fun execAsTermux(uid: Int, command: String): CommandResult {
         val wrapped = buildString {
             append("export LC_ALL=C; ")
-        append("export HOME=").append(q(TERMUX_HOME)).append("; ")
+            append("export HOME=").append(q(TERMUX_HOME)).append("; ")
             append("export PREFIX=").append(q(TERMUX_PREFIX)).append("; ")
             append("export TMPDIR=").append(q("$TERMUX_PREFIX/tmp")).append("; ")
             append("export PATH=").append(q("$TERMUX_PREFIX/bin:/system/bin:/system/xbin")).append("; ")
             append(command)
         }
-
         return try {
             val result = Shell.cmd("su $uid -c ${q(wrapped)}").exec()
             CommandResult(result.code, result.out.toList(), result.err.toList())
-        } catch (e: Exception) {
-            CommandResult(255, emptyList(), listOf(e.message ?: e.javaClass.simpleName))
-        }
+        } catch (e: Exception) { CommandResult(255, emptyList(), listOf(e.message ?: e.javaClass.simpleName)) }
     }
 
     internal fun buildContainerPayload(server: String, cookieEscaped: String): String = """
@@ -445,7 +403,6 @@ object PulseAudioNatScriptTransport {
         die() { printf '[-] %s\n' "${'$'}*" >&2; exit 1; }
 
         [ "${'$'}(id -u)" -eq 0 ] || die 'container setup is not running as root'
-
         need=0
         command -v pactl >/dev/null 2>&1 || need=1
         command -v pacat >/dev/null 2>&1 || need=1
@@ -454,12 +411,10 @@ object PulseAudioNatScriptTransport {
             if command -v apt-get >/dev/null 2>&1; then
                 printf '%s\n' __SAAS_AUDIO_APT__
                 DEBIAN_FRONTEND=noninteractive apt-get update >/dev/null 2>&1 || true
-                DEBIAN_FRONTEND=noninteractive apt-get install -y \
-                    pulseaudio-utils libasound2-plugins alsa-utils >/dev/null 2>&1 || true
+                DEBIAN_FRONTEND=noninteractive apt-get install -y pulseaudio-utils libasound2-plugins alsa-utils >/dev/null 2>&1 || true
             elif command -v apk >/dev/null 2>&1; then
                 printf '%s\n' __SAAS_AUDIO_APK__
-                apk add --no-cache pulseaudio-utils alsa-utils alsa-plugins-pulse \
-                    >/dev/null 2>&1 || true
+                apk add --no-cache pulseaudio-utils alsa-utils alsa-plugins-pulse >/dev/null 2>&1 || true
             fi
         fi
         command -v pactl >/dev/null 2>&1 || die 'pactl is unavailable; cannot verify the transport'
@@ -468,39 +423,26 @@ object PulseAudioNatScriptTransport {
         backup_unmanaged() {
             target="${'$'}1"; backup="${'$'}2"; old1="${'$'}{3:-}"; old2="${'$'}{4:-}"
             [ -f "${'$'}target" ] || return 0
-            if grep -Fq "${'$'}MANAGED" "${'$'}target" 2>/dev/null || \
-               grep -Fq "${'$'}SCRIPT" "${'$'}target" 2>/dev/null || \
-               grep -Fq "${'$'}NETLAB" "${'$'}target" 2>/dev/null || \
-               grep -Fq "${'$'}LEGACY" "${'$'}target" 2>/dev/null; then
+            if grep -Fq "${'$'}MANAGED" "${'$'}target" 2>/dev/null || grep -Fq "${'$'}SCRIPT" "${'$'}target" 2>/dev/null || grep -Fq "${'$'}NETLAB" "${'$'}target" 2>/dev/null || grep -Fq "${'$'}LEGACY" "${'$'}target" 2>/dev/null; then
                 if [ ! -e "${'$'}backup" ]; then
-                    [ -n "${'$'}old1" ] && [ -f "${'$'}old1" ] && \
-                        cp -p "${'$'}old1" "${'$'}backup" || true
-                    [ -e "${'$'}backup" ] || {
-                        [ -n "${'$'}old2" ] && [ -f "${'$'}old2" ] && \
-                            cp -p "${'$'}old2" "${'$'}backup" || true
-                    }
+                    [ -n "${'$'}old1" ] && [ -f "${'$'}old1" ] && cp -p "${'$'}old1" "${'$'}backup" || true
+                    [ -e "${'$'}backup" ] || { [ -n "${'$'}old2" ] && [ -f "${'$'}old2" ] && cp -p "${'$'}old2" "${'$'}backup" || true; }
                 fi
                 return 0
             fi
-            [ -e "${'$'}backup" ] || cp -p "${'$'}target" "${'$'}backup" || \
-                die "could not back up ${'$'}target"
+            [ -e "${'$'}backup" ] || cp -p "${'$'}target" "${'$'}backup" || die "could not back up ${'$'}target"
         }
 
-        mkdir -p /root/.config/pulse /etc/profile.d || \
-            die 'cannot create PulseAudio config directories'
-
+        mkdir -p /root/.config/pulse /etc/profile.d || die 'cannot create PulseAudio config directories'
         saas_audio_step=cookie
         cookie=/root/.config/pulse/saas-audio.cookie
-        printf '%b' "${'$'}COOKIE_ESCAPED" > "${'$'}cookie" || \
-            die 'cannot write PulseAudio cookie'
-        [ "${'$'}(wc -c < "${'$'}cookie" | tr -d ' ')" = 256 ] || \
-            die 'PulseAudio cookie has invalid length'
+        printf '%b' "${'$'}COOKIE_ESCAPED" > "${'$'}cookie" || die 'cannot write PulseAudio cookie'
+        [ "${'$'}(wc -c < "${'$'}cookie" | tr -d ' ')" = 256 ] || die 'PulseAudio cookie has invalid length'
         chmod 600 "${'$'}cookie" 2>/dev/null || true
 
         saas_audio_step=client-config
         client=/root/.config/pulse/client.conf
-        backup_unmanaged "${'$'}client" "${'$'}client.saas-hostnat.bak" \
-            "${'$'}client.saas-netlab.bak" "${'$'}client.saas-audio.bak"
+        backup_unmanaged "${'$'}client" "${'$'}client.saas-hostnat.bak" "${'$'}client.saas-netlab.bak" "${'$'}client.saas-audio.bak"
         cat > "${'$'}client" <<EOF_CLIENT
         # $MANAGED
         default-server = $server
@@ -519,11 +461,8 @@ object PulseAudioNatScriptTransport {
         chmod 644 "${'$'}profile" 2>/dev/null || true
 
         asound=/etc/asound.conf
-        if command -v aplay >/dev/null 2>&1 && \
-           PULSE_SERVER="${'$'}SERVER" PULSE_COOKIE="${'$'}cookie" \
-           aplay -L 2>/dev/null | grep -q '^pulse'; then
-            backup_unmanaged "${'$'}asound" "${'$'}asound.saas-hostnat.bak" \
-                "${'$'}asound.saas-netlab.bak" "${'$'}asound.saas-audio.bak"
+        if command -v aplay >/dev/null 2>&1 && PULSE_SERVER="${'$'}SERVER" PULSE_COOKIE="${'$'}cookie" aplay -L 2>/dev/null | grep -q '^pulse'; then
+            backup_unmanaged "${'$'}asound" "${'$'}asound.saas-hostnat.bak" "${'$'}asound.saas-netlab.bak" "${'$'}asound.saas-audio.bak"
             cat > "${'$'}asound" <<EOF_ASOUND
         # $MANAGED
         pcm.!default { type pulse }
@@ -533,40 +472,34 @@ object PulseAudioNatScriptTransport {
             warn 'ALSA pulse plugin not detected; PulseAudio clients are still supported'
         fi
 
-        # Remove integration left by retired implementations. The working v3.2
-        # architecture intentionally keeps audio independent from X11 lifecycle.
-        for old in \
-            /etc/systemd/system/x11-session.service.d/90-saas-audio.conf \
-            /etc/systemd/system/x11-session.service.d/audio.conf; do
-            if [ -f "${'$'}old" ] && {
-                grep -Fq "${'$'}MANAGED" "${'$'}old" 2>/dev/null || \
-                grep -Fq "${'$'}SCRIPT" "${'$'}old" 2>/dev/null || \
-                grep -Fq "${'$'}NETLAB" "${'$'}old" 2>/dev/null || \
-                grep -Fq "${'$'}LEGACY" "${'$'}old" 2>/dev/null
-            }; then
-                rm -f "${'$'}old"
-            fi
+        for old in /etc/systemd/system/x11-session.service.d/90-saas-audio.conf /etc/systemd/system/x11-session.service.d/audio.conf; do
+            if [ -f "${'$'}old" ] && { grep -Fq "${'$'}MANAGED" "${'$'}old" 2>/dev/null || grep -Fq "${'$'}SCRIPT" "${'$'}old" 2>/dev/null || grep -Fq "${'$'}NETLAB" "${'$'}old" 2>/dev/null || grep -Fq "${'$'}LEGACY" "${'$'}old" 2>/dev/null; }; then rm -f "${'$'}old"; fi
         done
-
         if [ -f /etc/conf.d/x11-session ]; then
-            sed '/^# BEGIN SaaS DroidSpaces Audio Auto$/,/^# END SaaS DroidSpaces Audio Auto$/d; /^# BEGIN SaaS DroidSpaces Audio NetLab$/,/^# END SaaS DroidSpaces Audio NetLab$/d' \
-                /etc/conf.d/x11-session > /etc/conf.d/x11-session.saas-audio.tmp && \
-                mv /etc/conf.d/x11-session.saas-audio.tmp /etc/conf.d/x11-session
+            sed '/^# BEGIN SaaS DroidSpaces Audio Auto$/,/^# END SaaS DroidSpaces Audio Auto$/d; /^# BEGIN SaaS DroidSpaces Audio NetLab$/,/^# END SaaS DroidSpaces Audio NetLab$/d' /etc/conf.d/x11-session > /etc/conf.d/x11-session.saas-audio.tmp && mv /etc/conf.d/x11-session.saas-audio.tmp /etc/conf.d/x11-session
         fi
 
         ${PulseAudioClientConfig.install(server).prependIndent("        ")}
-        saas_audio_step=client-auth
 
-        info="${'$'}(PULSE_SERVER="${'$'}SERVER" PULSE_COOKIE="${'$'}cookie" timeout 5 pactl info 2>&1)" || {
-            printf '%s\n' "${'$'}info" >&2
-            die "pactl cannot reach ${'$'}SERVER"
-        }
-        printf '%s\n' "${'$'}info" | \
-            grep -E '^(Server String|Server Version|Default Sink|Default Source):' || true
-        printf '%s\n' "${'$'}info" | \
-            grep -Eq '^Default Sink: (AAudio_sink|OpenSL_ES_sink)$' || \
-            die 'remote server has no verified Android sink'
-
+        # The install block above already completed an authenticated finite PCM
+        # stream. A second pactl immediately afterwards is only a health snapshot:
+        # retry it, expose diagnostics when available, but never override proven PCM.
+        info=''
+        info_ok=0
+        info_try=0
+        while [ "${'$'}info_try" -lt 3 ]; do
+            info=${'$'}(PULSE_SERVER="${'$'}SERVER" PULSE_COOKIE="${'$'}cookie" timeout 5 pactl info 2>&1) && {
+                printf '%s\n' "${'$'}info" | grep -Eq '^Default Sink: (AAudio_sink|OpenSL_ES_sink)$' && info_ok=1
+            }
+            [ "${'$'}info_ok" -eq 1 ] && break
+            info_try=${'$'}((info_try + 1))
+            [ "${'$'}info_try" -lt 3 ] && sleep 1
+        done
+        if [ "${'$'}info_ok" -eq 1 ]; then
+            printf '%s\n' "${'$'}info" | grep -E '^(Server String|Server Version|Default Sink|Default Source):' || true
+        else
+            printf '__SAAS_AUDIO_WARNING__:post-pcm-control-probe\n' >&2
+        fi
         printf '%s\n' __SAAS_AUDIO_TRANSPORT_READY__
     """.trimIndent()
 
