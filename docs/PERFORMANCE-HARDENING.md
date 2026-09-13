@@ -30,9 +30,11 @@ This document tracks runtime-performance work validated on the TEST branches bef
 ### Tranche 3 — X11 lifecycle, UI and log batching
 
 - Integrated X11 process, socket-file and kernel-socket readiness now use one root transaction per poll instead of three libsu round-trips.
+- The batched probe reuses the existing kernel-table parser without requiring `awk` in the Android root shell; tests reject stale, mismatched and malformed sockets.
 - X11 Start returns the result of its authoritative desktop handshake. `SessionAccessManager` rechecks only when the first bounded handshake missed a session that was still settling.
 - Reconciliation reuses the container snapshot when no stale bind was changed, and server startup reuses the already-known ownership snapshot.
 - Stop/Stop All pass known ownership/container snapshots through the lifecycle and avoid a full container-list read for every monitor.
+- Session stop excludes its target before grouping display owners, preserving another running owner's monitor even when the target remains in a stale or restarted snapshot.
 - A successful Stop All applies one final runtime snapshot instead of reading and applying the same state twice.
 - `ViewModelLogger` delivers retained entries as one batch. Compose state, operation observers and the durable-write debounce are invalidated once per visible log burst.
 - Compose screens collect `StateFlow` through lifecycle-aware collectors, stopping background UI collection when the Activity is not active.

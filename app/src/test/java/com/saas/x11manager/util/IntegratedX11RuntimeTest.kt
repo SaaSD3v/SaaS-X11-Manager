@@ -8,6 +8,56 @@ import org.junit.Test
 class IntegratedX11RuntimeTest {
 
     @Test
+    fun stoppingOwnerDoesNotMaskAnotherRunningOwnerOfTheSameDisplay() {
+        val slot = X11DisplaySlot(2)
+        fun owner(name: String, status: ContainerStatus = ContainerStatus.RUNNING) = ContainerInfo(
+            name = name,
+            rootfsPath = "/containers/$name/rootfs",
+            configPath = "/containers/$name/container.config",
+            bindMounts = "${slot.socketDir}:/usr/.X11-unix",
+            status = status
+        )
+        val target = owner("stopping")
+        val other = owner("remaining")
+        val stopped = owner("stopped", ContainerStatus.STOPPED)
+
+        listOf(listOf(target, other, stopped), listOf(stopped, other, target)).forEach { snapshot ->
+            assertEquals(
+                mapOf(2 to "remaining"),
+                X11SessionManager.runningAssignments(snapshot, excludingContainer = "stopping")
+            )
+        }
+        assertTrue(
+            X11SessionManager.runningAssignments(
+                listOf(target, stopped), excludingContainer = "stopping"
+            ).isEmpty()
+        )
+    }
+
+    @Test
+    fun batchedRuntimeProbeRequiresMatchingKernelSocketAndFilesystemSocket() {
+        val slot = X11DisplaySlot(2)
+        val markers = listOf("__SAAS_X11_PIDS__=42 42 invalid -1 73", "__SAAS_X11_SOCKET__=1")
+        fun socketRow(path: String, inode: String = "12345") =
+            "0000000000000000: 00000002 00000000 00010000 0001 01 $inode $path"
+
+        listOf(slot.socketFile, "@${slot.socketFile}").forEach { path ->
+            val runtime = X11SessionManager.parseServerRuntime(slot, markers + socketRow(path))
+            assertEquals(listOf(42, 73), runtime.pids)
+            assertTrue(runtime.liveSocket)
+        }
+        listOf(
+            markers,
+            markers + socketRow(X11DisplaySlot(3).socketFile),
+            markers + socketRow(slot.socketFile, inode = "invalid"),
+            listOf("__SAAS_X11_SOCKET__=0") + socketRow(slot.socketFile),
+            emptyList()
+        ).forEach { lines ->
+            assertFalse(X11SessionManager.parseServerRuntime(slot, lines).liveSocket)
+        }
+    }
+
+    @Test
     fun integratedServerCommandUsesExplicitIsolatedMonitorRuntimeAndSharedXkbCache() {
         val slot = X11DisplaySlot(3)
         val command = X11SessionManager.buildIntegratedServerCommand(

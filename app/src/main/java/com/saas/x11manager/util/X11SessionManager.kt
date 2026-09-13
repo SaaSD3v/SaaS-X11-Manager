@@ -51,7 +51,7 @@ object X11SessionManager {
         val reused: Boolean
     )
 
-    private data class ServerRuntimeProbe(
+    internal data class ServerRuntimeProbe(
         val pids: List<Int>,
         val liveSocket: Boolean
     )
@@ -106,25 +106,30 @@ object X11SessionManager {
             val result = Shell.cmd(
                 "pids=${'$'}(pidof $process 2>/dev/null || true); " +
                     "socket=0; " +
-                    "if [ -S $socket ] && " +
-                    "awk -v target=$socket '${'$'}NF == target || ${'$'}NF == \"@\" target " +
-                    "{ found=1; exit } END { exit !found }' /proc/net/unix 2>/dev/null; " +
-                    "then socket=1; fi; " +
+                    "if [ -S $socket ]; then socket=1; fi; " +
                     "printf '%s\\n' '$RUNTIME_PIDS_MARKER'\"${'$'}pids\" " +
-                    "'$RUNTIME_SOCKET_MARKER'\"${'$'}socket\""
+                    "'$RUNTIME_SOCKET_MARKER'\"${'$'}socket\"; " +
+                    "cat /proc/net/unix 2>/dev/null"
             ).exec()
-            val pids = result.out.firstOrNull { it.startsWith(RUNTIME_PIDS_MARKER) }
-                ?.removePrefix(RUNTIME_PIDS_MARKER)
-                ?.let { parsePids(listOf(it)) }
-                .orEmpty()
-            ServerRuntimeProbe(
-                pids = pids,
-                liveSocket = result.out.any { it == "${RUNTIME_SOCKET_MARKER}1" }
-            )
+            parseServerRuntime(displaySlot, result.out)
         } catch (_: Exception) {
             ServerRuntimeProbe(emptyList(), liveSocket = false)
         }
     }
+
+    internal fun parseServerRuntime(
+        displaySlot: X11DisplaySlot,
+        lines: List<String>
+    ): ServerRuntimeProbe = ServerRuntimeProbe(
+        pids = lines.firstOrNull { it.startsWith(RUNTIME_PIDS_MARKER) }
+            ?.removePrefix(RUNTIME_PIDS_MARKER)
+            ?.let { parsePids(listOf(it)) }
+            .orEmpty(),
+        // Keep the existing kernel-table parser: Android root shells do not
+        // necessarily provide awk, and a socket file alone may be stale.
+        liveSocket = lines.any { it == "${RUNTIME_SOCKET_MARKER}1" } &&
+            hasKernelSocket(displaySlot.socketFile, lines)
+    )
 
     private fun socketTableLines(): List<String> {
         return try {
@@ -374,11 +379,14 @@ object X11SessionManager {
         }
     }
 
-    private fun runningAssignments(containers: List<ContainerInfo>): Map<Int, String> =
+    internal fun runningAssignments(
+        containers: List<ContainerInfo>,
+        excludingContainer: String? = null
+    ): Map<Int, String> =
         buildMap {
             containers
                 .asSequence()
-                .filter { it.isRunning }
+                .filter { it.isRunning && it.name != excludingContainer }
                 .forEach { container ->
                     ContainerConfigManager.displaySlotFromBindMounts(container.bindMounts)
                         ?.let { slot -> putIfAbsent(slot.number, container.name) }
@@ -1053,8 +1061,11 @@ object X11SessionManager {
 
         if (displaySlot != null) {
             val remaining = ContainerManager.listContainers()
-            val remainingOwner = runningAssignments(remaining)[displaySlot.number]
-                ?.takeIf { it != containerName }
+            // Exclude before grouping: a stale/restarted target must not hide
+            // another running container that still owns this display.
+            val remainingOwner = runningAssignments(
+                remaining, excludingContainer = containerName
+            )[displaySlot.number]
             val stillUsed = remainingOwner != null
 
             logger?.i("[CTX] Display still owned by another running container: ${if (stillUsed) "yes" else "no"}")
