@@ -10,6 +10,9 @@ concurrency:
   group: x11-only-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Verify fixed X0 build
