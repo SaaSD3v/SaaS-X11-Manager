@@ -13,17 +13,18 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -49,8 +50,8 @@ fun ManagedDisplayScreen(
         viewModelStoreOwner = X11Application.instance
     )
 ) {
-    val containers by viewModel.containers.collectAsState()
-    val runtimeMonitors by viewModel.monitors.collectAsState()
+    val containers by viewModel.containers.collectAsStateWithLifecycle()
+    val runtimeMonitors by viewModel.monitors.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val activity = remember(context) { context.findManagedDisplayActivity() }
     val prefs = remember(context) { EmbeddedDisplayHost.getPrefs(context) }
@@ -438,7 +439,7 @@ private fun ManagedDisplayTopBar(
         actions = {
             if (hasLogs) {
                 IconButton(onClick = onShowLogs) {
-                    Icon(Icons.Default.ReceiptLong, contentDescription = "X11 logs")
+                    Icon(Icons.AutoMirrored.Filled.ReceiptLong, contentDescription = "X11 logs")
                 }
             }
             if (additionalKeysEnabled) {

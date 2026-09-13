@@ -122,7 +122,7 @@ object SessionAccessManager {
                     perf.stage("audio.prepare-host") {
                         prepareAudioBeforeGraphicalStart(containerName, logger)
                     }
-                    val slot = perf.stage("x11.start-session") {
+                    val startResult = perf.stage("x11.start-session") {
                         X11SessionManager.startX11Session(
                             containerName = containerName,
                             logger = logger,
@@ -133,19 +133,26 @@ object SessionAccessManager {
                             }
                         )
                     }
-                    if (slot == null) {
+                    if (startResult == null) {
                         logger?.e("[-] Integrated X11 access failed")
                         false
-                    } else if (!perf.stage("desktop.confirm") {
-                            confirmManagedDesktop(containerName, session, slot)
-                        }
-                    ) {
-                        logger?.e("[-] ${session.label} did not become active on ${slot.describe()}")
-                        false
                     } else {
-                        logger?.i("[X11] ✓ Integrated X11 ready on ${slot.describe()}")
-                        logger?.i("[SESSION] ✓ ${session.label} is active through Integrated X11")
-                        true
+                        val slot = startResult.slot
+                        // startX11Session already performs the authoritative desktop
+                        // handshake. Retry only when that first bounded confirmation
+                        // missed a session that was still settling.
+                        val desktopReady = startResult.graphicSessionReady ||
+                            perf.stage("desktop.confirm-retry") {
+                                confirmManagedDesktop(containerName, session, slot)
+                            }
+                        if (!desktopReady) {
+                            logger?.e("[-] ${session.label} did not become active on ${slot.describe()}")
+                            false
+                        } else {
+                            logger?.i("[X11] ✓ Integrated X11 ready on ${slot.describe()}")
+                            logger?.i("[SESSION] ✓ ${session.label} is active through Integrated X11")
+                            true
+                        }
                     }
                 }
 

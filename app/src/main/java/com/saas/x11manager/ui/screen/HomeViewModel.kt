@@ -224,7 +224,10 @@ class HomeViewModel : ViewModel() {
             val logs = logsFor(container.name)
             logs.clear()
             showLogViewerFor = container.name
-            val logger = ViewModelLogger { level, message -> appendLog(logs, level, message); operation.changed() }
+            val logger = ViewModelLogger.batched { entries ->
+                appendLogs(logs, entries)
+                operation.changed()
+            }
             try {
                 runtimeRefreshJob?.join()
                 val profile = withContext(Dispatchers.IO) { ContainerSettingsManager.readSnapshot(container.name, forceRefresh = true) }
@@ -264,7 +267,10 @@ class HomeViewModel : ViewModel() {
             operation.begin("Stopping ${container.name}", initialLogs = pinnedAtStopStart)
             var succeeded = false
             showLogViewerFor = container.name
-            val logger = ViewModelLogger { level, message -> appendLog(logs, level, message); operation.changed() }
+            val logger = ViewModelLogger.batched { entries ->
+                appendLogs(logs, entries)
+                operation.changed()
+            }
             try {
                 runtimeRefreshJob?.join()
                 val accessMode = RuntimeAccessPolicy.normalize(VncSettings.getAccessMode(X11Application.instance, container.name))
@@ -299,7 +305,8 @@ class HomeViewModel : ViewModel() {
             logsFor("__all__")
             showLogViewerFor = "__all__"
             var succeeded = false
-            val logger = ViewModelLogger(operation::append)
+            var runtimeRefreshed = false
+            val logger = ViewModelLogger.batched(operation::appendAll)
             try {
                 runtimeRefreshJob?.join()
                 val currentContainers = ContainerManager.listContainers()
@@ -307,9 +314,10 @@ class HomeViewModel : ViewModel() {
                     val accessMode = RuntimeAccessPolicy.normalize(VncSettings.getAccessMode(X11Application.instance, container.name))
                     if (accessMode.requiresVnc) VncServerManager.stopManagedVnc(container.name, logger)
                 }
-                X11SessionManager.stopAll(logger)
+                X11SessionManager.stopAll(logger, currentContainers)
                 val snapshot = readRuntimeSnapshot()
                 applyRuntimeSnapshot(snapshot)
+                runtimeRefreshed = true
                 succeeded = snapshot.containers.none { it.isRunning } && snapshot.monitors.none { it.status == X11ServerStatus.Running }
                 containerLogs.values.forEach(::removePinnedVncSummary)
             } catch (e: Exception) {
@@ -319,7 +327,7 @@ class HomeViewModel : ViewModel() {
                 logger.flush()
                 operation.finishDurably(succeeded, if (succeeded) "All containers and monitors stopped" else "Stop all was not fully confirmed — view logs")
                 runningOperationContainer = null
-                refreshRuntimeAfterOperation()
+                if (!runtimeRefreshed) refreshRuntimeAfterOperation()
             }
         }
     }
@@ -379,7 +387,15 @@ class HomeViewModel : ViewModel() {
     }
 
     private fun appendLog(logs: SnapshotStateList<Pair<Int, String>>, level: Int, message: String) {
-        logs.add(level to message)
+        appendLogs(logs, listOf(level to message))
+    }
+
+    private fun appendLogs(
+        logs: SnapshotStateList<Pair<Int, String>>,
+        entries: List<Pair<Int, String>>
+    ) {
+        if (entries.isEmpty()) return
+        logs.addAll(entries)
         if (logs.size > MAX_LOG_ENTRIES) {
             val pinned = VncConnectionGuide.retainPinnedSummary(logs)
             val retained = logs.takeLast(LOG_ENTRIES_AFTER_TRIM)

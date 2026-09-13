@@ -28,9 +28,16 @@ abstract class ContainerLogger {
  * One main-loop callback flushes every reduced entry accumulated during the burst,
  * preserving order while avoiding one Handler post / recomposition trigger per line.
  */
-class ViewModelLogger(
-    private val onLog: (Int, String) -> Unit
+class ViewModelLogger private constructor(
+    private val onLog: ((Int, String) -> Unit)?,
+    private val onLogBatch: ((List<Pair<Int, String>>) -> Unit)?
 ) : ContainerLogger() {
+    constructor(onLog: (Int, String) -> Unit) : this(onLog, null)
+
+    companion object {
+        fun batched(onLogBatch: (List<Pair<Int, String>>) -> Unit): ViewModelLogger =
+            ViewModelLogger(onLog = null, onLogBatch = onLogBatch)
+    }
     private val reducer = ConciseLogReducer()
     private val reducerLock = Any()
     private val dispatchLock = Any()
@@ -53,7 +60,11 @@ class ViewModelLogger(
             }
         }
 
-        batch.forEach { (level, message) -> onLog(level, message) }
+        if (batch.isNotEmpty()) {
+            onLogBatch?.invoke(batch) ?: batch.forEach { (level, message) ->
+                onLog?.invoke(level, message)
+            }
+        }
     }
 
     override fun logImmediate(level: Int, msg: String) {

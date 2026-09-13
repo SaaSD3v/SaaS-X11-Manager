@@ -106,7 +106,7 @@ class ManagedDisplayViewModel : ViewModel() {
 
         selectedDisplayNumber = monitor.slot.number
         val operation = beginOperation(monitor, "Deleting ${monitor.slot.describe()}")
-        val logger = ViewModelLogger(operation::append)
+        val logger = ViewModelLogger.batched(operation::appendAll)
         viewModelScope.launch {
             try {
                 logger.i("--- Deleting X11 monitor ---")
@@ -169,7 +169,7 @@ class ManagedDisplayViewModel : ViewModel() {
             "Starting ${monitor.slot.describe()}"
         }
         val operation = beginOperation(monitor, title)
-        val logger = ViewModelLogger(operation::append)
+        val logger = ViewModelLogger.batched(operation::appendAll)
         viewModelScope.launch {
             try {
                 if (monitor.status == X11ServerStatus.Running) {

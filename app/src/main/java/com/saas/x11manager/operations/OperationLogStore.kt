@@ -51,7 +51,12 @@ class LogOperation internal constructor(val owner: OperationOwner, private val s
     }
 
     fun append(level: Int, line: String) {
-        logs.add(level to line)
+        appendAll(listOf(level to line))
+    }
+
+    fun appendAll(entries: List<Pair<Int, String>>) {
+        if (entries.isEmpty()) return
+        logs.addAll(entries)
         if (logs.size > OperationArchive.MAX_ENTRIES) {
             val pinned = VncConnectionGuide.retainPinnedSummary(logs)
             val recent = logs.takeLast(OperationArchive.MAX_ENTRIES - pinned.size)

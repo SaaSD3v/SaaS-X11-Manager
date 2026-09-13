@@ -16,9 +16,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -44,12 +46,12 @@ fun VncManagedScreen(
     viewModel: VncLauncherViewModel,
     onClose: () -> Unit
 ) {
-    val profiles by viewModel.profiles.collectAsState()
-    val selectedId by viewModel.selectedProfileId.collectAsState()
-    val state by viewModel.connectionState.collectAsState()
-    val detail by viewModel.connectionDetail.collectAsState()
-    val screenEnabled by viewModel.screenEnabled.collectAsState()
-    val framebuffer by viewModel.framebufferSize.collectAsState()
+    val profiles by viewModel.profiles.collectAsStateWithLifecycle()
+    val selectedId by viewModel.selectedProfileId.collectAsStateWithLifecycle()
+    val state by viewModel.connectionState.collectAsStateWithLifecycle()
+    val detail by viewModel.connectionDetail.collectAsStateWithLifecycle()
+    val screenEnabled by viewModel.screenEnabled.collectAsStateWithLifecycle()
+    val framebuffer by viewModel.framebufferSize.collectAsStateWithLifecycle()
 
     val selectedProfile = profiles.firstOrNull { it.id == selectedId }
     val activeProfile = viewModel.activeProfile()
@@ -306,7 +308,7 @@ private fun VncManagedTopBar(
         actions = {
             if (hasLogs) {
                 IconButton(onClick = onShowLogs) {
-                    Icon(Icons.Default.ReceiptLong, contentDescription = "VNC logs")
+                    Icon(Icons.AutoMirrored.Filled.ReceiptLong, contentDescription = "VNC logs")
                 }
             }
             IconButton(onClick = onToggleAdditionalKeys, enabled = state == EmbeddedVncState.CONNECTED) {

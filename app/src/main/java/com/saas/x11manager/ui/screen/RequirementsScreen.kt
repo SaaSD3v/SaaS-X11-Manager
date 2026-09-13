@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -31,17 +32,17 @@ import com.saas.x11manager.util.X11ServerStatus
 fun RequirementsScreen(
     viewModel: HomeViewModel
 ) {
-    val rootStatus by viewModel.rootStatus.collectAsState()
-    val dsStatus by viewModel.dsStatus.collectAsState()
-    val dsRequirements by viewModel.dsRequirements.collectAsState()
-    val rootProvider by viewModel.rootProvider.collectAsState()
-    val kernelVersion by viewModel.kernelVersion.collectAsState()
-    val arch by viewModel.arch.collectAsState()
-    val androidVersion by viewModel.androidVersion.collectAsState()
-    val androidSdk by viewModel.androidSdk.collectAsState()
-    val deviceName by viewModel.deviceName.collectAsState()
-    val containers by viewModel.containers.collectAsState()
-    val monitors by viewModel.monitors.collectAsState()
+    val rootStatus by viewModel.rootStatus.collectAsStateWithLifecycle()
+    val dsStatus by viewModel.dsStatus.collectAsStateWithLifecycle()
+    val dsRequirements by viewModel.dsRequirements.collectAsStateWithLifecycle()
+    val rootProvider by viewModel.rootProvider.collectAsStateWithLifecycle()
+    val kernelVersion by viewModel.kernelVersion.collectAsStateWithLifecycle()
+    val arch by viewModel.arch.collectAsStateWithLifecycle()
+    val androidVersion by viewModel.androidVersion.collectAsStateWithLifecycle()
+    val androidSdk by viewModel.androidSdk.collectAsStateWithLifecycle()
+    val deviceName by viewModel.deviceName.collectAsStateWithLifecycle()
+    val containers by viewModel.containers.collectAsStateWithLifecycle()
+    val monitors by viewModel.monitors.collectAsStateWithLifecycle()
 
     val hostCheckValue = when (dsRequirements?.state) {
         DroidspacesRequirementState.READY -> "Ready"

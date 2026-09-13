@@ -19,7 +19,7 @@ data class ContainerCapabilities(
         get() = when (architecture?.lowercase()) {
             "aarch64", "arm64" -> "arm64"
             null, "" -> "unknown arch"
-            else -> architecture ?: "unknown arch"
+            else -> architecture
         }
 }
 

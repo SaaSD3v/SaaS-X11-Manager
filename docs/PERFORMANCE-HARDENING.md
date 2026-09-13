@@ -1,6 +1,6 @@
-# TEST performance hardening
+# Runtime performance hardening
 
-This document tracks the runtime-performance pass on the TEST branches. Stable branches are intentionally untouched.
+This document tracks runtime-performance work validated on the TEST branches before promotion to the corresponding stable branches.
 
 ## Invariants
 
@@ -27,21 +27,28 @@ This document tracks the runtime-performance pass on the TEST branches. Stable b
 - TigerVNC LISTEN readiness is polled inside one DroidSpaces invocation instead of entering the container every 250 ms.
 - The fixed 750 ms delay after the VNC desktop launch is removed. The Manager now verifies both recorded server/session PID+start-time leases plus the TCP LISTEN state across a short bounded stability window.
 
+### Tranche 3 — X11 lifecycle, UI and log batching
+
+- Integrated X11 process, socket-file and kernel-socket readiness now use one root transaction per poll instead of three libsu round-trips.
+- X11 Start returns the result of its authoritative desktop handshake. `SessionAccessManager` rechecks only when the first bounded handshake missed a session that was still settling.
+- Reconciliation reuses the container snapshot when no stale bind was changed, and server startup reuses the already-known ownership snapshot.
+- Stop/Stop All pass known ownership/container snapshots through the lifecycle and avoid a full container-list read for every monitor.
+- A successful Stop All applies one final runtime snapshot instead of reading and applying the same state twice.
+- `ViewModelLogger` delivers retained entries as one batch. Compose state, operation observers and the durable-write debounce are invalidated once per visible log burst.
+- Compose screens collect `StateFlow` through lifecycle-aware collectors, stopping background UI collection when the Activity is not active.
+- A redundant root `test -f` before every single-container config read was removed; the authoritative config read already handles a missing file.
+- PulseAudio configuration avoids the atomic rewrite when `enable_pulseaudio` already has the requested effective value, and avoids rewriting an already-absent key during restore.
+
 ## Remaining runtime work
 
-1. Move Integrated X11 process/socket readiness into one bounded shell transaction instead of repeated `pidof` / socket shell round-trips.
-2. Return a structured X11 Start result so SessionAccessManager can avoid re-running graphical-session confirmation after X11SessionManager already proved it.
-3. Make X11 reconciliation return/reuse its container/monitor snapshot instead of immediately listing containers again.
-4. Add a single-operation rootfs access transaction for user/profile edits so image rootfs is mounted once per operation.
-5. Bound PulseAudio host-core startup with a true global deadline; nested control probes must not multiply the outer retry budget.
-6. Reuse Termux UID/network/runtime facts across one graphical Start.
-7. Skip `enable_pulseaudio` config rewrite when the effective value is already correct.
-8. Defer nonessential `droidspaces check` UI diagnostics so they cannot queue ahead of a user Start.
-9. Consolidate Stop/Stop All post-validation snapshots instead of reading the full runtime twice.
-10. Reorder package repository preparation so APT/APK indexes are refreshed only when required and only once per transaction where possible.
-11. Add an offline capability probe for stopped rootfs before temporarily starting a container solely for wizard detection.
-12. Batch durable log change notification per ViewModelLogger flush rather than per retained line.
-13. Port common changes to X11-X0TEST and separately remove its fixed-X0 whole-`/proc` fallback without introducing multi-monitor behavior.
+1. Add a single-operation rootfs access transaction for user/profile edits so image rootfs is mounted once per operation.
+2. Bound PulseAudio host-core startup with a true global deadline; nested control probes must not multiply the outer retry budget.
+3. Reuse Termux UID/network/runtime facts across one graphical Start.
+4. Defer nonessential `droidspaces check` UI diagnostics so they cannot queue ahead of a user Start.
+5. Reorder package repository preparation so APT/APK indexes are refreshed only when required and only once per transaction where possible.
+6. Add an offline capability probe for stopped rootfs before temporarily starting a container solely for wizard detection.
+7. Replace the legacy whole-`/proc` PulseAudio migration scan with an ownership-safe bounded lookup; it currently runs only on cold recovery, not the warm path.
+8. Serialize explicit VNC toolbar commands if device traces show out-of-order writes under rapid repeated input.
 
 ## Physical validation
 
