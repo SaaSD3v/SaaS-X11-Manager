@@ -52,6 +52,8 @@ This document tracks runtime-performance work validated on the TEST branches bef
 
 ## Physical validation
 
+The Android appearance matrix runs on both `X11TEST` and `X11APP`, so UI changes are exercised before promotion as well as after it.
+
 Filter Android Logcat by `SaaSPerf`. Example format:
 
 ```
