@@ -103,10 +103,9 @@ object SessionAccessManager {
                 if (!started) {
                     logger?.e("[-] Integrated X11 access failed")
                     false
-                } else if (!confirmManagedDesktop(containerName, session)) {
-                    logger?.e("[-] ${session.label} did not become active on ${Constants.X11_DISPLAY}")
-                    false
                 } else {
+                    // startX11Session returns true only after the configured
+                    // desktop handshake succeeds; do not run it a second time.
                     logger?.i("[X11] ✓ Integrated X11 ready on Monitor 1 (${Constants.X11_DISPLAY})")
                     logger?.i("[SESSION] ✓ ${session.label} is active through Integrated X11")
                     true
@@ -177,17 +176,6 @@ object SessionAccessManager {
         }
         logger?.i("[X11] ✓ Monitor 1 (${Constants.X11_DISPLAY}) stopped; container remains available for VNC")
         return true
-    }
-
-    private suspend fun confirmManagedDesktop(
-        containerName: String,
-        session: GraphicSession
-    ): Boolean {
-        if (session == GraphicSession.NONE) return true
-        return X11SessionManager.ensureContainerGraphicSession(
-            containerName = containerName,
-            logger = null
-        )
     }
 
     private suspend fun finalizeAudioAfterContainerReady(

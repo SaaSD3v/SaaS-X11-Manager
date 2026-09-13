@@ -619,8 +619,8 @@ class EditContainerViewModel : ViewModel() {
         quickStartCompleted = false
     }
 
-    private fun operationLogger(): ViewModelLogger = ViewModelLogger { level, message ->
-        sessionLogOperation?.append(level, message)
+    private fun operationLogger(): ViewModelLogger = ViewModelLogger.batched { entries ->
+        sessionLogOperation?.appendAll(entries)
     }
 
     private fun showOperationSetupError(title: String, message: String, session: GraphicSession) {

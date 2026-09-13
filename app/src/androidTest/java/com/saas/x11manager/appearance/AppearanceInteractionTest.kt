@@ -5,6 +5,7 @@ import android.app.WallpaperManager
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.Build
+import android.util.Log
 import android.view.Window
 import android.view.View
 import android.view.WindowManager
@@ -17,6 +18,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.core.view.WindowInsetsControllerCompat
 import com.termux.x11.EmbeddedDisplayHost
 import com.saas.x11manager.MainActivity
+import com.saas.x11manager.X11Application
+import com.saas.x11manager.operations.OperationArea
+import com.saas.x11manager.operations.OperationOwner
 import com.saas.x11manager.ui.theme.*
 import org.junit.Assert.*
 import org.junit.Before
@@ -195,6 +199,17 @@ class AppearanceInteractionTest {
     @Test fun fixedWorkspaceKeepsItsControlsAndLogsAcrossThemes() {
         choose("Light")
         if (Build.VERSION.SDK_INT >= 31) choose("Dynamic Color")
+        compose.runOnIdle {
+            val operation = X11Application.instance.operationLogs.get(
+                OperationOwner(OperationArea.MONITOR, "0")
+            )
+            if (!operation.available) {
+                operation.begin("Appearance evidence")
+                operation.append(Log.INFO, "[X11] Monitor lifecycle evidence")
+                operation.finish(true, "Appearance evidence ready")
+            }
+        }
+        compose.waitForIdle()
         for (name in listOf("light", "dark", "amoled")) {
             when (name) {
                 "dark" -> choose("Dark")

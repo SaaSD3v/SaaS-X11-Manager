@@ -96,7 +96,7 @@ class ManagedDisplayViewModel : ViewModel() {
         operation.begin("Updating X11 display")
         message = null
         showMonitorLogs = true
-        val logger = ViewModelLogger(operation::append)
+        val logger = ViewModelLogger.batched(operation::appendAll)
         viewModelScope.launch {
             var succeeded = false
             var result = "X11 operation was not confirmed — view logs"

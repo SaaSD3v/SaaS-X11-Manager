@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -25,8 +26,8 @@ fun DisplayScreen(
     viewModel: HomeViewModel,
     onOpenScreen: () -> Unit
 ) {
-    val serverStatus by viewModel.x11ServerStatus.collectAsState()
-    val serverPid by viewModel.x11ServerPid.collectAsState()
+    val serverStatus by viewModel.x11ServerStatus.collectAsStateWithLifecycle()
+    val serverPid by viewModel.x11ServerPid.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val prefs = remember(context) { EmbeddedDisplayHost.getPrefs(context) }
     val store = remember(prefs) { prefs.get() }

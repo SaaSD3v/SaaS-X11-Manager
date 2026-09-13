@@ -9,15 +9,16 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -48,9 +49,9 @@ fun ManagedDisplayScreen(
     onClose: () -> Unit,
     displayViewModel: ManagedDisplayViewModel = androidx.lifecycle.viewmodel.compose.viewModel(viewModelStoreOwner = X11Application.instance)
 ) {
-    val serverStatus by viewModel.x11ServerStatus.collectAsState()
-    val serverPid by viewModel.x11ServerPid.collectAsState()
-    val containers by viewModel.containers.collectAsState()
+    val serverStatus by viewModel.x11ServerStatus.collectAsStateWithLifecycle()
+    val serverPid by viewModel.x11ServerPid.collectAsStateWithLifecycle()
+    val containers by viewModel.containers.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val activity = remember(context) { context.findManagedDisplayActivity() }
     val prefs = remember(context) { EmbeddedDisplayHost.getPrefs(context) }
@@ -354,7 +355,7 @@ private fun FixedDisplayTopBar(
         actions = {
             if (hasLogs) {
                 IconButton(onClick = onShowLogs) {
-                    Icon(Icons.Default.ReceiptLong, contentDescription = "Monitor logs")
+                    Icon(Icons.AutoMirrored.Filled.ReceiptLong, contentDescription = "Monitor logs")
                 }
             }
             if (additionalKeysEnabled) {

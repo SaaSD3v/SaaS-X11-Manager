@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -31,8 +32,8 @@ fun HomeScreen(
     onOpenFixes: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val containers by viewModel.containers.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
+    val containers by viewModel.containers.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     // Do not expose Clear/Minimize against a synthetic in-memory record while the
     // durable archive is still restoring. This closes the clear-before-restore race.
     val logsLoaded = X11Application.instance.operationLogs.loadedState

@@ -10,14 +10,23 @@ import kotlinx.coroutines.withContext
 
 enum class X11ServerStatus { Running, Stopped }
 
+data class X11ServerRuntime(
+    val status: X11ServerStatus,
+    val pid: Int?
+)
+
 /** Owns the Manager's fixed integrated X11 server on display :0. */
 object X11SessionManager {
+
+    private const val RUNTIME_PIDS_MARKER = "__SAAS_X11_PIDS__="
+    private const val RUNTIME_SOCKET_MARKER = "__SAAS_X11_SOCKET__="
 
     // One fixed transport: serialize process/socket mutations, including recovery.
     // Desktop handshakes run outside this lock so their bounded restart can acquire it.
     private val serverMutex = Mutex()
 
     private data class ServerLease(val pid: Int, val reused: Boolean)
+    private data class ServerRuntimeProbe(val pids: List<Int>, val socketReady: Boolean)
 
     private fun shellQuote(value: String): String =
         "'" + value.replace("'", "'\\''") + "'"
@@ -28,29 +37,26 @@ object X11SessionManager {
         .filter { it > 0 }
         .distinct()
 
-    private fun liveServerPids(): List<Int> = try {
-        val pidof = Shell.cmd("pidof ${shellQuote(Constants.X11_SERVER_PROCESS)} 2>/dev/null").exec()
-        parsePids(pidof.out).ifEmpty {
-            val target = shellQuote(Constants.X11_SERVER_PROCESS)
-            val result = Shell.cmd(
-                "target=$target; " +
-                    "for comm in /proc/[0-9]*/comm; do " +
-                    "[ -r \"\$comm\" ] || continue; " +
-                    "IFS= read -r name < \"\$comm\" || continue; " +
-                    "[ \"\$name\" = \"\$target\" ] || continue; " +
-                    "pid=\${comm#/proc/}; pid=\${pid%/comm}; " +
-                    "printf '%s\\n' \"\$pid\"; done"
-            ).exec()
-            parsePids(result.out)
-        }
+    /** One bounded root transaction replaces separate pid/socket probes per poll. */
+    private fun probeServerRuntime(): ServerRuntimeProbe = try {
+        val process = shellQuote(Constants.X11_SERVER_PROCESS)
+        val socket = shellQuote(Constants.X11_SOCK_FILE)
+        val result = Shell.cmd(
+            "pids=${'$'}(pidof $process 2>/dev/null || true); " +
+                "socket=0; [ -S $socket ] && socket=1; " +
+                "printf '%s\\n' '$RUNTIME_PIDS_MARKER'\"${'$'}pids\" " +
+                "'$RUNTIME_SOCKET_MARKER'\"${'$'}socket\""
+        ).exec()
+        val pids = result.out.firstOrNull { it.startsWith(RUNTIME_PIDS_MARKER) }
+            ?.removePrefix(RUNTIME_PIDS_MARKER)
+            ?.let { parsePids(listOf(it)) }
+            .orEmpty()
+        ServerRuntimeProbe(
+            pids = pids,
+            socketReady = result.out.any { it == "${RUNTIME_SOCKET_MARKER}1" }
+        )
     } catch (_: Exception) {
-        emptyList()
-    }
-
-    private fun socketReady(): Boolean = try {
-        Shell.cmd("test -S ${shellQuote(Constants.X11_SOCK_FILE)}").exec().isSuccess
-    } catch (_: Exception) {
-        false
+        ServerRuntimeProbe(emptyList(), socketReady = false)
     }
 
     private fun prepareRuntime(): Boolean = try {
@@ -130,14 +136,18 @@ object X11SessionManager {
             "com.termux.x11.CmdEntryPoint ${Constants.X11_DISPLAY} " +
             ">${shellQuote(Constants.X11_LOG_FILE)} 2>&1 & echo ${'$'}!"
 
-    suspend fun getServerStatus(): X11ServerStatus = withContext(Dispatchers.IO) {
-        if (socketReady() && liveServerPids().isNotEmpty()) X11ServerStatus.Running
-        else X11ServerStatus.Stopped
+    suspend fun getServerRuntime(): X11ServerRuntime = withContext(Dispatchers.IO) {
+        val runtime = probeServerRuntime()
+        val running = runtime.socketReady && runtime.pids.isNotEmpty()
+        X11ServerRuntime(
+            status = if (running) X11ServerStatus.Running else X11ServerStatus.Stopped,
+            pid = if (running) runtime.pids.first() else null
+        )
     }
 
-    suspend fun getServerPid(): Int? = withContext(Dispatchers.IO) {
-        if (socketReady()) liveServerPids().firstOrNull() else null
-    }
+    suspend fun getServerStatus(): X11ServerStatus = getServerRuntime().status
+
+    suspend fun getServerPid(): Int? = getServerRuntime().pid
 
     suspend fun getOwnerContainerName(): String? = withContext(Dispatchers.IO) {
         ContainerManager.listContainers()
@@ -160,8 +170,9 @@ object X11SessionManager {
         logger: ContainerLogger?
     ): Result<ServerLease> = serverMutex.withLock { withContext(Dispatchers.IO) {
         try {
-            val existingPids = liveServerPids()
-            if (socketReady() && existingPids.isNotEmpty()) {
+            val existing = probeServerRuntime()
+            val existingPids = existing.pids
+            if (existing.socketReady && existingPids.isNotEmpty()) {
                 val pid = existingPids.first()
                 logger?.i("[+] Integrated X11 ${Constants.X11_DISPLAY} ready (PID=$pid)")
                 return@withContext Result.success(ServerLease(pid, reused = true))
@@ -192,8 +203,9 @@ object X11SessionManager {
             val deadline = System.nanoTime() + 10_000_000_000L
 
             while (System.nanoTime() < deadline) {
-                val pids = liveServerPids()
-                if (socketReady() && pids.isNotEmpty()) {
+                val runtime = probeServerRuntime()
+                val pids = runtime.pids
+                if (runtime.socketReady && pids.isNotEmpty()) {
                     val pid = launchedPid?.takeIf { it in pids } ?: pids.first()
                     logger?.i("[+] Integrated X11 ${Constants.X11_DISPLAY} ready (PID=$pid)")
                     return@withContext Result.success(ServerLease(pid, reused = false))
@@ -201,7 +213,7 @@ object X11SessionManager {
                 delay(250)
             }
 
-            killPids(liveServerPids())
+            killPids(probeServerRuntime().pids)
             clearSocketState()
             Result.failure(IllegalStateException("Integrated X11 did not create ${Constants.X11_SOCK_FILE}"))
         } catch (e: Exception) {
@@ -216,11 +228,12 @@ object X11SessionManager {
 
     suspend fun stopIntegratedServer(logger: ContainerLogger? = null): Boolean = serverMutex.withLock { withContext(Dispatchers.IO) {
         try {
-            val pids = liveServerPids()
-            killPids(pids)
+            val before = probeServerRuntime()
+            killPids(before.pids)
             clearSocketState()
             delay(50)
-            val stopped = liveServerPids().isEmpty() && !socketReady()
+            val after = probeServerRuntime()
+            val stopped = after.pids.isEmpty() && !after.socketReady
             if (stopped) {
                 logger?.i("[+] Integrated X11 ${Constants.X11_DISPLAY} stopped")
             } else {
@@ -262,9 +275,6 @@ object X11SessionManager {
         }
     }
 
-    private suspend fun conflictingContainer(containerName: String): String? =
-        FixedX11Ownership.otherOwner(ContainerManager.listContainers(), containerName)
-
     suspend fun startX11Session(
         containerName: String,
         logger: ContainerLogger? = null,
@@ -276,12 +286,15 @@ object X11SessionManager {
         try {
             logger?.i("--- Starting Integrated X11 Session ---")
 
-            val before = ContainerManager.getContainerInfo(containerName) ?: run {
-                logger?.e("[-] Container $containerName was not found")
-                return@withContext false
-            }
+            val containers = ContainerManager.listContainers()
+            val before = containers.firstOrNull { it.name == containerName }
+                ?: ContainerManager.getContainerInfo(containerName)
+                ?: run {
+                    logger?.e("[-] Container $containerName was not found")
+                    return@withContext false
+                }
 
-            conflictingContainer(containerName)?.let { owner ->
+            FixedX11Ownership.otherOwner(containers, containerName)?.let { owner ->
                 logger?.e("[-] Integrated X11 ${Constants.X11_DISPLAY} is already in use by $owner")
                 return@withContext false
             }
@@ -386,9 +399,15 @@ object X11SessionManager {
         true
     }
 
-    suspend fun stopAll(logger: ContainerLogger? = null) = withContext(Dispatchers.IO) {
+    suspend fun stopAll(
+        logger: ContainerLogger? = null,
+        containersSnapshot: List<ContainerInfo>? = null
+    ) = withContext(Dispatchers.IO) {
         logger?.i("--- Stopping All ---")
-        val running = ContainerManager.listContainers().filter { it.isRunning }
+        val containers = containersSnapshot
+            ?.takeIf { it.isNotEmpty() }
+            ?: ContainerManager.listContainers()
+        val running = containers.filter { it.isRunning }
         if (running.isEmpty()) {
             logger?.i("[CONTAINER] ✓ No running containers to stop")
         } else {

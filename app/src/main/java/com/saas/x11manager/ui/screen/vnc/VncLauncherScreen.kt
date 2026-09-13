@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -27,11 +28,11 @@ fun VncLauncherScreen(
     viewModel: VncLauncherViewModel,
     onOpenScreen: () -> Unit
 ) {
-    val profiles by viewModel.profiles.collectAsState()
-    val selectedId by viewModel.selectedProfileId.collectAsState()
-    val state by viewModel.connectionState.collectAsState()
-    val screenEnabled by viewModel.screenEnabled.collectAsState()
-    val framebuffer by viewModel.framebufferSize.collectAsState()
+    val profiles by viewModel.profiles.collectAsStateWithLifecycle()
+    val selectedId by viewModel.selectedProfileId.collectAsStateWithLifecycle()
+    val state by viewModel.connectionState.collectAsStateWithLifecycle()
+    val screenEnabled by viewModel.screenEnabled.collectAsStateWithLifecycle()
+    val framebuffer by viewModel.framebufferSize.collectAsStateWithLifecycle()
     val active = viewModel.activeProfile()
     val selected = profiles.firstOrNull { it.id == selectedId }
 
@@ -237,9 +238,9 @@ private fun VncConnectionsDialog(
     onDisconnect: () -> Unit,
     onWakeResult: (Result<Unit>) -> Unit
 ) {
-    val profiles by viewModel.profiles.collectAsState()
-    val selectedId by viewModel.selectedProfileId.collectAsState()
-    val state by viewModel.connectionState.collectAsState()
+    val profiles by viewModel.profiles.collectAsStateWithLifecycle()
+    val selectedId by viewModel.selectedProfileId.collectAsStateWithLifecycle()
+    val state by viewModel.connectionState.collectAsStateWithLifecycle()
     val active = viewModel.activeProfile()
     val canAdd = !viewModel.singleDisplayMode || profiles.isEmpty()
 

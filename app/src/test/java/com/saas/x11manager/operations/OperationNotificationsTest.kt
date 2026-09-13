@@ -177,6 +177,21 @@ class OperationNotificationsTest {
         assertEquals("Installed", archived.result)
     }
 
+    @Test fun batchedLoggerInvalidatesComposeAndArchiveOnlyOncePerUiBurst() {
+        val operation = operation(OperationArea.HOME, "batch")
+        var changes = 0
+        store.observer = { changes++ }
+        val logger = ViewModelLogger.batched(operation::appendAll)
+
+        logger.logImmediate(Log.INFO, "--- Starting Integrated X11 Session ---")
+        logger.logImmediate(Log.INFO, "[+] Container runtime active")
+        runBlocking { logger.flush() }
+
+        assertTrue(operation.logs.isNotEmpty())
+        assertEquals(1, changes)
+        store.observer = null
+    }
+
     @Test fun restorationCannotOverwriteANewOperationAndNewRunReplacesOldNotification() {
         val operation = operation(OperationArea.HOME, "jellyfin")
         operation.append(Log.INFO, "Old log")

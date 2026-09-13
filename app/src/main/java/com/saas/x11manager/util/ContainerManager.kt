@@ -230,7 +230,6 @@ object ContainerManager {
 
     suspend fun getContainerInfo(name: String): ContainerInfo? = withContext(Dispatchers.IO) {
         val path = "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}"
-        if (!Shell.cmd("test -f '$path'").exec().isSuccess) return@withContext null
         val c = loadConfig(path, name) ?: return@withContext null
         val state = getContainerRuntimeStates(listOf(c.name))[c.name]
             ?: ContainerRuntimeState(ContainerStatus.UNKNOWN)
