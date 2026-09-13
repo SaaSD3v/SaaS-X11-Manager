@@ -20,6 +20,7 @@ This document tracks runtime-performance work validated on `X11-X0TEST` before p
 - `scripts/verify-x11-only.sh` recursively rejects dynamic display allocation and non-`:0`/`X0` production behavior.
 - Runtime policy tests pin the one-probe, no-whole-`/proc`, no-double-desktop-confirmation and lifecycle-aware collection contracts.
 - Appearance tests create an explicit monitor log before exercising the conditional log action. This matches the UI rule that an empty synthetic log must stay hidden.
+- The Android appearance matrix runs on both `X11-X0TEST` and `X11-0nly`, validating UI changes before and after promotion.
 - Full unit, Android appearance and release-build validation runs in GitHub Actions because the local workspace does not contain the Gradle distribution or Android SDK.
 
 ## Remaining measured-device work

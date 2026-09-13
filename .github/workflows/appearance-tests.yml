@@ -2,7 +2,7 @@ name: Android appearance tests
 
 on:
   push:
-    branches: [X11-0nly]
+    branches: [X11-0nly, X11-X0TEST]
     paths:
       - 'app/src/main/java/com/saas/x11manager/ui/**'
       - 'app/src/main/java/com/saas/x11manager/MainActivity.kt'
