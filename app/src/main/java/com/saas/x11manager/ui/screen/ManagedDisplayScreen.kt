@@ -95,7 +95,9 @@ fun ManagedDisplayScreen(
         // placeholder as soon as a running container adopts it. From then on its
         // lifecycle is represented by the real container/server state only.
         val adoptedManualNumbers = manualDisplayNumbers.filterTo(mutableSetOf()) { number ->
-            liveByNumber[number]?.containerName != null
+            liveByNumber[number]?.let {
+                it.containerName != null || it.conflictingOwners.isNotEmpty()
+            } == true
         }
         val effectiveManualNumbers = manualDisplayNumbers - adoptedManualNumbers
         if (adoptedManualNumbers.isNotEmpty()) {
@@ -420,7 +422,13 @@ private fun ManagedDisplayTopBar(
                                     else -> "stopped"
                                 }
                             )
-                            monitor?.containerName?.let(::add)
+                            monitor?.let { info ->
+                                if (info.conflictingOwners.isNotEmpty()) {
+                                    add("OWNER CONFLICT")
+                                } else {
+                                    info.containerName?.let(::add)
+                                }
+                            }
                             serverPid?.let { add("PID $it") }
                         }.joinToString(" · ")
                     } ?: "No monitor selected",
@@ -551,7 +559,11 @@ private fun MonitorCard(
     onDelete: () -> Unit
 ) {
     val running = monitor.status == X11ServerStatus.Running
-    val canDelete = !running && monitor.containerName == null && !interactionsLocked
+    val canDelete =
+        !running &&
+            monitor.containerName == null &&
+            monitor.conflictingOwners.isEmpty() &&
+            !interactionsLocked
 
     Surface(
         modifier = Modifier
@@ -608,6 +620,8 @@ private fun MonitorCard(
 
             Text(
                 text = when {
+                    monitor.conflictingOwners.isNotEmpty() ->
+                        "Conflict: " + monitor.conflictingOwners.joinToString(", ")
                     monitor.containerName != null -> monitor.containerName
                     running -> "X11 server running"
                     else -> "Available"
