@@ -324,6 +324,8 @@ object VirGLFixManager {
     }
 
     private fun writeLease(runtime: TermuxRuntime, lease: HostLease): Boolean = try {
+        @Suppress("UNUSED_VARIABLE")
+        val termuxUid = runtime.uid
         val temp = "$HOST_PID_FILE.tmp.${android.os.Process.myPid()}"
         val result = Shell.cmd(
             "printf '%s\\n' ${q("owner=$OWNER")} ${q("pid=${lease.pid}")} " +
@@ -342,8 +344,8 @@ object VirGLFixManager {
             pid=${lease.pid}
             [ -r "/proc/${'$'}pid/status" ] && [ -r "/proc/${'$'}pid/cmdline" ] || exit 1
             uid=${'$'}(sed -n 's/^Uid:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "/proc/${'$'}pid/status" | sed -n '1p')
-            [ "${'
-            cmd=${'$'}(tr '\000' ' ' < "/proc/${'$'}pid/cmdline" 2>/dev/null || true)
+            [ "${'$'}uid" = 0 ] || exit 1
+            cmd=${'$'}(tr '\\000' ' ' < "/proc/${'$'}pid/cmdline" 2>/dev/null || true)
             case " ${'$'}cmd " in
                 *${q(VIRGL_BIN)}*--socket-path*${q(HOST_SOCKET)}*) exit 0 ;;
                 *) exit 1 ;;
@@ -351,7 +353,6 @@ object VirGLFixManager {
         """.trimIndent()
         return try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
     }
-
     private fun kernelSocketLive(path: String): Boolean = try {
         val result = Shell.cmd("cat /proc/net/unix 2>/dev/null").exec()
         result.isSuccess &&
