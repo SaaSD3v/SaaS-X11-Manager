@@ -116,6 +116,13 @@ class ManagedDisplayViewModel : ViewModel() {
                 logger.i("[*] Socket: ${monitor.slot.socketFile}")
                 logger.i("")
 
+                if (monitor.conflictingOwners.isNotEmpty()) {
+                    message = "${monitor.slot.describe()} has conflicting owners: " +
+                        monitor.conflictingOwners.joinToString(", ")
+                    logger.e("[-] $message")
+                    logger.e("[!] Resolve the duplicate container display lease before deleting this monitor")
+                    return@launch
+                }
                 if (monitor.containerName != null) {
                     message = "${monitor.slot.describe()} is reserved by ${monitor.containerName}"
                     logger.w("[!] Monitor is reserved by running container '${monitor.containerName}'")
@@ -172,6 +179,14 @@ class ManagedDisplayViewModel : ViewModel() {
         val logger = ViewModelLogger.batched(operation::appendAll)
         viewModelScope.launch {
             try {
+                if (monitor.conflictingOwners.isNotEmpty()) {
+                    message = "${monitor.slot.describe()} has conflicting owners: " +
+                        monitor.conflictingOwners.joinToString(", ")
+                    logger.e("[-] $message")
+                    logger.e("[!] Monitor start/stop is disabled until only one running owner remains")
+                    return@launch
+                }
+
                 if (monitor.status == X11ServerStatus.Running) {
                     logger.i("--- Stopping X11 monitor ---")
                     logger.i("[*] Monitor: ${monitor.monitorNumber}")
