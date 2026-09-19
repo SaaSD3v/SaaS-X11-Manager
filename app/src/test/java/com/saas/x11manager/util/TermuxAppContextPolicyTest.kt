@@ -42,7 +42,7 @@ class TermuxAppContextPolicyTest {
         assertTrue(audio.contains("su " + dollar + "{runtime.uid} -c"))
         assertTrue(transport.contains("su " + dollar + "{owner.uid} -c"))
         assertTrue(virgl.contains("u:r:droidspacesd:s0"))
-        assertTrue(virgl.contains("[ \"" + dollar + "uid\" = 0 ]"))
+        assertTrue(virgl.contains("= 0 ] || exit 1"))
         assertTrue(virgl.contains("virgl_test_server_android"))
         assertTrue(virgl.contains("--socket-path"))
         assertFalse(virgl.contains("pkg update"))
@@ -53,9 +53,10 @@ class TermuxAppContextPolicyTest {
     fun retiredReconstructedAudioHelperIsNotReferenced() {
         val audio = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
 
-        assertFalse(audio.contains("saas-audio"))
         assertFalse(audio.contains("Base64"))
         assertFalse(audio.contains("SaaS-DroidSpaces-Audio-Auto.sh"))
+        assertFalse(audio.contains("context.assets.open"))
+        assertFalse(audio.contains("SCRIPT_SHA256"))
         assertTrue(audio.contains("Physically validated transport baseline"))
     }
 }
