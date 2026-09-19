@@ -266,17 +266,19 @@ object VirGLFixManager {
 
     private fun runAsTermux(
         runtime: TermuxRuntime,
-        command: String
-    ) = Shell.cmd(
-        "su ${runtime.uid} -c " + q(
+        command: String,
+        timeoutMs: Long = 30_000L
+    ): TermuxAppCommand.Result = TermuxAppCommand.execBlocking(
+        label = "virgl-${runtime.uid}",
+        command =
             "export LC_ALL=C; " +
                 "export HOME=$TERMUX_HOME; " +
                 "export PREFIX=$TERMUX_PREFIX; " +
                 "export TMPDIR=$TERMUX_PREFIX/tmp; " +
                 "export PATH=$TERMUX_PREFIX/bin:/system/bin:/system/xbin; " +
-                command
-        )
-    ).exec()
+                command,
+        timeoutMs = timeoutMs
+    )
 
     private fun supportsPrivateSocket(runtime: TermuxRuntime): Boolean = try {
         runAsTermux(
@@ -304,7 +306,11 @@ object VirGLFixManager {
                 "{ pkg update -y >/dev/null 2>&1 && " +
                 "pkg install -y virglrenderer-android >/dev/null 2>&1; }; " +
                 "test -x ${q(VIRGL_BIN)}"
-        val installed = try { runAsTermux(runtime, command).isSuccess } catch (_: Exception) { false }
+        val installed = try {
+            runAsTermux(runtime, command, timeoutMs = 180_000L).isSuccess
+        } catch (_: Exception) {
+            false
+        }
         return installed && supportsPrivateSocket(runtime)
     }
 
