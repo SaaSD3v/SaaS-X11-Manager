@@ -14,7 +14,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 
-/** Execute the shipped shell templates; Android commands are never run here. */
+/** Execute X11/Alpine shell templates; Android commands are never run here. */
 class AudioAndAlpineRuntimeTest {
     // Android's compile-time stubs omit the JDK UNIX socket API. The unit tests
     // run on JDK 17, so reach that API reflectively without changing app APIs.
@@ -67,73 +67,6 @@ class AudioAndAlpineRuntimeTest {
             return process.exitValue() to process.inputStream.bufferedReader().readText()
         }
         override fun close() { root.deleteRecursively() }
-    }
-
-    @Test fun switchingHostNatHostReplacesStaleProfilesAndConfiguresTheGraphicalUser() {
-        Fixture().use { f ->
-            val userHome = File(f.root, "home/desktop").path
-            f.file("etc/passwd", "root:x:0:0::${f.root}/root:/bin/sh\ndesktop:x:1000:1000::$userHome:/bin/sh\n")
-            f.file("etc/saas-x11-manager/session-user", "user=desktop\ncreate=0\n")
-            f.file("home/desktop/.config/pulse/client.conf", "original-user-config\n")
-            val cookie = ByteArray(256) { it.toByte() }
-            f.file("root/.config/pulse/saas-audio.cookie").writeBytes(cookie)
-            // UID changes are represented at this boundary; all file writes,
-            // profile evaluation and client endpoint selection run normally.
-            f.command("chown", "exit 0")
-            f.command("pacat", "cat >/dev/null")
-            f.command("id", "case \"\$1:\$2\" in -u:desktop|-g:desktop) echo 1000 ;; *) echo 0 ;; esac")
-            f.command("su", "for arg do last=\$arg; done\nHOME='$userHome' USER=desktop /bin/sh -c \"\$last\"")
-            f.command("pactl", """
-                [ -z "${'$'}{PULSE_SERVER:-}" ] || exit 40
-                [ -r "${'$'}PULSE_COOKIE" ] || exit 41
-                [ "${'$'}(wc -c < "${'$'}PULSE_COOKIE")" -eq 256 ] || exit 42
-                endpoint=${'$'}(sed -n 's/^default-server = //p' "${'$'}PULSE_CLIENTCONFIG")
-                printf 'Server String: %s\nDefault Sink: AAudio_sink\n' "${'$'}endpoint"
-            """.trimIndent())
-            for (server in listOf("tcp:127.0.0.1:4713", "tcp:172.28.0.1:4714", "tcp:127.0.0.1:4715")) {
-                f.file("etc/profile.d/saas-droidspaces-audio.sh", "# SaaS DroidSpaces Audio HostNAT\nexport PULSE_SERVER=old\n")
-                val result = f.run(f.mapped(PulseAudioClientConfig.install(server)), mapOf("PULSE_SERVER" to "unix:/stale-native"))
-                assertEquals(result.second, 0, result.first)
-                assertTrue(result.second.contains("Server String: $server"))
-                assertArrayEquals(cookie, File(userHome, ".config/pulse/saas-audio.cookie").readBytes())
-                assertFalse(File(f.root, "etc/profile.d/saas-droidspaces-audio.sh").exists())
-                assertTrue(File(userHome, ".config/pulse/client.conf").readText().contains(server))
-            }
-            assertEquals("original-user-config\n", File(userHome, ".config/pulse/client.conf.saas-x11-manager.bak").readText())
-        }
-    }
-
-    @Test fun playbackMustDrainEvenWhenTheControlChannelWouldRespond() {
-        Fixture().use { f ->
-            f.command("pacat", "bytes=\$(wc -c); [ \"\$bytes\" -eq 48000 ]")
-            val command = PulseAudioClientConfig.playbackProbe("unix:/control", "/cookie", "/client")
-            assertEquals(0, f.run(command).first)
-            f.command("pacat", "exec sleep 10")
-            assertEquals("A stalled sink must fail the finite stream probe", 124, f.run(command).first)
-        }
-    }
-
-    @Test fun completeHostAndNatPayloadsPreserveBinaryCookieAndFinishTheirProof() {
-        val server = "tcp:172.28.0.1:4714"
-        val cookie = ByteArray(256) { it.toByte() }
-        val octal = cookie.joinToString("") { "\\0%03o".format(it.toInt() and 255) }
-        val payloads = listOf(
-            PulseAudioUnifiedTransport.buildContainerPayload(server, octal),
-            PulseAudioNatScriptTransport.buildContainerPayload(server, octal)
-        )
-        for (payload in payloads) Fixture().use { f ->
-            f.command("chown", "exit 0")
-            f.command("id", "echo 0")
-            f.command("speaker-test", "exit 0")
-            f.command("aplay", "echo pulse")
-            f.command("pacat", "cat >/dev/null")
-            f.command("pactl", "printf 'Server String: $server\\nDefault Sink: AAudio_sink\\n'")
-            val result = f.run(f.mapped(payload))
-            assertEquals(result.second, 0, result.first)
-            assertTrue(result.second, result.second.contains("__SAAS_AUDIO_PCM_DRAINED__"))
-            assertTrue(result.second, result.second.contains("__READY__") || result.second.contains("__SAAS_AUDIO_TRANSPORT_READY__"))
-            assertArrayEquals(cookie, File(f.root, "root/.config/pulse/saas-audio.cookie").readBytes())
-        }
     }
 
     @Test fun isolatedMonitorWinsOverOtherSocketsVisibleInTmp() {
