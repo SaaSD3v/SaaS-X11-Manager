@@ -229,13 +229,17 @@ object PulseAudioUnifiedTransport {
         val wrapped = buildTermuxCommand(command)
 
         return try {
-            val shellResult = Shell.cmd("su ${owner.uid} -c ${q(wrapped)}").exec()
-            val rawOut = shellResult.out.toList()
+            val shellResult = TermuxAppCommand.execBlocking(
+                label = "audio-control-${owner.uid}",
+                command = wrapped,
+                timeoutMs = 15_000L
+            )
+            val rawOut = shellResult.out
             val markerLine = rawOut.lastOrNull { it.trim().startsWith(marker) }?.trim()
             val exitCode = markerLine?.removePrefix(marker)?.toIntOrNull()
-                ?: if (shellResult.isSuccess) 0 else 255
+                ?: shellResult.exitCode
             val out = rawOut.filterNot { it.trim().startsWith(marker) }
-            DirectResult(exitCode, out, shellResult.err.toList())
+            DirectResult(exitCode, out, shellResult.err)
         } catch (e: Exception) {
             DirectResult(255, emptyList(), listOf(e.message ?: e.javaClass.simpleName))
         }
