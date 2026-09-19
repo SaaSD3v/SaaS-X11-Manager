@@ -28,11 +28,16 @@ class RuntimePerformancePolicyTest {
 
         assertTrue(manager.contains("data class X11SessionStartResult"))
         assertTrue(manager.contains("private fun probeServerRuntime(displaySlot: X11DisplaySlot)"))
+        assertTrue(manager.contains("private fun probeRuntimeSnapshot("))
+        assertTrue(manager.contains("parseRuntimeSnapshot(result.out)"))
+        assertTrue(manager.contains("val runtime = probeRuntimeSnapshot(assignments.keys)"))
         assertTrue(manager.contains("val runtime = probeServerRuntime(displaySlot)"))
         assertTrue(manager.contains("X11SessionStartResult(displaySlot, graphicSessionReady)"))
         assertTrue(access.contains("startResult.graphicSessionReady ||"))
         assertTrue(access.contains("desktop.confirm-retry"))
         assertFalse(access.contains("perf.stage(\"desktop.confirm\")"))
+        assertFalse(manager.contains("discoverRuntimeSlots().map { it.number }"))
+        assertFalse(manager.contains("val socketTable = socketTableLines()\n\n            slotNumbers"))
     }
 
     @Test
