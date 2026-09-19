@@ -34,11 +34,11 @@ class PulseAudioUnifiedTransportPolicyTest {
     }
 
     @Test
-    fun manifestDeclaresRunCommandPermissionAndTermuxVisibility() {
+    fun manifestHasNoRunCommandPermissionOrPackageVisibility() {
         val manifest = source("app/src/main/AndroidManifest.xml")
-        assertTrue(manifest.contains("com.termux.permission.RUN_COMMAND"))
-        assertTrue(manifest.contains("<package android:name=\"com.termux\""))
+        assertFalse(manifest.contains("com.termux.permission.RUN_COMMAND"))
         assertFalse(manifest.contains("com.termux.app.RunCommandService"))
+        assertFalse(manifest.contains("<package android:name=\"com.termux\""))
     }
 
     @Test
@@ -134,9 +134,7 @@ class PulseAudioUnifiedTransportPolicyTest {
         assertTrue(transport.contains("PULSE_SERVER="))
         assertTrue(transport.contains("PULSE_COOKIE="))
         assertTrue(transport.contains("pactl info"))
-        assertTrue(transport.contains("PulseAudioCookieTransport.encodeCommand(COOKIE)"))
-        val encoder = source("app/src/main/java/com/saas/x11manager/util/PulseAudioCookieTransport.kt")
-        assertTrue(encoder.contains("od -An -v -tu1"))
+        assertTrue(transport.contains("od -An -v -tu1"))
         assertTrue(transport.contains("printf '%b'"))
         assertTrue(transport.contains("COOKIE_ESCAPED"))
         assertTrue(transport.contains("cookie-file = /root/.config/pulse/saas-audio.cookie"))
