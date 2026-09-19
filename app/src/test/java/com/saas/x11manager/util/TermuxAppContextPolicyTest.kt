@@ -29,6 +29,8 @@ class TermuxAppContextPolicyTest {
         assertTrue(broker.contains("com.termux.app.RunCommandService"))
         assertTrue(broker.contains("am startservice --user 0"))
         assertTrue(broker.contains("allow-external-apps=true"))
+        assertTrue(broker.contains("POLICY_CACHE_MARKER"))
+        assertTrue(broker.contains("TermuxAppSharedProperties"))
         assertTrue(manifest.contains("com.termux.permission.RUN_COMMAND"))
         assertTrue(manifest.contains("<package android:name=\"com.termux\""))
 
