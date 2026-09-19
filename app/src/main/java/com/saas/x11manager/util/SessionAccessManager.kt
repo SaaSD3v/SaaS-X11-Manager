@@ -83,7 +83,12 @@ object SessionAccessManager {
             }
         }
 
-        // Audio baseline: physically validated HOST + NAT transport from 0f61eaa3.
+        // Final validated HOST + NAT audio baseline. Clear stale competing
+        // runtime state before preparing the Manager-owned core.
+        PulseAudioRuntimeSanitizer.prepare(
+            containerName = containerName,
+            logger = logger
+        )
         PulseAudioFixManager.prepareBeforeGraphicalStart(
             containerName = containerName,
             logger = logger
