@@ -84,7 +84,7 @@ object SessionAccessManager {
         }
 
         // Audio ownership and transport are intentionally unchanged from the
-        // X11-0nly baseline. This port does not replace, refactor or migrate them.
+        // X11-0nly baseline. VirGL is a separate Manager-owned host service.
         PulseAudioRuntimeSanitizer.prepare(
             containerName = containerName,
             logger = logger
@@ -93,11 +93,18 @@ object SessionAccessManager {
             containerName = containerName,
             logger = logger
         )
+        if (accessMode != SessionAccessMode.VNC) {
+            VirGLFixManager.prepareBeforeGraphicalStart(
+                containerName = containerName,
+                logger = logger
+            )
+        }
 
         return when (accessMode) {
             SessionAccessMode.INTEGRATED_X11,
             SessionAccessMode.BOTH -> {
                 val started = X11SessionManager.startX11Session(containerName, logger) {
+                    VirGLFixManager.finalizeAfterContainerReady(containerName, logger)
                     finalizeAudioAfterContainerReady(containerName, logger)
                 }
                 if (!started) {
