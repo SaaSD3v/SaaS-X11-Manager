@@ -25,6 +25,7 @@ internal object TermuxAppCommand {
     private const val TERMUX_SH = "$TERMUX_PREFIX/bin/sh"
     private const val STATE = "$TERMUX_HOME/.saas-x11-manager/termux-exec"
     private const val COMMANDS = "$STATE/commands"
+    private const val POLICY_CACHE_MARKER = "$STATE/allow-external-apps.cache-v1"
 
     internal data class Result(
         val exitCode: Int,
@@ -144,32 +145,1025 @@ internal object TermuxAppCommand {
                 mkdir -p ${q(STATE)} ${q(COMMANDS)} ${q(propsDir)} || exit 31
                 chown ${owner.uid}:${owner.gid} ${q(STATE)} ${q(COMMANDS)} ${q(propsDir)} 2>/dev/null || true
                 chmod 700 ${q(STATE)} ${q(COMMANDS)} ${q(propsDir)} 2>/dev/null || true
-                if ! grep -Eq '^[[:space:]]*allow-external-apps[[:space:]]*=[[:space:]]*true[[:space:]]*$' ${q(props)} 2>/dev/null; then
+                refresh=0
+                if ! grep -Eq '^[[:space:]]*allow-external-apps[[:space:]]*=[[:space:]]*true[[:space:]]*
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+ ${q(props)} 2>/dev/null; then
                     tmp=${q("$props.saas-manager.tmp")}
-                    : > "${'$'}tmp" || exit 32
+                    : > "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}tmp" || exit 32
                     found=0
                     if [ -f ${q(props)} ]; then
-                        while IFS= read -r line || [ -n "${'$'}line" ]; do
-                            case "${'$'}line" in
+                        while IFS= read -r line || [ -n "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}line" ]; do
+                            case "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}line" in
                                 allow-external-apps=*)
-                                    if [ "${'$'}found" -eq 0 ]; then
-                                        printf '%s\n' 'allow-external-apps=true' >> "${'$'}tmp"
+                                    if [ "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}found" -eq 0 ]; then
+                                        printf '%s\n' 'allow-external-apps=true' >> "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}tmp"
                                         found=1
                                     fi
                                     ;;
-                                *) printf '%s\n' "${'$'}line" >> "${'$'}tmp" ;;
+                                *) printf '%s\n' "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}line" >> "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}tmp" ;;
                             esac
                         done < ${q(props)}
                     fi
-                    [ "${'$'}found" -eq 1 ] || printf '%s\n' 'allow-external-apps=true' >> "${'$'}tmp"
-                    mv -f "${'$'}tmp" ${q(props)} || exit 33
+                    [ "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}found" -eq 1 ] || printf '%s\n' 'allow-external-apps=true' >> "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}tmp"
+                    mv -f "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}tmp" ${q(props)} || exit 33
+                    refresh=1
                 fi
+                [ -f ${q(POLICY_CACHE_MARKER)} ] || refresh=1
                 chown ${owner.uid}:${owner.gid} ${q(props)} 2>/dev/null || true
                 chmod 600 ${q(props)} 2>/dev/null || true
                 restorecon -RF ${q(STATE)} ${q(propsDir)} >/dev/null 2>&1 || true
                 pm grant ${q(context.packageName)} ${q(RUN_PERMISSION)} >/dev/null 2>&1 || true
-                am broadcast --user 0 -a com.termux.app.reload_style com.termux >/dev/null 2>&1 || true
-                grep -Eq '^[[:space:]]*allow-external-apps[[:space:]]*=[[:space:]]*true[[:space:]]*$' ${q(props)}
+
+                if [ "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}refresh" -eq 1 ]; then
+                    # TermuxAppSharedProperties is cached by the Java app process.
+                    # Kill only exact cmdline=com.termux; never kill same-UID
+                    # shells, PulseAudio or VirGL renderer processes.
+                    for p in /proc/[0-9]*; do
+                        [ -r "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}p/cmdline" ] || continue
+                        cmd=${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}(tr '\000' '\n' < "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}p/cmdline" 2>/dev/null | sed -n '1p')
+                        [ "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}cmd" = ${q(TERMUX_PACKAGE)} ] || continue
+                        pid=${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}{p##*/}
+                        kill -9 "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}pid" 2>/dev/null || true
+                    done
+                    i=0
+                    while [ "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}i" -lt 30 ]; do
+                        live=0
+                        for p in /proc/[0-9]*; do
+                            [ -r "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}p/cmdline" ] || continue
+                            cmd=${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}(tr '\000' '\n' < "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}p/cmdline" 2>/dev/null | sed -n '1p')
+                            [ "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}cmd" = ${q(TERMUX_PACKAGE)} ] && { live=1; break; }
+                        done
+                        [ "${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}live" -eq 0 ] && break
+                        sleep 0.1
+                        i=${'
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+}((i + 1))
+                    done
+                    : > ${q(POLICY_CACHE_MARKER)} || exit 34
+                    chown ${owner.uid}:${owner.gid} ${q(POLICY_CACHE_MARKER)} 2>/dev/null || true
+                    chmod 600 ${q(POLICY_CACHE_MARKER)} 2>/dev/null || true
+                fi
+
+                grep -Eq '^[[:space:]]*allow-external-apps[[:space:]]*=[[:space:]]*true[[:space:]]*
+            prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+            return prepared
+        }
+    }
+
+    private fun owner(): Owner? {
+        val command = """
+            test -x ${q(TERMUX_SH)} || exit 1
+            uid=${'$'}(stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%u' ${q(TERMUX_HOME)} 2>/dev/null)
+            gid=${'$'}(stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null || toybox stat -c '%g' ${q(TERMUX_HOME)} 2>/dev/null)
+            case "${'$'}uid:${'$'}gid" in *[!0-9:]*) exit 2 ;; esac
+            printf '%s|%s\n' "${'$'}uid" "${'$'}gid"
+        """.trimIndent()
+        return try {
+            val result = Shell.cmd(command).exec()
+            if (!result.isSuccess) null
+            else result.out.firstOrNull()?.trim()?.split('|')?.let { parts ->
+                val uid = parts.getOrNull(0)?.toIntOrNull() ?: return@let null
+                val gid = parts.getOrNull(1)?.toIntOrNull() ?: return@let null
+                if (uid > 0 && gid > 0) Owner(uid, gid) else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun cleanup(vararg paths: String) {
+        try {
+            Shell.cmd("rm -f ${paths.joinToString(" ") { q(it) }} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun q(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+ ${q(props)}
             """.trimIndent()
             prepared = try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
             return prepared
