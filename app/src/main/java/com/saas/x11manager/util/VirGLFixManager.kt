@@ -270,7 +270,7 @@ object VirGLFixManager {
         false
     }
 
-    private fun ensureVirGLPackage(runtime: TermuxRuntime, logger: ContainerLogger?): Boolean {
+    private suspend fun ensureVirGLPackage(runtime: TermuxRuntime, logger: ContainerLogger?): Boolean {
         try {
             if (runAsTermux(runtime, "test -x ${q(VIRGL_BIN)}").isSuccess &&
                 supportsPrivateSocket(runtime)
@@ -299,19 +299,23 @@ object VirGLFixManager {
         null
     }
 
-    private fun readLease(): HostLease? = try {
-        val result = Shell.cmd("cat ${q(HOST_PID_FILE)} 2>/dev/null").exec()
-        if (!result.isSuccess) return null
-        val values = result.out.mapNotNull { line ->
-            val i = line.indexOf('=')
-            if (i <= 0) null else line.substring(0, i) to line.substring(i + 1)
-        }.toMap()
-        if (values["owner"] != OWNER) return null
-        val pid = values["pid"]?.toIntOrNull()?.takeIf { it > 1 } ?: return null
-        val start = values["start"]?.takeIf(String::isNotBlank) ?: return null
-        HostLease(pid, start)
-    } catch (_: Exception) {
-        null
+    private fun readLease(): HostLease? {
+        return try {
+            val result = Shell.cmd("cat ${q(HOST_PID_FILE)} 2>/dev/null").exec()
+            if (!result.isSuccess) return null
+
+            val values = result.out.mapNotNull { line ->
+                val i = line.indexOf('=')
+                if (i <= 0) null else line.substring(0, i) to line.substring(i + 1)
+            }.toMap()
+            if (values["owner"] != OWNER) return null
+
+            val pid = values["pid"]?.toIntOrNull()?.takeIf { it > 1 } ?: return null
+            val start = values["start"]?.takeIf(String::isNotBlank) ?: return null
+            HostLease(pid, start)
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun writeLease(runtime: TermuxRuntime, lease: HostLease): Boolean = try {
