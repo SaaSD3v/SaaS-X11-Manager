@@ -193,8 +193,9 @@ internal object VirGLContainerConfig {
 
             val temp = "$configPath.saas-virgl.${android.os.Process.myPid()}"
             val result = Shell.cmd(
-                "printf '%s' ${q(updatedText)} > ${q(temp)} && " +
-                    "chmod $(stat -c '%a' ${q(configPath)} 2>/dev/null || printf '600') ${q(temp)} 2>/dev/null || true; " +
+                "printf '%s' ${q(updatedText)} > ${q(temp)} || exit 51; " +
+                    "mode=\$(stat -c '%a' ${q(configPath)} 2>/dev/null || printf '600'); " +
+                    "chmod \"\$mode\" ${q(temp)} 2>/dev/null || true; " +
                     "mv -f ${q(temp)} ${q(configPath)}"
             ).exec()
             if (!result.isSuccess) {
