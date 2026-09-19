@@ -57,6 +57,23 @@ class ContainerConfigManagerTest {
     }
 
     @Test
+    fun stoppedLeaseCleanupRemovesOnlyTheManagerBind() {
+        val original = listOf(
+            "name=demo",
+            "enable_termux_x11=0",
+            "bind_mounts=/host/data:/mnt/data,$fixedBind,/external/x11:/opt/x11"
+        )
+
+        val updated = ContainerConfigManager.buildConfigWithoutManagedX11(original)
+        val bindLine = updated.single { it.startsWith("bind_mounts=") }
+
+        assertFalse(bindLine.contains(fixedBind))
+        assertTrue(bindLine.contains("/host/data:/mnt/data"))
+        assertTrue(bindLine.contains("/external/x11:/opt/x11"))
+        assertEquals("enable_termux_x11=0", updated[1])
+    }
+
+    @Test
     fun mutationIsIdempotent() {
         val original = listOf(
             "name=demo",
