@@ -19,24 +19,35 @@ class TermuxAppContextPolicyTest {
     private fun source(path: String): String = projectFile(path).readText()
 
     @Test
-    fun virglUsesTermuxAppContextButAudioKeepsValidatedUidBaseline() {
-        val broker = source("app/src/main/java/com/saas/x11manager/util/TermuxAppCommand.kt")
+    fun audioAndVirglDoNotUseTheRetiredRunCommandBroker() {
         val audio = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
         val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioUnifiedTransport.kt")
         val virgl = source("app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt")
         val manifest = source("app/src/main/AndroidManifest.xml")
 
-        assertTrue(broker.contains("com.termux.app.RunCommandService"))
-        assertTrue(manifest.contains("com.termux.permission.RUN_COMMAND"))
-        assertTrue(manifest.contains("<package android:name=\"com.termux\""))
-        assertTrue(virgl.contains("TermuxAppCommand.execBlocking"))
+        assertFalse(audio.contains("TermuxAppCommand"))
+        assertFalse(transport.contains("TermuxAppCommand"))
+        assertFalse(virgl.contains("TermuxAppCommand"))
 
-        // Audio is intentionally pinned to the physically validated 0f61eaa3
-        // baseline and must not be silently routed through the later broker.
-        assertFalse(audio.contains("TermuxAppCommand.execBlocking"))
-        assertFalse(transport.contains("TermuxAppCommand.execBlocking"))
+        assertFalse(manifest.contains("com.termux.permission.RUN_COMMAND"))
+        assertFalse(manifest.contains("com.termux.app.RunCommandService"))
+    }
+
+    @Test
+    fun audioKeepsValidatedTermuxUidBaselineAndVirglUsesDroidspacesRootIdentity() {
+        val audio = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
+        val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioUnifiedTransport.kt")
+        val virgl = source("app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt")
+
         assertTrue(audio.contains("su ${runtime.uid} -c"))
         assertTrue(transport.contains("su ${owner.uid} -c"))
+
+        assertTrue(virgl.contains("u:r:droidspacesd:s0"))
+        assertTrue(virgl.contains("[ \"${'$'}uid\" = 0 ]"))
+        assertTrue(virgl.contains("virgl_test_server_android"))
+        assertTrue(virgl.contains("--socket-path"))
+        assertFalse(virgl.contains("pkg update"))
+        assertFalse(virgl.contains("pkg install"))
     }
 
     @Test
