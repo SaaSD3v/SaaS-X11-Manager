@@ -683,4 +683,3 @@ object X11SessionManager {
         }
     }
 }
-}
