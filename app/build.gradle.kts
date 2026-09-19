@@ -18,7 +18,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.saas.x11manager"
+        applicationId = "com.saas.x11manager.x0"
         minSdk = 26
         targetSdk = 34
         versionCode = releaseVersionCode
