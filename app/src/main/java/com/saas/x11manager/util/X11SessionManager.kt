@@ -860,7 +860,7 @@ object X11SessionManager {
         logger: ContainerLogger? = null
     ): Boolean = withContext(Dispatchers.IO) {
         val owners = runningAssignmentGroups(ContainerManager.listContainers())
-            [displaySlot.number]
+            .get(displaySlot.number)
             .orEmpty()
         if (owners.size > 1) {
             logger?.e(
