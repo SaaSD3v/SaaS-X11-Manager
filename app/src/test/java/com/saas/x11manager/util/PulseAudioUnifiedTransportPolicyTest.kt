@@ -34,11 +34,11 @@ class PulseAudioUnifiedTransportPolicyTest {
     }
 
     @Test
-    fun manifestHasNoRunCommandPermissionOrPackageVisibility() {
+    fun manifestDeclaresRunCommandPermissionAndTermuxVisibility() {
         val manifest = source("app/src/main/AndroidManifest.xml")
-        assertFalse(manifest.contains("com.termux.permission.RUN_COMMAND"))
+        assertTrue(manifest.contains("com.termux.permission.RUN_COMMAND"))
+        assertTrue(manifest.contains("<package android:name=\"com.termux\""))
         assertFalse(manifest.contains("com.termux.app.RunCommandService"))
-        assertFalse(manifest.contains("<package android:name=\"com.termux\""))
     }
 
     @Test
