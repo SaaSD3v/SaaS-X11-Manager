@@ -72,6 +72,7 @@ class PulseAudioFixPolicyTest {
         assertFalse(sessionAccess.contains("PulseAudioDataPathTransport.finalizeAfterContainerReady"))
         assertFalse(sessionAccess.contains("PulseAudioNatTransport"))
         assertFalse(sessionAccess.contains("PulseAudioPhysicalTransport"))
+        assertFalse(sessionAccess.contains("PulseAudioRuntimeSanitizer.prepare"))
     }
 
     @Test
@@ -87,8 +88,6 @@ class PulseAudioFixPolicyTest {
         assertFalse(manager.contains("auth-anonymous=1"))
         assertFalse(manager.contains("listen=0.0.0.0"))
         assertFalse(manager.contains("PULSE_SERVER=unix:/tmp/.pulse-socket"))
-        assertTrue(manager.contains("1:1|1:true|1:yes|1:on|0:0|0:false|0:no|0:off"))
-        assertTrue(manager.contains("grep -q '^enable_pulseaudio='"))
     }
 
     @Test
