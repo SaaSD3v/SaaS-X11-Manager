@@ -58,6 +58,32 @@ class IntegratedX11RuntimeTest {
     }
 
     @Test
+    fun multiMonitorSnapshotParsesAllSlotsAndRequiresTheirOwnKernelSocket() {
+        val slot0 = X11DisplaySlot(0)
+        val slot2 = X11DisplaySlot(2)
+        fun socketRow(path: String, inode: String) =
+            "0000000000000000: 00000002 00000000 00010000 0001 01 $inode $path"
+
+        val runtime = X11SessionManager.parseRuntimeSnapshot(
+            listOf(
+                "__SAAS_X11_SLOT__=0|1|101",
+                "__SAAS_X11_SLOT__=2|1|202 203",
+                "__SAAS_X11_SLOT__=4|0|404",
+                socketRow(slot0.socketFile, "10001"),
+                socketRow(X11DisplaySlot(3).socketFile, "10003")
+            )
+        )
+
+        assertEquals(setOf(0, 2, 4), runtime.probes.keys)
+        assertEquals(setOf(0, 2), runtime.socketFiles)
+        assertEquals(listOf(101), runtime.probes.getValue(0).pids)
+        assertTrue(runtime.probes.getValue(0).liveSocket)
+        assertEquals(listOf(202, 203), runtime.probes.getValue(2).pids)
+        assertFalse(runtime.probes.getValue(2).liveSocket)
+        assertFalse(runtime.probes.getValue(4).liveSocket)
+    }
+
+    @Test
     fun integratedServerCommandUsesExplicitIsolatedMonitorRuntimeAndSharedXkbCache() {
         val slot = X11DisplaySlot(3)
         val command = X11SessionManager.buildIntegratedServerCommand(
