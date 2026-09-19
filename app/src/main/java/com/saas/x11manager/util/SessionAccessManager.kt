@@ -83,8 +83,11 @@ object SessionAccessManager {
             }
         }
 
-        // Keep the physically proven Manager-owned core startup path.
-        // Client handoff fixes are applied only after the container is ready.
+        // PulseAudio path pinned to the 11 Sep validated state.
+        PulseAudioRuntimeSanitizer.prepare(
+            containerName = containerName,
+            logger = logger
+        )
         PulseAudioFixManager.prepareBeforeGraphicalStart(
             containerName = containerName,
             logger = logger
