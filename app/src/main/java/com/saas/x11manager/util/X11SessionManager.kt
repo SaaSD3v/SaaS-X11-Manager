@@ -12,10 +12,12 @@ data class X11MonitorInfo(
     val slot: X11DisplaySlot,
     val status: X11ServerStatus,
     val pid: Int?,
-    val containerName: String? = null
+    val containerName: String? = null,
+    val conflictingOwners: List<String> = emptyList()
 ) {
     val monitorNumber: Int get() = slot.monitorNumber
     val displayName: String get() = slot.displayName
+    val hasOwnershipConflict: Boolean get() = conflictingOwners.size > 1
 }
 
 data class X11SessionStartResult(
@@ -460,19 +462,33 @@ object X11SessionManager {
         }
     }
 
+    internal fun runningAssignmentGroups(
+        containers: List<ContainerInfo>,
+        excludingContainer: String? = null
+    ): Map<Int, List<String>> =
+        containers
+            .asSequence()
+            .filter { it.isRunning && it.name != excludingContainer }
+            .mapNotNull { container ->
+                ContainerConfigManager.displaySlotFromBindMounts(container.bindMounts)
+                    ?.let { slot -> slot.number to container.name }
+            }
+            .groupBy(keySelector = { it.first }, valueTransform = { it.second })
+            .mapValues { (_, owners) -> owners.distinct().sorted() }
+
+    /**
+     * Compatibility view for callers that require exactly one owner. Conflicted
+     * displays are deliberately omitted instead of picking an arbitrary winner.
+     */
     internal fun runningAssignments(
         containers: List<ContainerInfo>,
         excludingContainer: String? = null
     ): Map<Int, String> =
-        buildMap {
-            containers
-                .asSequence()
-                .filter { it.isRunning && it.name != excludingContainer }
-                .forEach { container ->
-                    ContainerConfigManager.displaySlotFromBindMounts(container.bindMounts)
-                        ?.let { slot -> putIfAbsent(slot.number, container.name) }
-                }
-        }
+        runningAssignmentGroups(containers, excludingContainer)
+            .mapNotNull { (number, owners) ->
+                owners.singleOrNull()?.let { number to it }
+            }
+            .toMap()
 
     /**
      * Reconciles persistent container config with real runtime state.
@@ -504,8 +520,8 @@ object X11SessionManager {
 
         cleanupLegacyRuntime(logger)
 
-        val assignments = runningAssignments(containers)
-        val runtime = probeRuntimeSnapshot(assignments.keys)
+        val assignmentGroups = runningAssignmentGroups(containers)
+        val runtime = probeRuntimeSnapshot(assignmentGroups.keys)
 
         var staleSlots = 0
         for (number in runtime.probes.keys.sorted()) {
@@ -515,7 +531,7 @@ object X11SessionManager {
             val probe = runtime.probes.getValue(number)
             val pids = probe.pids
             val liveSocket = probe.liveSocket
-            val preserveAnchor = number in assignments
+            val preserveAnchor = number in assignmentGroups
 
             if (pids.isNotEmpty() && !liveSocket) {
                 logger?.w("[!] ${slot.processName} has no live ${slot.socketFile}; removing stale server")
@@ -578,17 +594,17 @@ object X11SessionManager {
                 )
         }
 
-        val assignments = runningAssignments(containers)
-        val runtime = probeRuntimeSnapshot(assignments.keys)
+        val assignmentGroups = runningAssignmentGroups(containers)
+        val runtime = probeRuntimeSnapshot(assignmentGroups.keys)
         val reusableActive = runtime.probes
             .asSequence()
             .filter { (number, probe) ->
-                number !in assignments && probe.pids.isNotEmpty() && probe.liveSocket
+                number !in assignmentGroups && probe.pids.isNotEmpty() && probe.liveSocket
             }
             .map { it.key }
             .toList()
 
-        return selectDisplaySlot(assignments.keys, reusableActive)
+        return selectDisplaySlot(assignmentGroups.keys, reusableActive)
     }
 
     internal fun buildIntegratedServerCommand(
@@ -606,6 +622,7 @@ object X11SessionManager {
     private fun serverInfo(
         displaySlot: X11DisplaySlot,
         containerName: String? = null,
+        conflictingOwners: List<String> = emptyList(),
         runtime: ServerRuntimeProbe? = null
     ): X11MonitorInfo {
         val probe = runtime ?: probeServerRuntime(displaySlot)
@@ -614,7 +631,8 @@ object X11SessionManager {
             slot = displaySlot,
             status = if (running) X11ServerStatus.Running else X11ServerStatus.Stopped,
             pid = if (running) probe.pids.first() else null,
-            containerName = containerName
+            containerName = containerName,
+            conflictingOwners = conflictingOwners
         )
     }
 
@@ -628,19 +646,25 @@ object X11SessionManager {
      */
     suspend fun getMonitors(containers: List<ContainerInfo>): List<X11MonitorInfo> =
         withContext(Dispatchers.IO) {
-            val assignments = runningAssignments(containers)
-            val runtime = probeRuntimeSnapshot(assignments.keys)
+            val assignmentGroups = runningAssignmentGroups(containers)
+            val runtime = probeRuntimeSnapshot(assignmentGroups.keys)
 
             runtime.probes.keys
                 .sorted()
                 .map { number ->
+                    val owners = assignmentGroups[number].orEmpty()
                     serverInfo(
                         displaySlot = X11DisplaySlot(number),
-                        containerName = assignments[number],
+                        containerName = owners.singleOrNull(),
+                        conflictingOwners = owners.takeIf { it.size > 1 }.orEmpty(),
                         runtime = runtime.probes[number]
                     )
                 }
-                .filter { it.containerName != null || it.status == X11ServerStatus.Running }
+                .filter {
+                    it.containerName != null ||
+                        it.conflictingOwners.isNotEmpty() ||
+                        it.status == X11ServerStatus.Running
+                }
         }
 
     suspend fun getServerStatus(): X11ServerStatus = withContext(Dispatchers.IO) {
@@ -716,10 +740,13 @@ object X11SessionManager {
                 killPids(liveBefore)
             }
 
-            val runningOwners = runningAssignments(
+            val runningOwnerGroups = runningAssignmentGroups(
                 containersSnapshot ?: ContainerManager.listContainers()
             )
-            clearSlotRuntime(displaySlot, preserveBindAnchor = displaySlot.number in runningOwners)
+            clearSlotRuntime(
+                displaySlot,
+                preserveBindAnchor = displaySlot.number in runningOwnerGroups
+            )
 
             logger?.i("[*] Preparing isolated runtime directory...")
             if (!prepareRuntimeDirectory(displaySlot)) {
@@ -789,7 +816,7 @@ object X11SessionManager {
             logger?.e("[-] Final live PIDs: ${formatPids(liveAfter)}")
             logger?.e("[-] Server log: ${displaySlot.logFile}")
             killPids(liveAfter)
-            val preserve = displaySlot.number in runningOwners
+            val preserve = displaySlot.number in runningOwnerGroups
             clearSlotRuntime(displaySlot, preserve)
             logger?.i("[+] Timed-out X11 runtime cleaned")
             Result.failure(
@@ -832,8 +859,17 @@ object X11SessionManager {
         displaySlot: X11DisplaySlot,
         logger: ContainerLogger? = null
     ): Boolean = withContext(Dispatchers.IO) {
-        val owner = runningAssignments(ContainerManager.listContainers())[displaySlot.number]
-        stopIntegratedServer(displaySlot, owner, logger)
+        val owners = runningAssignmentGroups(ContainerManager.listContainers())
+            [displaySlot.number]
+            .orEmpty()
+        if (owners.size > 1) {
+            logger?.e(
+                "[-] Refusing to stop ${displaySlot.describe()}: conflicting running owners " +
+                    owners.joinToString(", ")
+            )
+            return@withContext false
+        }
+        stopIntegratedServer(displaySlot, owners.singleOrNull(), logger)
     }
 
     private suspend fun stopIntegratedServer(
@@ -1133,13 +1169,18 @@ object X11SessionManager {
             val remaining = ContainerManager.listContainers()
             // Exclude before grouping: a stale/restarted target must not hide
             // another running container that still owns this display.
-            val remainingOwner = runningAssignments(
+            val remainingOwners = runningAssignmentGroups(
                 remaining, excludingContainer = containerName
-            )[displaySlot.number]
-            val stillUsed = remainingOwner != null
+            )[displaySlot.number].orEmpty()
+            val stillUsed = remainingOwners.isNotEmpty()
 
             logger?.i("[CTX] Display still owned by another running container: ${if (stillUsed) "yes" else "no"}")
-            if (!stillUsed) {
+            if (stillUsed) {
+                logger?.i(
+                    "[CTX] ${displaySlot.describe()} retained for: " +
+                        remainingOwners.joinToString(", ")
+                )
+            } else {
                 val serverStopped = stopIntegratedServer(displaySlot, owner = null, logger = logger)
                 if (serverStopped) logger?.i("[+] Released ${displaySlot.describe()}")
                 else logger?.w("[!] Container stopped, but ${displaySlot.describe()} cleanup was not fully confirmed")
@@ -1167,30 +1208,40 @@ object X11SessionManager {
             val runningContainers = containers.filter { it.isRunning }
             logger?.i("[CTX] Running containers discovered: ${runningContainers.size}")
 
-            val slots = buildSet {
-                addAll(discoverRuntimeSlots().map { it.number })
-                containers.forEach { container ->
-                    ContainerConfigManager.displaySlotFromBindMounts(container.bindMounts)
-                        ?.let { add(it.number) }
-                }
+            val configuredSlots = containers.mapNotNull { container ->
+                ContainerConfigManager.displaySlotFromBindMounts(container.bindMounts)?.number
             }
+            val runtimeBeforeStop = probeRuntimeSnapshot(configuredSlots)
+            val slots = (runtimeBeforeStop.probes.keys + configuredSlots).toSortedSet()
 
             for (container in runningContainers) {
                 logger?.i("[*] Stopping container: ${container.name}")
                 ContainerManager.stopContainer(container.name, logger)
             }
             val containersAfterStop = ContainerManager.listContainers()
-            val remainingOwners = runningAssignments(containersAfterStop)
-            for (number in slots.sorted()) {
+            val remainingOwnerGroups = runningAssignmentGroups(containersAfterStop)
+            for (number in slots) {
+                val owners = remainingOwnerGroups[number].orEmpty()
+                if (owners.isNotEmpty()) {
+                    logger?.w(
+                        "[!] Preserving Monitor ${number + 1} (:$number): " +
+                            "running owner(s) remain: ${owners.joinToString(", ")}"
+                    )
+                    continue
+                }
                 stopIntegratedServer(
                     displaySlot = X11DisplaySlot(number),
-                    owner = remainingOwners[number],
+                    owner = null,
                     logger = logger
                 )
             }
 
             reconcileRuntime(containersAfterStop, logger)
-            logger?.i("[+] All containers and X11 monitors stopped")
+            if (remainingOwnerGroups.isEmpty()) {
+                logger?.i("[+] All containers and X11 monitors stopped")
+            } else {
+                logger?.w("[!] Stop All completed with surviving container-owned monitors")
+            }
         } catch (e: Exception) {
             logger?.e("[-] Error: ${e.message}")
         }
