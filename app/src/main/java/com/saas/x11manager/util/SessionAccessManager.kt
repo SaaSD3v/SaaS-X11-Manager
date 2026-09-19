@@ -83,12 +83,8 @@ object SessionAccessManager {
             }
         }
 
-        // Final validated HOST + NAT audio baseline. Clear stale competing
-        // runtime state before preparing the Manager-owned core.
-        PulseAudioRuntimeSanitizer.prepare(
-            containerName = containerName,
-            logger = logger
-        )
+        // Keep the physically proven Manager-owned core startup path.
+        // Client handoff fixes are applied only after the container is ready.
         PulseAudioFixManager.prepareBeforeGraphicalStart(
             containerName = containerName,
             logger = logger
