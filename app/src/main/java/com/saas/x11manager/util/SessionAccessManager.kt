@@ -161,7 +161,23 @@ object SessionAccessManager {
             return true
         }
 
-        val owner = X11SessionManager.getOwnerContainerName()
+        val owners = X11SessionManager.getOwnerContainerNames()
+        if (owners.size > 1) {
+            if (containerName in owners) {
+                logger?.e(
+                    "[X11] ✗ Cannot detach $containerName from fixed X0 while conflicting owners remain: " +
+                        owners.joinToString(", ")
+                )
+                return false
+            }
+            logger?.w(
+                "[X11] • Fixed X0 has conflicting owners, but this VNC-only container does not own it: " +
+                    owners.joinToString(", ")
+            )
+            return true
+        }
+
+        val owner = owners.singleOrNull()
         if (owner != null && owner != containerName) {
             logger?.i("[X11] • Monitor 1 (${Constants.X11_DISPLAY}) remains owned by $owner")
             return true
