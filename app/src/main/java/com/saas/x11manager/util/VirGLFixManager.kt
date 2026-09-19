@@ -278,7 +278,7 @@ object VirGLFixManager {
      * The normal DroidSpaces Termux setup owns dependencies; Start either
      * finds a usable renderer immediately or fails fast.
      */
-    private fun ensureVirGLPackage(logger: ContainerLogger?): Boolean {
+    private suspend fun ensureVirGLPackage(logger: ContainerLogger?): Boolean {
         val present = try {
             Shell.cmd("test -x ${q(VIRGL_BIN)}").exec().isSuccess
         } catch (_: Exception) {
@@ -403,7 +403,7 @@ object VirGLFixManager {
         return true
     }
 
-    private fun startHost(runtime: TermuxRuntime, logger: ContainerLogger?): HostLease? {
+    private suspend fun startHost(runtime: TermuxRuntime, logger: ContainerLogger?): HostLease? {
         val command = """
             : > ${q(HOST_LOG_FILE)} || exit 40
             rm -f ${q(HOST_SOCKET)} 2>/dev/null || true
@@ -457,7 +457,7 @@ object VirGLFixManager {
         val needle = q(" $HOST_SOCKET")
         val result = try {
             Shell.cmd(
-                "i=0; while [ \"${'
+                "i=0; while [ \"${'$'}i\" -lt 20 ]; do " +
                     "[ -S $path ] && grep -Fq $needle /proc/net/unix 2>/dev/null && exit 0; " +
                     "kill -0 ${lease.pid} 2>/dev/null || exit 2; " +
                     "i=${'$'}((i + 1)); sleep 0.1; done; exit 1"
@@ -466,11 +466,13 @@ object VirGLFixManager {
             return false
         }
         if (result.isSuccess) {
-            try { Shell.cmd("chmod 666 ${q(HOST_SOCKET)} 2>/dev/null || true").exec() } catch (_: Exception) { }
+            try {
+                Shell.cmd("chmod 666 ${q(HOST_SOCKET)} 2>/dev/null || true").exec()
+            } catch (_: Exception) {
+            }
         }
         return result.isSuccess
     }
-
     private suspend fun ensureHostRuntime(
         runtime: TermuxRuntime,
         logger: ContainerLogger?
