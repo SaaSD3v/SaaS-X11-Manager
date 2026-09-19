@@ -235,11 +235,11 @@ object VirGLFixManager {
         val managerDir = "$TERMUX_HOME/.saas-x11-manager"
         val command = """
             for dir in ${q(managerDir)} ${q(HOST_STATE_DIR)} ${q(HOST_RUNTIME_DIR)}; do
-                [ ! -L "${KD}dir" ] || exit 20
-                mkdir -p "${KD}dir" || exit 21
-                owner=${KD}(stat -c '%u' "${KD}dir" 2>/dev/null || toybox stat -c '%u' "${KD}dir" 2>/dev/null) || exit 22
-                case "${KD}owner" in 0|${runtime.uid}) ;; *) exit 23 ;; esac
-                chown ${runtime.uid}:${runtime.uid} "${KD}dir" || exit 24
+                [ ! -L "${'$'}dir" ] || exit 20
+                mkdir -p "${'$'}dir" || exit 21
+                owner=${'$'}(stat -c '%u' "${'$'}dir" 2>/dev/null || toybox stat -c '%u' "${'$'}dir" 2>/dev/null) || exit 22
+                case "${'$'}owner" in 0|${runtime.uid}) ;; *) exit 23 ;; esac
+                chown ${runtime.uid}:${runtime.uid} "${'$'}dir" || exit 24
             done
             chmod 700 ${q(managerDir)} ${q(HOST_STATE_DIR)} || exit 25
             chmod 1777 ${q(HOST_RUNTIME_DIR)} || exit 26
@@ -317,11 +317,11 @@ object VirGLFixManager {
         if (processStartTime(lease.pid) != lease.startTime) return false
         val command = """
             pid=${lease.pid}
-            [ -r "/proc/${KD}pid/status" ] && [ -r "/proc/${KD}pid/cmdline" ] || exit 1
-            uid=${KD}(sed -n 's/^Uid:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "/proc/${KD}pid/status" | sed -n '1p')
-            [ "${KD}uid" = ${runtime.uid} ] || exit 1
-            cmd=${KD}(tr '\000' ' ' < "/proc/${KD}pid/cmdline" 2>/dev/null || true)
-            case " ${KD}cmd " in
+            [ -r "/proc/${'$'}pid/status" ] && [ -r "/proc/${'$'}pid/cmdline" ] || exit 1
+            uid=${'$'}(sed -n 's/^Uid:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "/proc/${'$'}pid/status" | sed -n '1p')
+            [ "${'$'}uid" = ${runtime.uid} ] || exit 1
+            cmd=${'$'}(tr '\000' ' ' < "/proc/${'$'}pid/cmdline" 2>/dev/null || true)
+            case " ${'$'}cmd " in
                 *${q(VIRGL_BIN)}*--socket-path*${q(HOST_SOCKET)}*) exit 0 ;;
                 *) exit 1 ;;
             esac
@@ -380,7 +380,7 @@ object VirGLFixManager {
                 ": > ${q(HOST_LOG_FILE)} || exit 40; " +
                     "rm -f ${q(HOST_SOCKET)} 2>/dev/null || true; " +
                     "nohup ${q(VIRGL_BIN)} --socket-path ${q(HOST_SOCKET)} " +
-                    "</dev/null >${q(HOST_LOG_FILE)} 2>&1 & printf '%s\\n' ${KD}!"
+                    "</dev/null >${q(HOST_LOG_FILE)} 2>&1 & printf '%s\\n' ${'$'}!"
             )
         } catch (_: Exception) {
             return null
@@ -393,7 +393,7 @@ object VirGLFixManager {
         val start = processStartTime(pid) ?: return null
         val lease = HostLease(pid, start)
         if (!writeLease(runtime, lease)) {
-            Shell.cmd("kill ${KD}pid 2>/dev/null || true").exec()
+            Shell.cmd("kill $pid 2>/dev/null || true").exec()
             return null
         }
         return lease
@@ -404,10 +404,10 @@ object VirGLFixManager {
         val needle = q(" $HOST_SOCKET")
         val result = try {
             Shell.cmd(
-                "i=0; while [ \"${KD}i\" -lt 50 ]; do " +
-                    "[ -S ${KD}path ] && grep -Fq ${KD}needle /proc/net/unix 2>/dev/null && exit 0; " +
+                "i=0; while [ \"${'$'}i\" -lt 50 ]; do " +
+                    "[ -S $path ] && grep -Fq $needle /proc/net/unix 2>/dev/null && exit 0; " +
                     "kill -0 ${lease.pid} 2>/dev/null || exit 2; " +
-                    "i=${KD}((i + 1)); sleep 0.1; done; exit 1"
+                    "i=${'$'}((i + 1)); sleep 0.1; done; exit 1"
             ).exec()
         } catch (_: Exception) {
             return false
@@ -479,10 +479,10 @@ object VirGLFixManager {
                 profile=${q(GUEST_PROFILE)}
                 dropin=${q(GUEST_SYSTEMD_DROPIN)}
                 conf=${q(GUEST_OPENRC_CONF)}
-                rm -f "${KD}profile" "${KD}dropin" 2>/dev/null || true
-                if [ -f "${KD}conf" ]; then
-                    sed '/^# BEGIN SaaS X11 Manager VirGL${KD}/,/^# END SaaS X11 Manager VirGL${KD}/d' "${KD}conf" > "${KD}conf.saas-virgl.tmp" &&
-                        mv "${KD}conf.saas-virgl.tmp" "${KD}conf"
+                rm -f "${'$'}profile" "${'$'}dropin" 2>/dev/null || true
+                if [ -f "${'$'}conf" ]; then
+                    sed '/^# BEGIN SaaS X11 Manager VirGL${'$'}/,/^# END SaaS X11 Manager VirGL${'$'}/d' "${'$'}conf" > "${'$'}conf.saas-virgl.tmp" &&
+                        mv "${'$'}conf.saas-virgl.tmp" "${'$'}conf"
                 fi
                 command -v systemctl >/dev/null 2>&1 && systemctl daemon-reload >/dev/null 2>&1 || true
             """.trimIndent()
@@ -512,15 +512,15 @@ object VirGLFixManager {
             if [ -x /etc/init.d/x11-session ]; then
                 mkdir -p /etc/conf.d || exit 73
                 conf=${q(GUEST_OPENRC_CONF)}
-                [ -f "${KD}conf" ] || : > "${KD}conf"
-                sed '/^# BEGIN SaaS X11 Manager VirGL${KD}/,/^# END SaaS X11 Manager VirGL${KD}/d' "${KD}conf" > "${KD}conf.saas-virgl.tmp" || exit 74
-                cat >> "${KD}conf.saas-virgl.tmp" <<'EOF_SAAS_VIRGL_OPENRC'
+                [ -f "${'$'}conf" ] || : > "${'$'}conf"
+                sed '/^# BEGIN SaaS X11 Manager VirGL${'$'}/,/^# END SaaS X11 Manager VirGL${'$'}/d' "${'$'}conf" > "${'$'}conf.saas-virgl.tmp" || exit 74
+                cat >> "${'$'}conf.saas-virgl.tmp" <<'EOF_SAAS_VIRGL_OPENRC'
             $BEGIN
             export GALLIUM_DRIVER=virpipe
             export VTEST_SOCKET_NAME=$guestSocket
             $END
             EOF_SAAS_VIRGL_OPENRC
-                mv "${KD}conf.saas-virgl.tmp" "${KD}conf"
+                mv "${'$'}conf.saas-virgl.tmp" "${'$'}conf"
             fi
             printf '%s\n' __SAAS_VIRGL_ENV_READY__
         """.trimIndent()
@@ -568,12 +568,12 @@ object VirGLFixManager {
         val payload = """
             command -v glxinfo >/dev/null 2>&1 || { printf '%s\n' __SAAS_VIRGL_PROBE_UNAVAILABLE__; exit 0; }
             ${X11SessionCommands.socketSetup()}
-            out=${KD}(DISPLAY=:0 GALLIUM_DRIVER=virpipe VTEST_SOCKET_NAME=${q(socket)} timeout 8 glxinfo -B 2>&1) || {
-                printf '%s\n' "${KD}out" >&2
+            out=${'$'}(DISPLAY=:0 GALLIUM_DRIVER=virpipe VTEST_SOCKET_NAME=${q(socket)} timeout 8 glxinfo -B 2>&1) || {
+                printf '%s\n' "${'$'}out" >&2
                 exit 80
             }
-            printf '%s\n' "${KD}out" | grep -Ei 'OpenGL renderer string:.*(virgl|virpipe)' >/dev/null 2>&1 || {
-                printf '%s\n' "${KD}out" >&2
+            printf '%s\n' "${'$'}out" | grep -Ei 'OpenGL renderer string:.*(virgl|virpipe)' >/dev/null 2>&1 || {
+                printf '%s\n' "${'$'}out" >&2
                 exit 81
             }
             printf '%s\n' __SAAS_VIRGL_RENDERER_READY__
