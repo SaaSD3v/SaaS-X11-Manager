@@ -357,7 +357,13 @@ object VirGLFixManager {
             }
             return false
         }
-        if (!ownedIdentity(runtime, lease)) return false
+        if (!ownedIdentity(runtime, lease)) {
+            if (!kernelSocketLive(HOST_SOCKET)) {
+                Shell.cmd("rm -f ${q(HOST_SOCKET)} ${q(HOST_PID_FILE)} 2>/dev/null || true").exec()
+                return true
+            }
+            return false
+        }
 
         Shell.cmd("kill ${lease.pid} 2>/dev/null || true").exec()
         delay(200)
@@ -554,12 +560,11 @@ object VirGLFixManager {
             val command = """
                 rm -f ${q(profile)} ${q(dropin)} 2>/dev/null || true
                 if [ -f ${q(openRc)} ]; then
-                    sed '/^# BEGIN SaaS X11 Manager VirGL$/ ,/^# END SaaS X11 Manager VirGL$/d' ${q(openRc)} > ${q("$openRc.saas-virgl.tmp")} &&
+                    sed '/^# BEGIN SaaS X11 Manager VirGL$/,/^# END SaaS X11 Manager VirGL$/d' ${q(openRc)} > ${q("$openRc.saas-virgl.tmp")} &&
                         mv ${q("$openRc.saas-virgl.tmp")} ${q(openRc)}
                 fi
                 true
             """.trimIndent()
-                .replace("VirGL$/ ,", "VirGL$/ ,")
             try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
         } ?: false
 
