@@ -58,12 +58,25 @@ class PulseAudioNatRoutingPolicyTest {
             "app/src/main/java/com/saas/x11manager/util/PulseAudioNatScriptTransport.kt"
         ).readText()
 
-        assertTrue(transport.contains("Constants.DS_BINARY_PATH"))
-        assertTrue(transport.contains("run /bin/sh -lc"))
+        assertTrue(transport.contains("PulseAudioContainerCommand.build(containerName, payload)"))
         assertTrue(transport.contains("/root/.config/pulse/saas-audio.cookie"))
         assertTrue(transport.contains("default-server = \$server"))
         assertTrue(transport.contains("__SAAS_AUDIO_TRANSPORT_READY__"))
         assertTrue(transport.contains("Default Sink: (AAudio_sink|OpenSL_ES_sink)"))
-        assertTrue(transport.contains("NAT audio transport verified from inside the container"))
+        assertTrue(transport.contains("NAT audio PCM transport verified from inside the container"))
+    }
+
+    @Test
+    fun physicallyValidatedNatBaselineStaysDocumentedAndRetiredLayersStayRetired() {
+        val baseline = projectFile("docs/AUDIO-TRANSPORT-BASELINE.md").readText()
+        val utilDir = projectFile("app/src/main/java/com/saas/x11manager/util")
+
+        assertTrue(baseline.contains("physically validated end-to-end"))
+        assertTrue(baseline.contains("4713 through 4777"))
+        assertTrue(baseline.contains("never bind the audio listener to `0.0.0.0`"))
+        assertTrue(baseline.contains("never enable anonymous PulseAudio authentication"))
+        assertTrue(baseline.contains("do not scan all Android `/proc/<pid>/fd` tables"))
+        assertFalse(File(utilDir, "PulseAudioNatHostReadiness.kt").exists())
+        assertFalse(File(utilDir, "PulseAudioNatPreflight.kt").exists())
     }
 }
