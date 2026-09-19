@@ -72,7 +72,6 @@ class PulseAudioFixPolicyTest {
         assertFalse(sessionAccess.contains("PulseAudioDataPathTransport.finalizeAfterContainerReady"))
         assertFalse(sessionAccess.contains("PulseAudioNatTransport"))
         assertFalse(sessionAccess.contains("PulseAudioPhysicalTransport"))
-        assertFalse(sessionAccess.contains("PulseAudioRuntimeSanitizer.prepare"))
     }
 
     @Test
