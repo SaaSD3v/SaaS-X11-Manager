@@ -30,7 +30,7 @@ class RuntimePerformancePolicyTest {
         assertTrue(manager.contains("private fun probeServerRuntime(displaySlot: X11DisplaySlot)"))
         assertTrue(manager.contains("private fun probeRuntimeSnapshot("))
         assertTrue(manager.contains("parseRuntimeSnapshot(result.out)"))
-        assertTrue(manager.contains("val runtime = probeRuntimeSnapshot(assignments.keys)"))
+        assertTrue(manager.contains("val runtime = probeRuntimeSnapshot(assignmentGroups.keys)"))
         assertTrue(manager.contains("val runtime = probeServerRuntime(displaySlot)"))
         assertTrue(manager.contains("X11SessionStartResult(displaySlot, graphicSessionReady)"))
         assertTrue(access.contains("startResult.graphicSessionReady ||"))
@@ -51,11 +51,31 @@ class RuntimePerformancePolicyTest {
 
         assertTrue(manager.contains("if (releasedBindings > 0)"))
         assertTrue(manager.contains("containersSnapshot ?: ContainerManager.listContainers()"))
-        assertTrue(manager.contains("val remainingOwners = runningAssignments(containersAfterStop)"))
+        assertTrue(manager.contains("val remainingOwnerGroups = runningAssignmentGroups(containersAfterStop)"))
+        assertTrue(manager.contains("running owner(s) remain"))
         assertTrue(home.contains("X11SessionManager.stopAll(logger, currentContainers)"))
         assertTrue(home.contains("if (!runtimeRefreshed) refreshRuntimeAfterOperation()"))
         assertTrue(home.contains("ViewModelLogger.batched"))
         assertTrue(home.contains("appendLogs(logs, entries)"))
+    }
+
+    @Test
+    fun monitorUiFailsClosedOnDuplicateOwners() {
+        val manager = source(
+            "app/src/main/java/com/saas/x11manager/util/X11SessionManager.kt"
+        )
+        val viewModel = source(
+            "app/src/main/java/com/saas/x11manager/ui/screen/ManagedDisplayViewModel.kt"
+        )
+        val screen = source(
+            "app/src/main/java/com/saas/x11manager/ui/screen/ManagedDisplayScreen.kt"
+        )
+
+        assertTrue(manager.contains("runningAssignmentGroups"))
+        assertTrue(manager.contains("conflictingOwners"))
+        assertTrue(manager.contains("Refusing to stop"))
+        assertTrue(viewModel.contains("Monitor start/stop is disabled"))
+        assertTrue(screen.contains("\"Conflict: \" + monitor.conflictingOwners.joinToString"))
     }
 
     @Test
