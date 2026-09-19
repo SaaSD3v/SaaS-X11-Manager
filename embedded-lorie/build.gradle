@@ -17,7 +17,7 @@ android {
         targetSdkVersion 34
         buildConfigField 'String', 'VERSION_NAME', '"manager-embedded"'
         buildConfigField 'String', 'COMMIT', '"' + upstreamCommit + '"'
-        buildConfigField 'String', 'APPLICATION_ID', '"com.saas.x11manager"'
+        buildConfigField 'String', 'APPLICATION_ID', '"com.saas.x11manager.x0"'
         consumerProguardFiles new File(upstream, 'proguard-rules.pro')
     }
 
@@ -202,7 +202,7 @@ tasks.register('generateEmbeddedLorieShortcuts') {
         def out = new File(generatedRes.get().asFile, 'xml/lorie_shortcuts.xml')
         out.parentFile.mkdirs()
         out.text = new File(upstream, 'src/main/templates/xml/shortcuts.xml').text
-            .replace('@@APPLICATION_ID@@', 'com.saas.x11manager')
+            .replace('@@APPLICATION_ID@@', 'com.saas.x11manager.x0')
     }
 }
 
