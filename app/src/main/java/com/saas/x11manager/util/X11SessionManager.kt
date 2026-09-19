@@ -44,6 +44,7 @@ object X11SessionManager {
 
     private const val RUNTIME_PIDS_MARKER = "__SAAS_X11_PIDS__="
     private const val RUNTIME_SOCKET_MARKER = "__SAAS_X11_SOCKET__="
+    private const val RUNTIME_SLOT_MARKER = "__SAAS_X11_SLOT__="
 
     private data class ServerLease(
         val slot: X11DisplaySlot,
@@ -54,6 +55,11 @@ object X11SessionManager {
     internal data class ServerRuntimeProbe(
         val pids: List<Int>,
         val liveSocket: Boolean
+    )
+
+    internal data class RuntimeSnapshot(
+        val probes: Map<Int, ServerRuntimeProbe>,
+        val socketFiles: Set<Int>
     )
 
     private val pendingLeaseLock = Any()
@@ -130,6 +136,81 @@ object X11SessionManager {
         liveSocket = lines.any { it == "${RUNTIME_SOCKET_MARKER}1" } &&
             hasKernelSocket(displaySlot.socketFile, lines)
     )
+
+    /**
+     * Read-only multi-monitor observation in one root transaction.
+     *
+     * Assigned display numbers are seeded even when their runtime directory is
+     * missing, while runtime directories discover raw/unowned monitors. The
+     * kernel UNIX table is appended once and is authoritative together with the
+     * filesystem socket bit emitted for each slot.
+     */
+    private fun probeRuntimeSnapshot(
+        requiredDisplayNumbers: Collection<Int> = emptyList()
+    ): RuntimeSnapshot {
+        val required = requiredDisplayNumbers
+            .asSequence()
+            .filter { it >= 0 }
+            .distinct()
+            .sorted()
+            .joinToString(" ")
+        val base = shellQuote(Constants.INTEGRATED_X11_RUNTIME_DIR)
+
+        return try {
+            val result = Shell.cmd(
+                "base=$base; seen=' '; " +
+                    "probe_slot() { " +
+                    "n=\"\$1\"; " +
+                    "case \"\$n\" in ''|*[!0-9]*) return ;; esac; " +
+                    "case \"\$seen\" in *\" \$n \"*) return ;; esac; " +
+                    "seen=\"\$seen\$n \"; " +
+                    "process=${shellQuote(Constants.INTEGRATED_X11_PROCESS_PREFIX)}\$n; " +
+                    "socket=\"\$base/display-\$n/.X11-unix/X\$n\"; " +
+                    "pids=\$(pidof \"\$process\" 2>/dev/null || true); " +
+                    "fs=0; [ -S \"\$socket\" ] && fs=1; " +
+                    "printf '%s%s|%s|%s\\n' '$RUNTIME_SLOT_MARKER' \"\$n\" \"\$fs\" \"\$pids\"; " +
+                    "}; " +
+                    "for n in $required; do probe_slot \"\$n\"; done; " +
+                    "for dir in \"\$base\"/display-*; do " +
+                    "[ -d \"\$dir\" ] || continue; " +
+                    "name=\${dir##*/}; n=\${name#display-}; probe_slot \"\$n\"; " +
+                    "done; " +
+                    "cat /proc/net/unix 2>/dev/null"
+            ).exec()
+            parseRuntimeSnapshot(result.out)
+        } catch (_: Exception) {
+            RuntimeSnapshot(emptyMap(), emptySet())
+        }
+    }
+
+    internal fun parseRuntimeSnapshot(lines: List<String>): RuntimeSnapshot {
+        data class RawProbe(val pids: List<Int>, val socketFile: Boolean)
+
+        val raw = linkedMapOf<Int, RawProbe>()
+        for (line in lines) {
+            if (!line.startsWith(RUNTIME_SLOT_MARKER)) continue
+            val fields = line.removePrefix(RUNTIME_SLOT_MARKER).split('|', limit = 3)
+            if (fields.size != 3) continue
+            val number = fields[0].toIntOrNull()?.takeIf { it >= 0 } ?: continue
+            raw[number] = RawProbe(
+                pids = parsePids(listOf(fields[2])),
+                socketFile = fields[1] == "1"
+            )
+        }
+
+        val socketFiles = raw.asSequence()
+            .filter { it.value.socketFile }
+            .map { it.key }
+            .toSet()
+        val probes = raw.mapValues { (number, value) ->
+            val slot = X11DisplaySlot(number)
+            ServerRuntimeProbe(
+                pids = value.pids,
+                liveSocket = value.socketFile && hasKernelSocket(slot.socketFile, lines)
+            )
+        }
+        return RuntimeSnapshot(probes, socketFiles)
+    }
 
     private fun socketTableLines(): List<String> {
         return try {
@@ -424,19 +505,16 @@ object X11SessionManager {
         cleanupLegacyRuntime(logger)
 
         val assignments = runningAssignments(containers)
-        val slotNumbers = buildSet {
-            addAll(assignments.keys)
-            addAll(discoverRuntimeSlots().map { it.number })
-        }
-        val socketTable = socketTableLines()
+        val runtime = probeRuntimeSnapshot(assignments.keys)
 
         var staleSlots = 0
-        for (number in slotNumbers.sorted()) {
+        for (number in runtime.probes.keys.sorted()) {
             val slot = X11DisplaySlot(number)
             sanitizeUnexpectedArtifacts(slot)
 
-            val pids = getLiveServerPids(slot)
-            val liveSocket = hasLiveSocket(slot, socketTable)
+            val probe = runtime.probes.getValue(number)
+            val pids = probe.pids
+            val liveSocket = probe.liveSocket
             val preserveAnchor = number in assignments
 
             if (pids.isNotEmpty() && !liveSocket) {
@@ -448,7 +526,7 @@ object X11SessionManager {
             }
 
             if (pids.isEmpty()) {
-                if (hasSocketFile(slot) || !preserveAnchor) {
+                if (number in runtime.socketFiles || !preserveAnchor) {
                     clearSlotRuntime(slot, preserveAnchor)
                 } else if (preserveAnchor) {
                     // Keep the already bind-mounted directory inode, but guarantee it is empty.
@@ -501,14 +579,14 @@ object X11SessionManager {
         }
 
         val assignments = runningAssignments(containers)
-        val socketTable = socketTableLines()
-        val reusableActive = discoverRuntimeSlots()
-            .filter { slot ->
-                slot.number !in assignments &&
-                    getLiveServerPids(slot).isNotEmpty() &&
-                    hasLiveSocket(slot, socketTable)
+        val runtime = probeRuntimeSnapshot(assignments.keys)
+        val reusableActive = runtime.probes
+            .asSequence()
+            .filter { (number, probe) ->
+                number !in assignments && probe.pids.isNotEmpty() && probe.liveSocket
             }
-            .map { it.number }
+            .map { it.key }
+            .toList()
 
         return selectDisplaySlot(assignments.keys, reusableActive)
     }
@@ -528,18 +606,14 @@ object X11SessionManager {
     private fun serverInfo(
         displaySlot: X11DisplaySlot,
         containerName: String? = null,
-        socketTable: List<String>? = null
+        runtime: ServerRuntimeProbe? = null
     ): X11MonitorInfo {
-        val live = getLiveServerPids(displaySlot)
-        val running = live.isNotEmpty() && if (socketTable == null) {
-            hasLiveSocket(displaySlot)
-        } else {
-            hasLiveSocket(displaySlot, socketTable)
-        }
+        val probe = runtime ?: probeServerRuntime(displaySlot)
+        val running = probe.pids.isNotEmpty() && probe.liveSocket
         return X11MonitorInfo(
             slot = displaySlot,
             status = if (running) X11ServerStatus.Running else X11ServerStatus.Stopped,
-            pid = if (running) live.first() else null,
+            pid = if (running) probe.pids.first() else null,
             containerName = containerName
         )
     }
@@ -555,19 +629,15 @@ object X11SessionManager {
     suspend fun getMonitors(containers: List<ContainerInfo>): List<X11MonitorInfo> =
         withContext(Dispatchers.IO) {
             val assignments = runningAssignments(containers)
-            val slotNumbers = buildSet {
-                addAll(assignments.keys)
-                addAll(discoverRuntimeSlots().map { it.number })
-            }
-            val socketTable = socketTableLines()
+            val runtime = probeRuntimeSnapshot(assignments.keys)
 
-            slotNumbers
+            runtime.probes.keys
                 .sorted()
                 .map { number ->
                     serverInfo(
                         displaySlot = X11DisplaySlot(number),
                         containerName = assignments[number],
-                        socketTable = socketTable
+                        runtime = runtime.probes[number]
                     )
                 }
                 .filter { it.containerName != null || it.status == X11ServerStatus.Running }
