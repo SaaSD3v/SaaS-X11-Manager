@@ -684,27 +684,3 @@ object X11SessionManager {
     }
 }
 }
-            ?: ContainerManager.listContainers()
-        val running = containers.filter { it.isRunning }
-        if (running.isEmpty()) {
-            logger?.i("[CONTAINER] ✓ No running containers to stop")
-        } else {
-            running.forEach { container ->
-                logger?.i("[CONTAINER] Stopping container: ${container.name}")
-                val stopped = ContainerManager.stopContainer(container.name, logger)
-                if (stopped) {
-                    logger?.i("[CONTAINER] ✓ Container stopped: ${container.name}")
-                } else {
-                    logger?.e("[CONTAINER] ✗ Container stop was not confirmed: ${container.name}")
-                }
-            }
-        }
-
-        val x11Stopped = stopIntegratedServer(logger)
-        if (x11Stopped) {
-            logger?.i("[MANAGER] ✓ All running containers stopped; X0 released")
-        } else {
-            logger?.e("[MANAGER] ✗ X0 cleanup was not fully confirmed")
-        }
-    }
-}
