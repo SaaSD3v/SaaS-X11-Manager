@@ -35,6 +35,32 @@ class IntegratedX11RuntimeTest {
     }
 
     @Test
+    fun duplicateDisplayOwnersAreExplicitAndNeverCollapsedToOneOwner() {
+        val slot = X11DisplaySlot(2)
+        fun owner(name: String) = ContainerInfo(
+            name = name,
+            rootfsPath = "/containers/$name/rootfs",
+            configPath = "/containers/$name/container.config",
+            bindMounts = "${slot.socketDir}:/usr/.X11-unix",
+            status = ContainerStatus.RUNNING
+        )
+
+        val containers = listOf(owner("zeta"), owner("alpha"))
+        assertEquals(
+            mapOf(2 to listOf("alpha", "zeta")),
+            X11SessionManager.runningAssignmentGroups(containers)
+        )
+        assertTrue(X11SessionManager.runningAssignments(containers).isEmpty())
+        assertEquals(
+            mapOf(2 to "zeta"),
+            X11SessionManager.runningAssignments(
+                containers,
+                excludingContainer = "alpha"
+            )
+        )
+    }
+
+    @Test
     fun batchedRuntimeProbeRequiresMatchingKernelSocketAndFilesystemSocket() {
         val slot = X11DisplaySlot(2)
         val markers = listOf("__SAAS_X11_PIDS__=42 42 invalid -1 73", "__SAAS_X11_SOCKET__=1")
