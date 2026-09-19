@@ -20,7 +20,21 @@ class FixedX11OwnershipTest {
         val first = container("first")
         val second = container("second")
         assertEquals("second", FixedX11Ownership.otherOwner(listOf(first, second), "first"))
+        assertEquals(listOf("second"), FixedX11Ownership.otherOwners(listOf(first, second), "first"))
         assertFalse(FixedX11Ownership.canReleaseAfterStop(first, listOf(second)))
+    }
+
+    @Test fun duplicateRunningOwnersAreReportedAsConflictInsteadOfPickingOne() {
+        val first = container("first")
+        val second = container("second")
+
+        assertEquals(listOf("first", "second"), FixedX11Ownership.owners(listOf(second, first)))
+        assertTrue(FixedX11Ownership.hasConflict(listOf(first, second)))
+        assertNull(FixedX11Ownership.otherOwner(listOf(first, second, container("third")), "third"))
+        assertEquals(
+            listOf("first", "second"),
+            FixedX11Ownership.otherOwners(listOf(first, second), "target")
+        )
     }
 
     @Test fun lastStoppedOwnerReleasesTheServerWithoutTouchingForeignClients() {
