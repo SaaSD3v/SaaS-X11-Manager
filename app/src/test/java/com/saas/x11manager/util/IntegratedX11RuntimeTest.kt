@@ -21,6 +21,13 @@ class IntegratedX11RuntimeTest {
     }
 
     @Test
+    fun procStartTimeParserHandlesProcessNamesWithSpaces() {
+        val stat = "123 (saas x11) S " +
+            (1..18).joinToString(" ") + " 987654 20 21 22"
+        assertTrue(X11SessionManager.parseProcStartTime(stat) == "987654")
+    }
+
+    @Test
     fun runtimeExposesTheFixedServerLifecycle() {
         val methodNames = X11SessionManager::class.java.declaredMethods.map { it.name }.toSet()
 
@@ -39,6 +46,7 @@ class IntegratedX11RuntimeTest {
         assertTrue(Constants.X11_SERVER_PROCESS == "saas-x11")
         assertTrue(Constants.X11_SOCK_DIR.startsWith(Constants.INTEGRATED_X11_RUNTIME_DIR))
         assertTrue(Constants.X11_SOCK_FILE.endsWith("/.X11-unix/X0"))
+        assertTrue(Constants.X11_LEASE_FILE.startsWith(Constants.INTEGRATED_X11_RUNTIME_DIR))
         assertTrue(Constants.INTEGRATED_X11_XKB_DIR.startsWith(Constants.INTEGRATED_X11_RUNTIME_DIR))
         assertFalse(Constants.X11_SOCK_DIR.contains("/data/data/com.termux"))
         assertFalse(Constants.INTEGRATED_X11_XKB_DIR.contains("/data/data/com.termux"))
