@@ -219,17 +219,27 @@ object PulseAudioFixManager {
         append(command)
     }
 
-    private fun runAsTermux(runtime: TermuxRuntime, command: String): Boolean = try {
-        Shell.cmd("su ${runtime.uid} -c ${shellQuote(wrapTermuxCommand(command))}").exec().isSuccess
-    } catch (_: Exception) {
-        false
-    }
+    private fun runAsTermux(
+        runtime: TermuxRuntime,
+        command: String,
+        timeoutMs: Long = 30_000L
+    ): Boolean = TermuxAppCommand.execBlocking(
+        label = "audio-${runtime.uid}",
+        command = wrapTermuxCommand(command),
+        timeoutMs = timeoutMs
+    ).isSuccess
 
-    private fun runAsTermuxOutput(runtime: TermuxRuntime, command: String): List<String> = try {
-        val result = Shell.cmd("su ${runtime.uid} -c ${shellQuote(wrapTermuxCommand(command))}").exec()
-        if (result.isSuccess) result.out else emptyList()
-    } catch (_: Exception) {
-        emptyList()
+    private fun runAsTermuxOutput(
+        runtime: TermuxRuntime,
+        command: String,
+        timeoutMs: Long = 30_000L
+    ): List<String> {
+        val result = TermuxAppCommand.execBlocking(
+            label = "audio-control-${runtime.uid}",
+            command = wrapTermuxCommand(command),
+            timeoutMs = timeoutMs
+        )
+        return if (result.isSuccess) result.out else emptyList()
     }
 
     private suspend fun ensureTermuxPackages(runtime: TermuxRuntime, logger: ContainerLogger?): Boolean {
@@ -240,7 +250,8 @@ object PulseAudioFixManager {
         val installed = runAsTermux(
             runtime,
             "pkg install -y pulseaudio >/dev/null 2>&1 || " +
-                "{ pkg update -y >/dev/null 2>&1 && pkg install -y pulseaudio >/dev/null 2>&1; }"
+                "{ pkg update -y >/dev/null 2>&1 && pkg install -y pulseaudio >/dev/null 2>&1; }",
+            timeoutMs = 180_000L
         )
         if (!installed) return false
 
