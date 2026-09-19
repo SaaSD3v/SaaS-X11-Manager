@@ -125,20 +125,26 @@ object X11SessionManager {
         ServerRuntimeProbe(emptyList(), socketReady = false)
     }
 
-    private fun readServerLease(): ServerLeaseRecord? = try {
-        val result = Shell.cmd("cat ${shellQuote(Constants.X11_LEASE_FILE)} 2>/dev/null").exec()
-        if (!result.isSuccess) return null
-        val values = result.out.mapNotNull { line ->
-            val separator = line.indexOf('=')
-            if (separator <= 0) null
-            else line.substring(0, separator) to line.substring(separator + 1)
-        }.toMap()
-        if (values["owner"] != SERVER_LEASE_OWNER) return null
-        val pid = values["pid"]?.toIntOrNull()?.takeIf { it > 0 } ?: return null
-        val start = values["start"]?.takeIf { it.isNotBlank() } ?: return null
-        ServerLeaseRecord(pid, start)
-    } catch (_: Exception) {
-        null
+    private fun readServerLease(): ServerLeaseRecord? {
+        return try {
+            val result = Shell.cmd(
+                "cat ${shellQuote(Constants.X11_LEASE_FILE)} 2>/dev/null"
+            ).exec()
+            if (!result.isSuccess) return null
+
+            val values = result.out.mapNotNull { line ->
+                val separator = line.indexOf('=')
+                if (separator <= 0) null
+                else line.substring(0, separator) to line.substring(separator + 1)
+            }.toMap()
+            if (values["owner"] != SERVER_LEASE_OWNER) return null
+
+            val pid = values["pid"]?.toIntOrNull()?.takeIf { it > 0 } ?: return null
+            val start = values["start"]?.takeIf { it.isNotBlank() } ?: return null
+            ServerLeaseRecord(pid, start)
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun writeServerLease(record: ServerLeaseRecord): Boolean = try {
