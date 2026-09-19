@@ -34,7 +34,7 @@ internal object VirGLContainerConfig {
 
     fun analyze(lines: List<String>): Analysis {
         var rawVirgl: String? = null
-        var bindValue = ""
+        val bindValues = mutableListOf<String>()
 
         lines.asSequence()
             .map(String::trim)
@@ -42,7 +42,7 @@ internal object VirGLContainerConfig {
             .forEach { line ->
                 when (line.substringBefore('=').trim()) {
                     VIRGL_KEY -> rawVirgl = line.substringAfter('=', "").trim()
-                    BINDS_KEY -> bindValue = line.substringAfter('=', "")
+                    BINDS_KEY -> bindValues += line.substringAfter('=', "")
                 }
             }
 
@@ -54,7 +54,8 @@ internal object VirGLContainerConfig {
 
         var managed = false
         var conflict = false
-        bindValue.split(',')
+        bindValues.asSequence()
+            .flatMap { it.split(',').asSequence() }
             .map(String::trim)
             .filter(String::isNotEmpty)
             .forEach { entry ->
