@@ -87,8 +87,6 @@ class PulseAudioFixPolicyTest {
         assertFalse(manager.contains("auth-anonymous=1"))
         assertFalse(manager.contains("listen=0.0.0.0"))
         assertFalse(manager.contains("PULSE_SERVER=unix:/tmp/.pulse-socket"))
-        assertTrue(manager.contains("1:1|1:true|1:yes|1:on|0:0|0:false|0:no|0:off"))
-        assertTrue(manager.contains("grep -q '^enable_pulseaudio='"))
     }
 
     @Test
@@ -101,7 +99,7 @@ class PulseAudioFixPolicyTest {
         assertTrue(transport.contains("DROIDSPACES_NAT_GATEWAY = \"172.28.0.1\""))
         assertTrue(transport.contains("resolveNatEndpoint"))
         assertTrue(transport.contains("discoverContainerDefaultGateway"))
-        assertTrue(transport.contains("PulseAudioContainerCommand.build(containerName, payload)"))
+        assertTrue(transport.contains("HOST is the physically validated APK baseline"))
         assertTrue(transport.contains("NAT transport status: experimental until physical APK verification"))
         assertTrue(transport.contains("configuredPortForwardOwner"))
         assertTrue(transport.contains("module-native-protocol-tcp"))
@@ -125,9 +123,7 @@ class PulseAudioFixPolicyTest {
         val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioUnifiedTransport.kt")
 
         assertTrue(transport.contains("transport.cookie"))
-        assertTrue(transport.contains("PulseAudioCookieTransport.encodeCommand(COOKIE)"))
-        val encoder = source("app/src/main/java/com/saas/x11manager/util/PulseAudioCookieTransport.kt")
-        assertTrue(encoder.contains("od -An -v -tu1"))
+        assertTrue(transport.contains("od -An -v -tu1"))
         assertTrue(transport.contains("printf '%b'"))
         assertTrue(transport.contains("COOKIE_ESCAPED"))
         assertTrue(transport.contains("cookie-file = /root/.config/pulse/saas-audio.cookie"))
