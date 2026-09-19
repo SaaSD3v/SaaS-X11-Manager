@@ -99,11 +99,8 @@ object VirGLFixManager {
             }
         }
 
-        val runtime = detectTermuxRuntime()
-            ?: return@withContext failure(logger, "Termux was not detected")
-        if (!prepareHostState(runtime)) {
-            return@withContext failure(logger, "Could not prepare the private VirGL host runtime")
-        }
+        val savedOriginal = originalState(context, containerName)
+            ?: return@withContext failure(logger, "Saved DroidSpaces VirGL state is unavailable")
 
         if (info.isRunning && !analysis.hasManagedBind) {
             return@withContext failure(
@@ -112,17 +109,37 @@ object VirGLFixManager {
             )
         }
 
-        if (!info.isRunning && !VirGLContainerConfig.apply(info, logger)) {
-            return@withContext failure(logger, "Could not apply the private VirGL bridge to container.config")
+        val runtime = detectTermuxRuntime()
+            ?: return@withContext failure(logger, "Termux was not detected")
+        val host = ensureHostRuntime(runtime, logger)
+            ?: return@withContext failure(
+                logger,
+                "Manager-owned VirGL renderer could not be started; container graphics were left unchanged"
+            )
+
+        if (!info.isRunning) {
+            if (!VirGLContainerConfig.apply(info, logger)) {
+                return@withContext failure(
+                    logger,
+                    "Could not apply the private VirGL bridge to container.config"
+                )
+            }
+            if (!installGuestOffline(info)) {
+                VirGLContainerConfig.restore(info, savedOriginal, logger)
+                cleanupGuestOffline(info)
+                return@withContext failure(
+                    logger,
+                    "Could not provision VirGL environment before container boot; configuration was rolled back"
+                )
+            }
         }
 
         if (!FixSettings.setVirGLApplied(context, containerName, true)) {
+            if (!info.isRunning) {
+                VirGLContainerConfig.restore(info, savedOriginal, logger)
+                cleanupGuestOffline(info)
+            }
             return@withContext failure(logger, "Could not save Manager VirGL state")
-        }
-
-        val host = ensureHostRuntime(runtime, logger)
-        if (host == null) {
-            return@withContext failure(logger, "Manager-owned VirGL renderer could not be started")
         }
 
         logger?.i("[+] VirGL host renderer ready (PID=${host.pid})")
@@ -569,6 +586,52 @@ object VirGLFixManager {
         if (!info.isRunning) return true
         return runContainer(containerName, guestEnvironmentPayload(install = false)).isSuccess
     }
+
+    private fun installGuestOffline(info: ContainerInfo): Boolean =
+        RootfsAccessor.use(info.rootfsPath, "virgl_prepare_${info.name}") { root ->
+            val profile = "$root$GUEST_PROFILE"
+            val dropin = "$root$GUEST_SYSTEMD_DROPIN"
+            val systemdService = "$root/etc/systemd/system/x11-session.service"
+            val openRcInit = "$root/etc/init.d/x11-session"
+            val openRc = "$root$GUEST_OPENRC_CONF"
+            val guestSocket = VirGLContainerConfig.GUEST_SOCKET
+            val command = """
+                mkdir -p ${q("$root/etc/profile.d")} || exit 61
+                cat > ${q(profile)} <<'EOF_SAAS_VIRGL_PROFILE'
+                $BEGIN
+                export GALLIUM_DRIVER=virpipe
+                export VTEST_SOCKET_NAME=$guestSocket
+                $END
+                EOF_SAAS_VIRGL_PROFILE
+                chmod 644 ${q(profile)} 2>/dev/null || true
+
+                if [ -f ${q(systemdService)} ]; then
+                    mkdir -p ${q("$root/etc/systemd/system/x11-session.service.d")} || exit 62
+                    cat > ${q(dropin)} <<'EOF_SAAS_VIRGL_SYSTEMD'
+                [Service]
+                Environment=GALLIUM_DRIVER=virpipe
+                Environment=VTEST_SOCKET_NAME=$guestSocket
+                EOF_SAAS_VIRGL_SYSTEMD
+                fi
+
+                if [ -x ${q(openRcInit)} ]; then
+                    mkdir -p ${q("$root/etc/conf.d")} || exit 63
+                    [ -f ${q(openRc)} ] || : > ${q(openRc)}
+                    sed '/^# BEGIN SaaS X11 Manager VirGL$/ ,/^# END SaaS X11 Manager VirGL$/d' ${q(openRc)} > ${q("$openRc.saas-virgl.tmp")} || exit 64
+                    cat >> ${q("$openRc.saas-virgl.tmp")} <<'EOF_SAAS_VIRGL_OPENRC'
+                $BEGIN
+                export GALLIUM_DRIVER=virpipe
+                export VTEST_SOCKET_NAME=$guestSocket
+                $END
+                EOF_SAAS_VIRGL_OPENRC
+                    mv ${q("$openRc.saas-virgl.tmp")} ${q(openRc)}
+                fi
+                true
+            """.trimIndent()
+                .replace("VirGL$/ ,", "VirGL$/,")
+
+            try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+        } ?: false
 
     private fun cleanupGuestOffline(info: ContainerInfo): Boolean =
         RootfsAccessor.use(info.rootfsPath, "virgl_cleanup_${info.name}") { root ->
