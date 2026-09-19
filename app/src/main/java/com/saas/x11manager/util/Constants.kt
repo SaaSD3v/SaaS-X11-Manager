@@ -15,4 +15,5 @@ object Constants {
     const val X11_SOCK_FILE = "$X11_SOCK_DIR/X0"
     const val X11_LOCK_FILE = "$INTEGRATED_X11_RUNTIME_DIR/.X0-lock"
     const val X11_LOG_FILE = "$INTEGRATED_X11_RUNTIME_DIR/server.log"
+    const val X11_LEASE_FILE = "$INTEGRATED_X11_RUNTIME_DIR/server.lease"
 }
