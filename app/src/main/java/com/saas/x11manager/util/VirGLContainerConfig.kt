@@ -174,7 +174,7 @@ internal object VirGLContainerConfig {
         }
     }
 
-    private fun mutate(
+    private suspend fun mutate(
         configPath: String,
         logger: ContainerLogger?,
         transform: (List<String>) -> List<String>?
