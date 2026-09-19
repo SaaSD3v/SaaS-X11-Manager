@@ -103,33 +103,41 @@ class ManagedDisplayViewModel : ViewModel() {
             try {
                 // Resolve the live state after the click, rather than acting on an old UI snapshot.
                 val running = X11SessionManager.getServerStatus() == X11ServerStatus.Running
-                val owner = X11SessionManager.getOwnerContainerName()
+                val owners = X11SessionManager.getOwnerContainerNames()
+                val owner = owners.singleOrNull()
                 ownerForLogs = owner
                 logger.i(if (running) "--- Stopping X11 monitor ---" else "--- Starting X11 monitor ---")
                 logger.i("[*] Monitor: 1")
                 logger.i("[*] Display: ${Constants.X11_DISPLAY}")
-                owner?.let { logger.i("[*] Container: $it") }
-                if (running) {
-                    if (owner != null && !X11SessionManager.stopContainerGraphicSession(owner, logger)) {
-                        logger.w("[!] Continuing with X11 server stop; container is still running")
-                    }
-                    succeeded = X11SessionManager.stopIntegratedServer(logger)
-                    if (succeeded) {
-                        result = "X11 display stopped"
-                        owner?.let { logger.i("[+] Container '$it' was left running") }
-                    }
+
+                if (owners.size > 1) {
+                    message = "X0 ownership conflict: " + owners.joinToString(", ")
+                    logger.e("[-] $message")
+                    logger.e("[-] Fixed X0 will not be mutated until only one running owner remains")
                 } else {
-                    val started = X11SessionManager.startIntegratedServer(owner ?: seedContainer, logger)
-                    if (started.isFailure) {
-                        message = started.exceptionOrNull()?.message ?: "X11 display could not start"
+                    owner?.let { logger.i("[*] Container: $it") }
+                    if (running) {
+                        if (owner != null && !X11SessionManager.stopContainerGraphicSession(owner, logger)) {
+                            logger.w("[!] Continuing with X11 server stop; container is still running")
+                        }
+                        succeeded = X11SessionManager.stopIntegratedServer(logger)
+                        if (succeeded) {
+                            result = "X11 display stopped"
+                            owner?.let { logger.i("[+] Container '$it' was left running") }
+                        }
                     } else {
-                        // Restarting the fixed server must also restore its owner's managed desktop.
-                        // A raw server without an owner remains available for manual X11 clients.
-                        succeeded = owner?.let {
-                            X11SessionManager.ensureContainerGraphicSession(it, logger)
-                        } ?: true
-                        result = "X11 display ready"
-                        if (!succeeded) message = "X11 is running, but its desktop could not be confirmed"
+                        val started = X11SessionManager.startIntegratedServer(owner ?: seedContainer, logger)
+                        if (started.isFailure) {
+                            message = started.exceptionOrNull()?.message ?: "X11 display could not start"
+                        } else {
+                            // Restarting the fixed server must also restore its owner's managed desktop.
+                            // A raw server without an owner remains available for manual X11 clients.
+                            succeeded = owner?.let {
+                                X11SessionManager.ensureContainerGraphicSession(it, logger)
+                            } ?: true
+                            result = "X11 display ready"
+                            if (!succeeded) message = "X11 is running, but its desktop could not be confirmed"
+                        }
                     }
                 }
                 if (!succeeded && message == null) message = result
