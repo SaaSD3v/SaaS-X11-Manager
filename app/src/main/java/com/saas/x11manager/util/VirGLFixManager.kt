@@ -261,20 +261,34 @@ object VirGLFixManager {
         )
     ).exec()
 
+    private fun supportsPrivateSocket(runtime: TermuxRuntime): Boolean = try {
+        runAsTermux(
+            runtime,
+            "${q(VIRGL_BIN)} --help 2>&1 | grep -Fq -- '--socket-path'"
+        ).isSuccess
+    } catch (_: Exception) {
+        false
+    }
+
     private fun ensureVirGLPackage(runtime: TermuxRuntime, logger: ContainerLogger?): Boolean {
         try {
-            if (runAsTermux(runtime, "test -x ${q(VIRGL_BIN)}").isSuccess) return true
+            if (runAsTermux(runtime, "test -x ${q(VIRGL_BIN)}").isSuccess &&
+                supportsPrivateSocket(runtime)
+            ) {
+                return true
+            }
         } catch (_: Exception) {
         }
 
-        logger?.i("[*] Installing Termux virglrenderer-android...")
+        logger?.i("[*] Installing/updating Termux virglrenderer-android with private socket support...")
         val command =
             "pkg install -y x11-repo >/dev/null 2>&1 || true; " +
                 "pkg install -y virglrenderer-android >/dev/null 2>&1 || " +
                 "{ pkg update -y >/dev/null 2>&1 && " +
                 "pkg install -y virglrenderer-android >/dev/null 2>&1; }; " +
                 "test -x ${q(VIRGL_BIN)}"
-        return try { runAsTermux(runtime, command).isSuccess } catch (_: Exception) { false }
+        val installed = try { runAsTermux(runtime, command).isSuccess } catch (_: Exception) { false }
+        return installed && supportsPrivateSocket(runtime)
     }
 
     private fun processStartTime(pid: Int): String? = try {
