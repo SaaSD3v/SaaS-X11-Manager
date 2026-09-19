@@ -39,8 +39,29 @@ class TermuxAppContextPolicyTest {
         val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioUnifiedTransport.kt")
         val virgl = source("app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt")
 
-        assertTrue(audio.contains("su ${runtime.uid} -c"))
-        assertTrue(transport.contains("su ${owner.uid} -c"))
+        val dollar = '
+
+        assertTrue(virgl.contains("u:r:droidspacesd:s0"))
+        assertTrue(virgl.contains("[ \"${'$'}uid\" = 0 ]"))
+        assertTrue(virgl.contains("virgl_test_server_android"))
+        assertTrue(virgl.contains("--socket-path"))
+        assertFalse(virgl.contains("pkg update"))
+        assertFalse(virgl.contains("pkg install"))
+    }
+
+    @Test
+    fun retiredReconstructedAudioHelperIsNotReferenced() {
+        val audio = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
+
+        assertFalse(audio.contains("saas-audio"))
+        assertFalse(audio.contains("Base64"))
+        assertFalse(audio.contains("SaaS-DroidSpaces-Audio-Auto.sh"))
+        assertTrue(audio.contains("Physically validated transport baseline"))
+    }
+}
+
+        assertTrue(audio.contains("su " + dollar + "{runtime.uid} -c"))
+        assertTrue(transport.contains("su " + dollar + "{owner.uid} -c"))
 
         assertTrue(virgl.contains("u:r:droidspacesd:s0"))
         assertTrue(virgl.contains("[ \"${'$'}uid\" = 0 ]"))
