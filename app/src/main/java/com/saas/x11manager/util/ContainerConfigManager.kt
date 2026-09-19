@@ -70,6 +70,80 @@ object ContainerConfigManager {
         }
     }
 
+    /**
+     * Remove only the Manager-owned fixed X0 bind after the container is
+     * authoritatively STOPPED. Foreign X11 binds and unrelated configuration
+     * remain untouched.
+     */
+    suspend fun clearManualX11Config(
+        containerName: String,
+        logger: ContainerLogger? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        val configPath = "${Constants.CONTAINERS_DIR}/$containerName/${Constants.CONFIG_FILE}"
+        try {
+            val read = Shell.cmd("cat ${shellQuote(configPath)} 2>/dev/null").exec()
+            if (!read.isSuccess || read.out.isEmpty()) return@withContext false
+
+            val original = read.out.toList()
+            val bindMounts = original.asSequence()
+                .map(String::trim)
+                .filter { it.isNotEmpty() && !it.startsWith("#") && it.contains('=') }
+                .firstOrNull { it.substringBefore('=').trim() == "bind_mounts" }
+                ?.substringAfter('=', "")
+                .orEmpty()
+            if (!usesManagedX11(bindMounts)) return@withContext true
+
+            val (status, pid) = ContainerManager.getContainerRuntimeStatePublic(containerName)
+            logger?.i("[CTX] X0 lease release runtime: $status")
+            logger?.i("[CTX] X0 lease release PID: ${pid ?: "none"}")
+            if (status != ContainerStatus.STOPPED) {
+                logger?.w("[!] Fixed X0 bind retained because $containerName is not confirmed STOPPED")
+                return@withContext false
+            }
+
+            val updated = buildConfigWithoutManagedX11(original)
+            val originalText = original.joinToString("\n") + "\n"
+            val updatedText = updated.joinToString("\n") + "\n"
+            if (updatedText == originalText) return@withContext true
+
+            val tempPath = "$configPath.saas-x11-release.tmp.${System.nanoTime()}"
+            val write = Shell.cmd(
+                "printf '%s' ${shellQuote(updatedText)} > ${shellQuote(tempPath)} && " +
+                    "chmod 644 ${shellQuote(tempPath)} && " +
+                    "mv -f ${shellQuote(tempPath)} ${shellQuote(configPath)}"
+            ).exec()
+            if (!write.isSuccess) {
+                Shell.cmd("rm -f ${shellQuote(tempPath)} 2>/dev/null").exec()
+                logger?.e("[-] Failed to release fixed X0 bind from $containerName")
+                return@withContext false
+            }
+
+            logger?.i("[+] Fixed X0 bind released from $containerName")
+            true
+        } catch (e: Exception) {
+            logger?.e("[-] X0 lease release error for $containerName: ${e.message}")
+            false
+        }
+    }
+
+    internal fun buildConfigWithoutManagedX11(original: List<String>): List<String> {
+        val updated = original.toMutableList()
+        for (index in updated.indices) {
+            val trimmed = updated[index].trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#") || !trimmed.contains('=')) continue
+            if (trimmed.substringBefore('=').trim() != "bind_mounts") continue
+
+            val remaining = trimmed.substringAfter('=', "")
+                .split(',')
+                .map(String::trim)
+                .filter(String::isNotEmpty)
+                .filterNot(::isManagedX11Bind)
+                .distinct()
+            updated[index] = "bind_mounts=${remaining.joinToString(",")}"
+        }
+        return updated
+    }
+
     internal fun buildManualX11Config(original: List<String>): List<String> {
         val updated = original.toMutableList()
         var x11FlagFound = false
@@ -111,10 +185,11 @@ object ContainerConfigManager {
         .asSequence()
         .map(String::trim)
         .filter(String::isNotEmpty)
-        .any { entry ->
-            bindDestination(entry) == X11_CONTAINER_SOCKET_DIR &&
-                entry.substringBefore(':').trim() == Constants.X11_SOCK_DIR
-        }
+        .any(::isManagedX11Bind)
+
+    private fun isManagedX11Bind(entry: String): Boolean =
+        bindDestination(entry) == X11_CONTAINER_SOCKET_DIR &&
+            entry.substringBefore(':').trim() == Constants.X11_SOCK_DIR
 
     /**
      * True for any X11 socket bind. Used only as a fail-closed guard while a
