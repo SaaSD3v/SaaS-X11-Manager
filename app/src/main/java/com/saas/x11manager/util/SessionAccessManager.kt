@@ -83,10 +83,8 @@ object SessionAccessManager {
             }
         }
 
-        // Restore the physically validated PulseAudio helper path. The helper
-        // owns its audio setup before graphical startup; do not run the later
-        // Manager-owned/native core or sanitizer transports in parallel.
-        PulseAudioFixManager.reconcileForStart(
+        // Audio baseline: physically validated HOST + NAT transport from 0f61eaa3.
+        PulseAudioFixManager.prepareBeforeGraphicalStart(
             containerName = containerName,
             logger = logger
         )
@@ -102,6 +100,7 @@ object SessionAccessManager {
             SessionAccessMode.BOTH -> {
                 val started = X11SessionManager.startX11Session(containerName, logger) {
                     VirGLFixManager.finalizeAfterContainerReady(containerName, logger)
+                    finalizeAudioAfterContainerReady(containerName, logger)
                 }
                 if (!started) {
                     logger?.e("[-] Integrated X11 access failed")
@@ -122,7 +121,8 @@ object SessionAccessManager {
                     session = session,
                     port = vncPort,
                     password = vncPassword,
-                    logger = logger
+                    logger = logger,
+                    beforeGraphicSession = { finalizeAudioAfterContainerReady(containerName, logger) }
                 )
                 if (result.success) {
                     VncConnectionGuide.logAfterSuccessfulStart(
@@ -145,6 +145,28 @@ object SessionAccessManager {
                 }
                 result.success
             }
+        }
+    }
+
+    private suspend fun finalizeAudioAfterContainerReady(
+        containerName: String,
+        logger: ContainerLogger?
+    ) {
+        val mode = ContainerManager.getContainerInfo(containerName)
+            ?.netMode
+            ?.trim()
+            ?.lowercase()
+
+        if (mode == "nat") {
+            PulseAudioNatScriptTransport.finalizeAfterContainerReady(
+                containerName = containerName,
+                logger = logger
+            )
+        } else {
+            PulseAudioUnifiedTransport.finalizeAfterContainerReady(
+                containerName = containerName,
+                logger = logger
+            )
         }
     }
 
