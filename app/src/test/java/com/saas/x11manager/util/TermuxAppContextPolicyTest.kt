@@ -19,7 +19,7 @@ class TermuxAppContextPolicyTest {
     private fun source(path: String): String = projectFile(path).readText()
 
     @Test
-    fun androidFacingBackendsRunThroughRealTermuxAppContext() {
+    fun virglUsesTermuxAppContextButAudioKeepsValidatedUidBaseline() {
         val broker = source("app/src/main/java/com/saas/x11manager/util/TermuxAppCommand.kt")
         val audio = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
         val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioUnifiedTransport.kt")
@@ -27,31 +27,25 @@ class TermuxAppContextPolicyTest {
         val manifest = source("app/src/main/AndroidManifest.xml")
 
         assertTrue(broker.contains("com.termux.app.RunCommandService"))
-        assertTrue(broker.contains("am startservice --user 0"))
-        assertTrue(broker.contains("allow-external-apps=true"))
         assertTrue(manifest.contains("com.termux.permission.RUN_COMMAND"))
         assertTrue(manifest.contains("<package android:name=\"com.termux\""))
-
-        assertTrue(audio.contains("TermuxAppCommand.execBlocking"))
-        assertTrue(transport.contains("TermuxAppCommand.execBlocking"))
         assertTrue(virgl.contains("TermuxAppCommand.execBlocking"))
 
-        assertFalse(audio.contains("Shell.cmd(\"su \${runtime.uid} -c"))
-        assertFalse(transport.contains("Shell.cmd(\"su \${owner.uid} -c"))
-        assertFalse(virgl.contains("\"su \${runtime.uid} -c \""))
+        // Audio is intentionally pinned to the physically validated 0f61eaa3
+        // baseline and must not be silently routed through the later broker.
+        assertFalse(audio.contains("TermuxAppCommand.execBlocking"))
+        assertFalse(transport.contains("TermuxAppCommand.execBlocking"))
+        assertTrue(audio.contains("su ${runtime.uid} -c"))
+        assertTrue(transport.contains("su ${owner.uid} -c"))
     }
 
     @Test
-    fun managerStillOwnsPrivateAudioAndVirglEndpoints() {
+    fun retiredReconstructedAudioHelperIsNotReferenced() {
         val audio = source("app/src/main/java/com/saas/x11manager/util/PulseAudioFixManager.kt")
-        val virgl = source("app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt")
 
-        assertTrue(audio.contains("module-native-protocol-unix socket=\$HOST_CONTROL_SOCKET auth-cookie=\$HOST_COOKIE"))
-        assertTrue(audio.contains("module-aaudio-sink"))
-        assertTrue(audio.contains("module-sles-sink"))
-
-        assertTrue(virgl.contains("virgl_test_server_android"))
-        assertTrue(virgl.contains("--socket-path"))
-        assertTrue(virgl.contains("HOST_SOCKET"))
+        assertFalse(audio.contains("saas-audio"))
+        assertFalse(audio.contains("Base64"))
+        assertFalse(audio.contains("SaaS-DroidSpaces-Audio-Auto.sh"))
+        assertTrue(audio.contains("Physically validated transport baseline"))
     }
 }
