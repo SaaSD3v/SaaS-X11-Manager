@@ -136,7 +136,7 @@ class VirGLFixPolicyTest {
 
         assertTrue(manager.contains("supportedOptionalFlags"))
         assertTrue(manager.contains("--help 2>&1 || true"))
-        assertTrue(manager.contains("VirGLRuntimeFlags.fromHelp"))
+        assertTrue(manager.contains("VirGLRuntimeFlags::fromHelp"))
         assertTrue(manager.contains("VirGLRuntimeFlags.arguments"))
         assertTrue(manager.contains("Renderer flags:"))
         assertTrue(manager.contains("Renderer flag change is pending"))
