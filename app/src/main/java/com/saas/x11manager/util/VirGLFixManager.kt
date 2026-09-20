@@ -53,25 +53,40 @@ object VirGLFixManager {
         val context = X11Application.instance
         val requested = FixSettings.isVirGLEnabled(context, containerName)
         val previouslyApplied = FixSettings.isVirGLApplied(context, containerName)
-        if (!requested && !previouslyApplied) return@withContext null
+        val hasSavedOriginal = FixSettings.getVirGLOriginalState(context, containerName) != null
+        if (!requested && !previouslyApplied && !hasSavedOriginal) return@withContext null
 
         logger?.i("--- VirGL Configuration ---")
         val info = ContainerManager.getContainerInfo(containerName)
             ?: return@withContext failure(logger, "Container $containerName was not found")
+        val config = readConfig(info.configPath)
+            ?: return@withContext failure(logger, "Could not read container configuration")
+        val analysis = VirGLContainerConfig.analyze(config)
 
         if (!requested) {
-            if (info.isRunning) {
+            val original = originalState(context, containerName)
+            val alreadyRestored = !analysis.hasManagedBind &&
+                (original == null || analysis.nativeState == original)
+            val cleaned = if (info.isRunning) {
                 cleanupGuestLive(containerName)
+            } else {
+                cleanupGuestOffline(info)
+            }
+
+            if (info.isRunning) {
+                if (alreadyRestored && cleaned) {
+                    FixSettings.clearVirGLRuntimeState(context, containerName)
+                    logger?.i("[+] Removed residual Manager VirGL environment from $containerName")
+                    return@withContext VirGLFixResult(true, "VirGL configuration disabled")
+                }
                 return@withContext failure(
                     logger,
                     "VirGL is disabled, but the container must stop once before its host bind/native setting can be restored"
                 )
             }
 
-            val original = originalState(context, containerName)
-            val restored = original != null &&
-                VirGLContainerConfig.restore(info, original, logger)
-            val cleaned = cleanupGuestOffline(info)
+            val restored = alreadyRestored ||
+                (original != null && VirGLContainerConfig.restore(info, original, logger))
             if (restored && cleaned) {
                 FixSettings.clearVirGLRuntimeState(context, containerName)
                 logger?.i("[+] Manager VirGL disabled for $containerName")
@@ -80,9 +95,6 @@ object VirGLFixManager {
             return@withContext failure(logger, "VirGL cleanup was not fully completed")
         }
 
-        val config = readConfig(info.configPath)
-            ?: return@withContext failure(logger, "Could not read container configuration")
-        val analysis = VirGLContainerConfig.analyze(config)
         if (analysis.conflictingGuestBind) {
             return@withContext failure(
                 logger,

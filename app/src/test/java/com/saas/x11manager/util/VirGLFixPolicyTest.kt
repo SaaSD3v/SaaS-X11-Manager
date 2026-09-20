@@ -86,6 +86,19 @@ class VirGLFixPolicyTest {
     }
 
     @Test
+    fun disabledFixCleansResidualStateAfterManualConfigRestore() {
+        val manager = source(
+            "app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt"
+        )
+
+        assertTrue(manager.contains("hasSavedOriginal"))
+        assertTrue(manager.contains("alreadyRestored"))
+        assertTrue(manager.contains("cleanupGuestLive(containerName)"))
+        assertTrue(manager.contains("Removed residual Manager VirGL environment"))
+        assertTrue(manager.contains("clearVirGLRuntimeState"))
+    }
+
+    @Test
     fun droidspacesNativeVirglIsDisabledAndRestorable() {
         val config = source(
             "app/src/main/java/com/saas/x11manager/util/VirGLContainerConfig.kt"
