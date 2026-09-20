@@ -42,7 +42,7 @@ class VirGLFixPolicyTest {
         assertTrue(manager.contains("pidof virgl_test_server_android"))
         assertTrue(manager.contains("processUid(pid) != 0"))
         assertTrue(manager.contains("cmdline.contains(\"--multi-clients\")"))
-        assertTrue(manager.contains("cmdline.contains(\"--socket-path \\$HOST_SOCKET\")"))
+        assertTrue(manager.contains("cmdline.contains(\"--socket-path ${\'$\'}HOST_SOCKET\")"))
         assertTrue(manager.contains("stopExactPrivateRenderers"))
         assertTrue(manager.contains("Retiring unrecoverable renderers on the Manager-private socket"))
         assertFalse(manager.contains("pkill virgl_test_server_android"))
