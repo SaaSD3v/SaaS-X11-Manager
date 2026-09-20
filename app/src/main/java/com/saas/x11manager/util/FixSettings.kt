@@ -7,6 +7,9 @@ object FixSettings {
     private const val PULSEAUDIO_PREFIX = "pulseaudio::"
     private const val PULSEAUDIO_APPLIED_PREFIX = "pulseaudio_applied::"
     private const val PULSEAUDIO_ORIGINAL_PREFIX = "pulseaudio_original::"
+    private const val VIRGL_PREFIX = "virgl::"
+    private const val VIRGL_APPLIED_PREFIX = "virgl_applied::"
+    private const val VIRGL_ORIGINAL_PREFIX = "virgl_original::"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -52,5 +55,48 @@ object FixSettings {
             .edit()
             .remove(PULSEAUDIO_APPLIED_PREFIX + containerName)
             .remove(PULSEAUDIO_ORIGINAL_PREFIX + containerName)
+            .commit()
+
+    fun isVirGLEnabled(context: Context, containerName: String): Boolean =
+        prefs(context).getBoolean(VIRGL_PREFIX + containerName, false)
+
+    fun setVirGLEnabled(
+        context: Context,
+        containerName: String,
+        enabled: Boolean
+    ): Boolean = prefs(context)
+        .edit()
+        .putBoolean(VIRGL_PREFIX + containerName, enabled)
+        .commit()
+
+    fun isVirGLApplied(context: Context, containerName: String): Boolean =
+        prefs(context).getBoolean(VIRGL_APPLIED_PREFIX + containerName, false)
+
+    fun setVirGLApplied(
+        context: Context,
+        containerName: String,
+        applied: Boolean
+    ): Boolean = prefs(context)
+        .edit()
+        .putBoolean(VIRGL_APPLIED_PREFIX + containerName, applied)
+        .commit()
+
+    fun getVirGLOriginalState(context: Context, containerName: String): String? =
+        prefs(context).getString(VIRGL_ORIGINAL_PREFIX + containerName, null)
+
+    fun setVirGLOriginalState(
+        context: Context,
+        containerName: String,
+        state: String
+    ): Boolean = prefs(context)
+        .edit()
+        .putString(VIRGL_ORIGINAL_PREFIX + containerName, state)
+        .commit()
+
+    fun clearVirGLRuntimeState(context: Context, containerName: String): Boolean =
+        prefs(context)
+            .edit()
+            .remove(VIRGL_APPLIED_PREFIX + containerName)
+            .remove(VIRGL_ORIGINAL_PREFIX + containerName)
             .commit()
 }
