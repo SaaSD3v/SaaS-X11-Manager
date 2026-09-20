@@ -38,8 +38,11 @@ internal fun FixesScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    var enabled by remember(containerName) {
+    var audioEnabled by remember(containerName) {
         mutableStateOf(FixSettings.isPulseAudioEnabled(context, containerName))
+    }
+    var virglEnabled by remember(containerName) {
+        mutableStateOf(FixSettings.isVirGLEnabled(context, containerName))
     }
     var saveError by remember(containerName) { mutableStateOf(false) }
 
@@ -94,9 +97,9 @@ internal fun FixesScreen(
                 icon = { Icon(Icons.Default.Build, contentDescription = null) }
             ) {
                 SettingsToggleRow(
-                    title = if (enabled) "Enabled" else "Disabled by default",
+                    title = if (audioEnabled) "Enabled" else "Disabled by default",
                     subtitle = "HOST and NAT network modes supported",
-                    checked = enabled,
+                    checked = audioEnabled,
                     onCheckedChange = { requested ->
                         val saved = FixSettings.setPulseAudioEnabled(
                             context = context,
@@ -104,7 +107,32 @@ internal fun FixesScreen(
                             enabled = requested
                         )
                         if (saved) {
+                            audioEnabled = requested
+                            saveError = false
+                        } else {
+                            saveError = true
+                        }
+                    }
+                )
+            }
+
+            SettingsSection(
+                title = "3D acceleration",
+                subtitle = "Manager-owned VirGL transport for Integrated X11",
+                icon = { Icon(Icons.Default.Build, contentDescription = null) }
+            ) {
+                SettingsToggleRow(
+                    title = if (virglEnabled) "Enabled" else "Disabled by default",
+                    subtitle = "Private virglrenderer socket; falls back to software rendering on failure",
+                    checked = virglEnabled,
+                    onCheckedChange = { requested ->
+                        val saved = FixSettings.setVirGLEnabled(
+                            context = context,
+                            containerName = containerName,
                             enabled = requested
+                        )
+                        if (saved) {
+                            virglEnabled = requested
                             saveError = false
                         } else {
                             saveError = true
