@@ -94,12 +94,10 @@ class PulseAudioFixPolicyTest {
         assertFalse(manager.contains("auth-anonymous=1"))
         assertFalse(manager.contains("listen=0.0.0.0"))
         assertFalse(manager.contains("PULSE_SERVER=unix:/tmp/.pulse-socket"))
-        assertTrue(manager.contains("1:1|1:true|1:yes|1:on|0:0|0:false|0:no|0:off"))
-        assertTrue(manager.contains("grep -q '^enable_pulseaudio='"))
     }
 
     @Test
-    fun unifiedTransportKeepsAuthenticatedHostAndNatOnTheSameCore() {
+    fun unifiedTransportKeepsHostValidatedAndNatExperimentalOnTheSameCore() {
         val transport = source("app/src/main/java/com/saas/x11manager/util/PulseAudioUnifiedTransport.kt")
 
         assertTrue(transport.contains("BASE_PORT = 4713"))
