@@ -38,6 +38,24 @@ class VirGLFixPolicyTest {
     }
 
     @Test
+    fun liveManagerRendererCanRecoverMissingLeaseWithoutBlindAdoption() {
+        val manager = source(
+            "app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt"
+        )
+
+        assertTrue(manager.contains("recoverLiveHostLease"))
+        assertTrue(manager.contains("pidof virgl_test_server_android"))
+        assertTrue(manager.contains("processUid(pid) != 0"))
+        assertTrue(manager.contains("--socket-path $HOST_SOCKET"))
+        assertTrue(manager.contains("processOwnsSocket(pid, inode)"))
+        assertTrue(manager.contains("socket:[$inode]"))
+        assertTrue(manager.contains("candidates.size != 1"))
+        assertTrue(manager.contains("writeLease(runtime, lease)"))
+        assertTrue(manager.contains("chmod 666"))
+        assertTrue(manager.contains("without a recoverable Manager lease"))
+    }
+
+    @Test
     fun droidspacesNativeVirglIsDisabledAndRestorable() {
         val config = source(
             "app/src/main/java/com/saas/x11manager/util/VirGLContainerConfig.kt"
