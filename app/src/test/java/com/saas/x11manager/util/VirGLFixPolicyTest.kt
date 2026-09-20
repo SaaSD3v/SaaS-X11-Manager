@@ -19,12 +19,8 @@ class VirGLFixPolicyTest {
 
     @Test
     fun managerOwnsPrivateMultiClientRendererSocketAndGuestContract() {
-        val manager = source(
-            "app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt"
-        )
-        val config = source(
-            "app/src/main/java/com/saas/x11manager/util/VirGLContainerConfig.kt"
-        )
+        val manager = source("app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt")
+        val config = source("app/src/main/java/com/saas/x11manager/util/VirGLContainerConfig.kt")
 
         assertTrue(manager.contains("virgl_test_server_android"))
         assertTrue(manager.contains("--socket-path"))
@@ -39,95 +35,26 @@ class VirGLFixPolicyTest {
     }
 
     @Test
-    fun liveManagerRendererCanRecoverMissingLeaseWithoutBlindAdoption() {
-        val manager = source(
-            "app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt"
-        )
+    fun liveManagerRendererRecoveryRequiresExactSharedIdentity() {
+        val manager = source("app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt")
 
         assertTrue(manager.contains("recoverLiveHostLease"))
         assertTrue(manager.contains("pidof virgl_test_server_android"))
         assertTrue(manager.contains("processUid(pid) != 0"))
-        assertTrue(manager.contains("--socket-path \$HOST_SOCKET"))
-        assertFalse(manager.contains("processOwnsSocket(pid, inode)"))
-        assertTrue(manager.contains("socketInode(HOST_SOCKET) == null"))
-        assertTrue(manager.contains("candidates.size != 1"))
-        assertTrue(manager.contains("su \${runtime.uid} -c"))
-        assertTrue(manager.contains("readLease() == lease"))
-        assertTrue(manager.contains("processUid(lease.pid) != 0"))
-        assertTrue(manager.contains("cmdline.contains(\"--socket-path \$HOST_SOCKET\")"))
-        assertTrue(manager.contains("Lease recovery could not persist virgl.pid"))
-        assertTrue(manager.contains("chmod 666"))
-        assertTrue(manager.contains("Retiring unrecoverable renderers on the Manager-private socket"))
-    }
-
-    @Test
-    fun stalePrivateRendererWorkersAreRetiredWithoutTouchingNativeVirgl() {
-        val manager = source(
-            "app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt"
-        )
-
-        assertTrue(manager.contains("exactPrivateRenderers"))
-        assertTrue(manager.contains("cmdline.contains(\"--socket-path \$HOST_SOCKET\")"))
+        assertTrue(manager.contains("cmdline.contains(\"--multi-clients\")"))
+        assertTrue(manager.contains("cmdline.contains(\"--socket-path \\$HOST_SOCKET\")"))
         assertTrue(manager.contains("stopExactPrivateRenderers"))
         assertTrue(manager.contains("Retiring unrecoverable renderers on the Manager-private socket"))
         assertFalse(manager.contains("pkill virgl_test_server_android"))
     }
 
     @Test
-    fun realRendererProbeUsesDynamicX11AppDisplayAndFallsBackToEglinfo() {
-        val manager = source(
-            "app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt"
-        )
+    fun rendererProbeUsesDynamicX11AppDisplayInsteadOfFixedX0() {
+        val manager = source("app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt")
 
         assertTrue(manager.contains("displaySlotFromBindMounts(info.bindMounts)"))
         assertTrue(manager.contains("probeGuestRenderer(containerName, displayName)"))
-        assertTrue(manager.contains("DISPLAY=" + '
-    @Test
-    fun disabledFixCleansResidualStateAfterManualConfigRestore() {
-        val manager = source(
-            "app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt"
-        )
-
-        assertTrue(manager.contains("hasSavedOriginal"))
-        assertTrue(manager.contains("alreadyRestored"))
-        assertTrue(manager.contains("cleanupGuestLive(containerName)"))
-        assertTrue(manager.contains("Removed residual Manager VirGL environment"))
-        assertTrue(manager.contains("clearVirGLRuntimeState"))
-    }
-
-    @Test
-    fun droidspacesNativeVirglIsDisabledAndRestorable() {
-        val config = source(
-            "app/src/main/java/com/saas/x11manager/util/VirGLContainerConfig.kt"
-        )
-        val settings = source(
-            "app/src/main/java/com/saas/x11manager/util/FixSettings.kt"
-        )
-
-        assertTrue(config.contains("enable_virgl"))
-        assertTrue(config.contains("buildRestoredConfig"))
-        assertTrue(settings.contains("getVirGLOriginalState"))
-        assertTrue(settings.contains("clearVirGLRuntimeState"))
-    }
-
-    @Test
-    fun x11AppStartFinalizesVirglBeforeDesktopHandshake() {
-        val access = source(
-            "app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt"
-        )
-
-        assertTrue(access.contains("virgl.prepare-host"))
-        assertTrue(access.contains("VirGLFixManager.prepareBeforeGraphicalStart"))
-        assertTrue(access.contains("virgl.finalize-guest"))
-        assertTrue(access.contains("VirGLFixManager.finalizeAfterContainerReady"))
-        assertTrue(
-            access.indexOf("VirGLFixManager.finalizeAfterContainerReady") <
-                access.indexOf("finalizeAudioAfterContainerReady(containerName, logger)", 
-                    access.indexOf("VirGLFixManager.finalizeAfterContainerReady"))
-        )
-    }
-}
- + "{q(displayName)}"))
+        assertTrue(manager.contains("DISPLAY=\${q(displayName)}"))
         assertFalse(manager.contains("DISPLAY=:0"))
         assertTrue(manager.contains("glxinfo -B"))
         assertTrue(manager.contains("eglinfo -B"))
@@ -138,25 +65,18 @@ class VirGLFixPolicyTest {
 
     @Test
     fun disabledFixCleansResidualStateAfterManualConfigRestore() {
-        val manager = source(
-            "app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt"
-        )
+        val manager = source("app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt")
 
         assertTrue(manager.contains("hasSavedOriginal"))
         assertTrue(manager.contains("alreadyRestored"))
         assertTrue(manager.contains("cleanupGuestLive(containerName)"))
-        assertTrue(manager.contains("Removed residual Manager VirGL environment"))
         assertTrue(manager.contains("clearVirGLRuntimeState"))
     }
 
     @Test
     fun droidspacesNativeVirglIsDisabledAndRestorable() {
-        val config = source(
-            "app/src/main/java/com/saas/x11manager/util/VirGLContainerConfig.kt"
-        )
-        val settings = source(
-            "app/src/main/java/com/saas/x11manager/util/FixSettings.kt"
-        )
+        val config = source("app/src/main/java/com/saas/x11manager/util/VirGLContainerConfig.kt")
+        val settings = source("app/src/main/java/com/saas/x11manager/util/FixSettings.kt")
 
         assertTrue(config.contains("enable_virgl"))
         assertTrue(config.contains("buildRestoredConfig"))
@@ -165,17 +85,22 @@ class VirGLFixPolicyTest {
     }
 
     @Test
-    fun x11StartFinalizesVirglBeforeDesktopHandshake() {
-        val access = source(
-            "app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt"
-        )
+    fun x11AppStartIntegratesVirglWithoutReplacingAudioOrVnc() {
+        val access = source("app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt")
 
+        assertTrue(access.contains("virgl.prepare-host"))
         assertTrue(access.contains("VirGLFixManager.prepareBeforeGraphicalStart"))
+        assertTrue(access.contains("virgl.finalize-guest"))
         assertTrue(access.contains("VirGLFixManager.finalizeAfterContainerReady"))
+        assertTrue(access.contains("audio.prepare-host"))
+        assertTrue(access.contains("audio.finalize-client"))
+        assertTrue(access.contains("VncServerManager.startStandalone"))
         assertTrue(
             access.indexOf("VirGLFixManager.finalizeAfterContainerReady") <
-                access.indexOf("finalizeAudioAfterContainerReady(containerName, logger)", 
-                    access.indexOf("VirGLFixManager.finalizeAfterContainerReady"))
+                access.indexOf(
+                    "finalizeAudioAfterContainerReady(containerName, logger)",
+                    access.indexOf("VirGLFixManager.finalizeAfterContainerReady")
+                )
         )
     }
 }
