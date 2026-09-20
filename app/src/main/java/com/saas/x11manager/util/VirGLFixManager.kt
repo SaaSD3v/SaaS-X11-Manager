@@ -382,24 +382,7 @@ object VirGLFixManager {
         logger: ContainerLogger?
     ): HostLease? {
         if (socketInode(HOST_SOCKET) == null) return null
-        val pidResult = try {
-            Shell.cmd("pidof virgl_test_server_android 2>/dev/null || true").exec()
-        } catch (_: Exception) {
-            return null
-        }
-        val candidates = pidResult.out
-            .flatMap { line -> line.trim().split(Regex("\\s+")) }
-            .mapNotNull(String::toIntOrNull)
-            .filter { it > 1 }
-            .distinct()
-            .mapNotNull { pid ->
-                if (processUid(pid) != 0) return@mapNotNull null
-                val cmdline = processCmdline(pid) ?: return@mapNotNull null
-                if (!cmdline.contains(VIRGL_BIN)) return@mapNotNull null
-                if (!cmdline.contains("--socket-path $HOST_SOCKET")) return@mapNotNull null
-                val start = processStartTime(pid) ?: return@mapNotNull null
-                HostLease(pid, start)
-            }
+        val candidates = exactPrivateRenderers()
 
         if (candidates.size != 1) {
             logger?.w("[VIRGL] ! Lease recovery found ${candidates.size} exact renderer candidates")
@@ -422,6 +405,28 @@ object VirGLFixManager {
         return lease
     }
 
+    /** Every match is root-owned and names the Manager-private socket exactly. */
+    private fun exactPrivateRenderers(): List<HostLease> {
+        val pidResult = try {
+            Shell.cmd("pidof virgl_test_server_android 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+            return emptyList()
+        }
+        return pidResult.out
+            .flatMap { line -> line.trim().split(Regex("\\s+")) }
+            .mapNotNull(String::toIntOrNull)
+            .filter { it > 1 }
+            .distinct()
+            .mapNotNull { pid ->
+                if (processUid(pid) != 0) return@mapNotNull null
+                val cmdline = processCmdline(pid) ?: return@mapNotNull null
+                if (!cmdline.contains(VIRGL_BIN)) return@mapNotNull null
+                if (!cmdline.contains("--socket-path $HOST_SOCKET")) return@mapNotNull null
+                val start = processStartTime(pid) ?: return@mapNotNull null
+                HostLease(pid, start)
+            }
+    }
+
     private fun ownedHostReady(runtime: TermuxRuntime): HostLease? {
         val lease = readLease() ?: return null
         if (!ownedIdentity(runtime, lease)) return null
@@ -439,14 +444,14 @@ object VirGLFixManager {
                 Shell.cmd("rm -f ${q(HOST_SOCKET)} ${q(HOST_PID_FILE)} 2>/dev/null || true").exec()
                 return true
             }
-            return false
+            return stopExactPrivateRenderers()
         }
         if (!ownedIdentity(runtime, lease)) {
             if (!kernelSocketLive(HOST_SOCKET)) {
                 Shell.cmd("rm -f ${q(HOST_SOCKET)} ${q(HOST_PID_FILE)} 2>/dev/null || true").exec()
                 return true
             }
-            return false
+            return stopExactPrivateRenderers()
         }
 
         Shell.cmd("kill ${lease.pid} 2>/dev/null || true").exec()
@@ -457,10 +462,21 @@ object VirGLFixManager {
         }
         if (processStartTime(lease.pid) == lease.startTime) return false
 
-        if (!kernelSocketLive(HOST_SOCKET)) {
-            Shell.cmd("rm -f ${q(HOST_SOCKET)} ${q(HOST_PID_FILE)} 2>/dev/null || true").exec()
-        }
-        return true
+        return stopExactPrivateRenderers()
+    }
+
+    private suspend fun stopExactPrivateRenderers(): Boolean {
+        var candidates = exactPrivateRenderers()
+        candidates.forEach { Shell.cmd("kill ${it.pid} 2>/dev/null || true").exec() }
+        if (candidates.isNotEmpty()) delay(200)
+
+        candidates = exactPrivateRenderers()
+        candidates.forEach { Shell.cmd("kill -9 ${it.pid} 2>/dev/null || true").exec() }
+        if (candidates.isNotEmpty()) delay(50)
+        if (exactPrivateRenderers().isNotEmpty()) return false
+
+        Shell.cmd("rm -f ${q(HOST_SOCKET)} ${q(HOST_PID_FILE)} 2>/dev/null || true").exec()
+        return !kernelSocketLive(HOST_SOCKET)
     }
 
     private suspend fun startHost(runtime: TermuxRuntime, logger: ContainerLogger?): HostLease? {
@@ -552,8 +568,8 @@ object VirGLFixManager {
                 logger?.i("[VIRGL] ✓ Reusing recovered renderer PID=${it.pid}")
                 return it
             }
-            logger?.w("[!] Private VirGL socket is live without a recoverable Manager lease; refusing to start a second renderer")
-            return null
+            logger?.w("[VIRGL] ! Retiring unrecoverable renderers on the Manager-private socket")
+            if (!stopExactPrivateRenderers()) return null
         }
 
         if (!stopOwnedHost(runtime)) {
@@ -734,17 +750,28 @@ object VirGLFixManager {
     private fun probeGuestRenderer(containerName: String): GuestProbe {
         val socket = VirGLContainerConfig.GUEST_SOCKET
         val payload = """
-            command -v glxinfo >/dev/null 2>&1 || { printf '%s\n' __SAAS_VIRGL_PROBE_UNAVAILABLE__; exit 0; }
             ${X11SessionCommands.socketSetup()}
-            out=${'$'}(DISPLAY=:0 GALLIUM_DRIVER=virpipe VTEST_SOCKET_NAME=${q(socket)} timeout 8 glxinfo -B 2>&1) || {
-                printf '%s\n' "${'$'}out" >&2
-                exit 80
-            }
-            printf '%s\n' "${'$'}out" | grep -Ei 'OpenGL renderer string:.*(virgl|virpipe)' >/dev/null 2>&1 || {
-                printf '%s\n' "${'$'}out" >&2
-                exit 81
-            }
-            printf '%s\n' __SAAS_VIRGL_RENDERER_READY__
+            available=0
+            diagnostic=''
+            if command -v glxinfo >/dev/null 2>&1; then
+                available=1
+                diagnostic=${'$'}(DISPLAY=:0 GALLIUM_DRIVER=virpipe VTEST_SOCKET_NAME=${q(socket)} timeout 8 glxinfo -B 2>&1 || true)
+                if printf '%s\n' "${'$'}diagnostic" | grep -Ei '(renderer string:|renderer:).*(virgl|virpipe)' >/dev/null 2>&1; then
+                    printf '%s\n' __SAAS_VIRGL_RENDERER_READY__
+                    exit 0
+                fi
+            fi
+            if command -v eglinfo >/dev/null 2>&1; then
+                available=1
+                diagnostic=${'$'}(DISPLAY=:0 GALLIUM_DRIVER=virpipe VTEST_SOCKET_NAME=${q(socket)} timeout 8 eglinfo -B 2>&1 || true)
+                if printf '%s\n' "${'$'}diagnostic" | grep -Ei 'renderer:.*(virgl|virpipe)' >/dev/null 2>&1; then
+                    printf '%s\n' __SAAS_VIRGL_RENDERER_READY__
+                    exit 0
+                fi
+            fi
+            [ "${'$'}available" -eq 1 ] || { printf '%s\n' __SAAS_VIRGL_PROBE_UNAVAILABLE__; exit 0; }
+            printf '%s\n' "${'$'}diagnostic" | tail -n 40 >&2
+            exit 81
         """.trimIndent()
         val result = runContainer(containerName, payload)
         return when {
