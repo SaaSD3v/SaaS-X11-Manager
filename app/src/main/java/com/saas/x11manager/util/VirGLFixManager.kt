@@ -324,16 +324,13 @@ object VirGLFixManager {
     }
 
     private fun writeLease(runtime: TermuxRuntime, lease: HostLease): Boolean = try {
-        @Suppress("UNUSED_VARIABLE")
-        val termuxUid = runtime.uid
         val temp = "$HOST_PID_FILE.tmp.${android.os.Process.myPid()}"
-        val result = Shell.cmd(
+        val payload =
             "printf '%s\\n' ${q("owner=$OWNER")} ${q("pid=${lease.pid}")} " +
                 "${q("start=${lease.startTime}")} > ${q(temp)} && " +
-                "chown 0:0 ${q(temp)} && chmod 600 ${q(temp)} && " +
-                "mv -f ${q(temp)} ${q(HOST_PID_FILE)}"
-        ).exec()
-        result.isSuccess
+                "chmod 600 ${q(temp)} && mv -f ${q(temp)} ${q(HOST_PID_FILE)}"
+        val result = Shell.cmd("su ${runtime.uid} -c ${q(payload)}").exec()
+        result.isSuccess && readLease() == lease
     } catch (_: Exception) {
         false
     }
@@ -378,22 +375,19 @@ object VirGLFixManager {
         null
     }
 
-    private fun processOwnsSocket(pid: Int, inode: String): Boolean = try {
-        val result = Shell.cmd("ls -l /proc/$pid/fd 2>/dev/null").exec()
-        result.isSuccess && result.out.any { it.contains("socket:[$inode]") }
-    } catch (_: Exception) {
-        false
-    }
-
     /**
-     * Rebuild a missing lease only when exactly one live root renderer can be
-     * proven to own the Manager socket inode and exact --socket-path.
+     * Rebuild a missing lease only when the Manager socket is live and exactly
+     * one root virgl_test_server_android has the exact Manager --socket-path.
+     *
+     * Do not depend on /proc/PID/fd socket-inode visibility here: Android SELinux
+     * and root-provider proc filtering can hide fd symlink targets even while
+     * /proc/net/unix and /proc/PID/cmdline remain authoritative and readable.
      */
     private suspend fun recoverLiveHostLease(
         runtime: TermuxRuntime,
         logger: ContainerLogger?
     ): HostLease? {
-        val inode = socketInode(HOST_SOCKET) ?: return null
+        if (socketInode(HOST_SOCKET) == null) return null
         val pidResult = try {
             Shell.cmd("pidof virgl_test_server_android 2>/dev/null || true").exec()
         } catch (_: Exception) {
@@ -409,15 +403,23 @@ object VirGLFixManager {
                 val cmdline = processCmdline(pid) ?: return@mapNotNull null
                 if (!cmdline.contains(VIRGL_BIN)) return@mapNotNull null
                 if (!cmdline.contains("--socket-path $HOST_SOCKET")) return@mapNotNull null
-                if (!processOwnsSocket(pid, inode)) return@mapNotNull null
                 val start = processStartTime(pid) ?: return@mapNotNull null
                 HostLease(pid, start)
             }
 
-        if (candidates.size != 1) return null
+        if (candidates.size != 1) {
+            logger?.w("[VIRGL] ! Lease recovery found ${candidates.size} exact renderer candidates")
+            return null
+        }
         val lease = candidates.single()
-        if (!ownedIdentity(runtime, lease)) return null
-        if (!writeLease(runtime, lease)) return null
+        if (!ownedIdentity(runtime, lease)) {
+            logger?.w("[VIRGL] ! Lease recovery candidate failed final identity verification")
+            return null
+        }
+        if (!writeLease(runtime, lease)) {
+            logger?.w("[VIRGL] ! Lease recovery could not persist virgl.pid as Termux UID ${runtime.uid}")
+            return null
+        }
         try {
             Shell.cmd("chmod 666 ${q(HOST_SOCKET)} 2>/dev/null || true").exec()
         } catch (_: Exception) {
