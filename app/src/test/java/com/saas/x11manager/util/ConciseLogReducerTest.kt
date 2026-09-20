@@ -30,6 +30,26 @@ class ConciseLogReducerTest {
     }
 
     @Test
+    fun virglLifecycleIsVisibleInConciseRuntimeLogs() {
+        val reducer = ConciseLogReducer()
+        val output = buildList {
+            addAll(reducer.reduce(Log.INFO, "--- VirGL Configuration ---"))
+            addAll(reducer.reduce(Log.INFO, "[VIRGL] ✓ Termux VirGL renderer binary is available"))
+            addAll(reducer.reduce(Log.INFO, "[+] VirGL host renderer ready (PID=4242)"))
+            addAll(reducer.reduce(Log.INFO, "[+] Private vtest socket: /data/data/com.termux/files/home/.saas-x11-manager/virgl/runtime/.virgl_test"))
+            addAll(reducer.reduce(Log.INFO, "[+] Guest OpenGL renderer confirmed through VirGL/virpipe"))
+            addAll(reducer.reduce(Log.INFO, "[+] VirGL ready for debian (host PID=4242)"))
+        }.map { it.second }
+
+        assertTrue(output.contains("[VIRGL] Preparing 3D acceleration"))
+        assertTrue(output.contains("[VIRGL] ✓ Termux VirGL renderer binary is available"))
+        assertTrue(output.contains("[VIRGL] ✓ VirGL host renderer ready (PID=4242)"))
+        assertTrue(output.any { it.startsWith("[VIRGL] ✓ Private vtest socket:") })
+        assertTrue(output.contains("[VIRGL] ✓ Guest OpenGL renderer confirmed through VirGL/virpipe"))
+        assertTrue(output.contains("[VIRGL] ✓ VirGL ready for debian (host PID=4242)"))
+    }
+
+    @Test
     fun droidSpacesAndPackageManagerNoiseAreDiscardedBeforeStorage() {
         val reducer = ConciseLogReducer()
         val output = buildList {
