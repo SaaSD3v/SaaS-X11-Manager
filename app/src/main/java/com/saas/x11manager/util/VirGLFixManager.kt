@@ -46,6 +46,32 @@ object VirGLFixManager {
     private data class TermuxRuntime(val uid: Int)
     private data class HostLease(val pid: Int, val startTime: String)
 
+    suspend fun supportedOptionalFlags(): Set<VirGLRuntimeFlag> = withContext(Dispatchers.IO) {
+        rendererHelp()?.let(VirGLRuntimeFlags::fromHelp).orEmpty()
+    }
+
+    private fun rendererHelp(): String? = try {
+        if (!Shell.cmd("test -x ${q(VIRGL_BIN)}").exec().isSuccess) return null
+        val result = Shell.cmd("${q(VIRGL_BIN)} --help 2>&1 || true").exec()
+        (result.out + result.err).joinToString("\n").takeIf(String::isNotBlank)
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun resolveRendererFlags(logger: ContainerLogger?): Set<VirGLRuntimeFlag> {
+        val configured = FixSettings.getVirGLRuntimeFlags(X11Application.instance)
+        val supported = rendererHelp()?.let(VirGLRuntimeFlags::fromHelp).orEmpty()
+        val effective = VirGLRuntimeFlags.sanitize(
+            configured.filterTo(linkedSetOf()) { it in supported }
+        )
+        val unsupported = VirGLRuntimeFlags.all.filter { it in configured && it !in supported }
+        if (unsupported.isNotEmpty()) {
+            logger?.w("[VIRGL] ! Ignoring unsupported renderer flags: ${unsupported.joinToString(" ") { it.argument }}")
+        }
+        logger?.i("[VIRGL] • Renderer flags: ${VirGLRuntimeFlags.describe(effective)}")
+        return effective
+    }
+
     suspend fun prepareBeforeGraphicalStart(
         containerName: String,
         logger: ContainerLogger? = null
@@ -123,7 +149,7 @@ object VirGLFixManager {
 
         val runtime = detectTermuxRuntime()
             ?: return@withContext failure(logger, "Termux was not detected")
-        val host = ensureHostRuntime(runtime, logger)
+        val host = ensureHostRuntime(runtime, containerName, logger)
             ?: return@withContext failure(
                 logger,
                 "Manager-owned VirGL renderer could not be started; container graphics were left unchanged"
@@ -174,7 +200,7 @@ object VirGLFixManager {
 
         val runtime = detectTermuxRuntime()
             ?: return@withContext fallback(logger, containerName, "Termux was not detected")
-        val host = ensureHostRuntime(runtime, logger)
+        val host = ensureHostRuntime(runtime, containerName, logger)
             ?: return@withContext fallback(logger, containerName, "VirGL host renderer is unavailable")
 
         if (!guestSocketVisible(containerName)) {
@@ -403,6 +429,25 @@ object VirGLFixManager {
         null
     }
 
+    private fun activeOptionalFlags(lease: HostLease): Set<VirGLRuntimeFlag>? {
+        val cmdline = processCmdline(lease.pid) ?: return null
+        val tokens = cmdline.split(Regex("\\s+")).toSet()
+        return VirGLRuntimeFlags.sanitize(
+            VirGLRuntimeFlags.all.filterTo(linkedSetOf()) { it.argument in tokens }
+        )
+    }
+
+    private suspend fun otherRunningVirGLContainers(containerName: String): List<String> {
+        val context = X11Application.instance
+        return ContainerManager.listContainers()
+            .filter { info ->
+                info.name != containerName &&
+                    info.isRunning &&
+                    FixSettings.isVirGLEnabled(context, info.name) &&
+                    FixSettings.isVirGLApplied(context, info.name)
+            }
+            .map { it.name }
+    }
     /**
      * Rebuild a missing lease only when the Manager socket is live and exactly
      * one root virgl_test_server_android has the exact Manager --socket-path.
@@ -514,7 +559,13 @@ object VirGLFixManager {
         return !kernelSocketLive(HOST_SOCKET)
     }
 
-    private suspend fun startHost(runtime: TermuxRuntime, logger: ContainerLogger?): HostLease? {
+    private suspend fun startHost(
+        runtime: TermuxRuntime,
+        optionalFlags: Set<VirGLRuntimeFlag>,
+        logger: ContainerLogger?
+    ): HostLease? {
+        val optionalArgs = VirGLRuntimeFlags.arguments(optionalFlags).joinToString(" ")
+        val optionalSuffix = if (optionalArgs.isEmpty()) "" else " $optionalArgs"
         val command = """
             : > ${q(HOST_LOG_FILE)} || exit 40
             rm -f ${q(HOST_SOCKET)} 2>/dev/null || true
@@ -533,7 +584,7 @@ object VirGLFixManager {
                 export PREFIX=${q(TERMUX_PREFIX)}
                 export TMPDIR=${q("$TERMUX_PREFIX/tmp")}
                 export PATH=${q("$TERMUX_PREFIX/bin:/system/bin:/system/xbin")}
-                exec ${q(VIRGL_BIN)} --multi-clients --socket-path ${q(HOST_SOCKET)}
+                exec ${q(VIRGL_BIN)} --multi-clients$optionalSuffix --socket-path ${q(HOST_SOCKET)}
             ) >>${q(HOST_LOG_FILE)} 2>&1 </dev/null &
 
             printf '%s\\n' "${'$'}!"
@@ -586,16 +637,38 @@ object VirGLFixManager {
     }
     private suspend fun ensureHostRuntime(
         runtime: TermuxRuntime,
+        containerName: String,
         logger: ContainerLogger?
     ): HostLease? {
         val totalStarted = System.nanoTime()
         logger?.i("[VIRGL] • Preflight: conventional DroidSpaces/Termux renderer")
         if (!ensureVirGLPackage(logger)) return null
         if (!prepareHostState(runtime)) return null
+        val desiredFlags = resolveRendererFlags(logger)
 
-        ownedHostReady(runtime)?.let {
-            logger?.i("[VIRGL] ✓ Reusing renderer PID=${it.pid} in ${(System.nanoTime() - totalStarted) / 1_000_000L}ms")
-            return it
+        ownedHostReady(runtime)?.let { lease ->
+            val activeFlags = activeOptionalFlags(lease).orEmpty()
+            if (activeFlags == desiredFlags) {
+                logger?.i("[VIRGL] ✓ Reusing renderer PID=${lease.pid} in ${(System.nanoTime() - totalStarted) / 1_000_000L}ms")
+                return lease
+            }
+
+            val blockers = otherRunningVirGLContainers(containerName)
+            if (blockers.isNotEmpty()) {
+                logger?.w("[VIRGL] ! Renderer flag change is pending; shared renderer is in use by ${blockers.joinToString(", ")}")
+                logger?.i("[VIRGL] • Active renderer flags: ${VirGLRuntimeFlags.describe(activeFlags)}")
+                logger?.i("[VIRGL] • Requested renderer flags: ${VirGLRuntimeFlags.describe(desiredFlags)}")
+                return lease
+            }
+
+            logger?.i(
+                "[VIRGL] • Renderer flags changed: ${VirGLRuntimeFlags.describe(activeFlags)} -> " +
+                    VirGLRuntimeFlags.describe(desiredFlags)
+            )
+            if (!stopOwnedHost(runtime)) {
+                logger?.w("[VIRGL] ! Could not restart the Manager-owned renderer to apply new flags")
+                return null
+            }
         }
 
         if (kernelSocketLive(HOST_SOCKET) && readLease() == null) {
@@ -614,7 +687,7 @@ object VirGLFixManager {
 
         logger?.i("[VIRGL] • Launching renderer as root with DroidSpaces SELinux context")
         val launchStarted = System.nanoTime()
-        val lease = startHost(runtime, logger) ?: return null
+        val lease = startHost(runtime, desiredFlags, logger) ?: return null
         if (!waitForHostSocket(lease) || !ownedIdentity(runtime, lease)) {
             logger?.w("[VIRGL] ! Renderer did not publish its private vtest socket within 2000ms")
             stopOwnedHost(runtime)

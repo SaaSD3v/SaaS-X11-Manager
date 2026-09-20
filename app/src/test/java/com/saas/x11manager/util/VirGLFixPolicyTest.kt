@@ -103,4 +103,30 @@ class VirGLFixPolicyTest {
                 )
         )
     }
+    @Test
+    fun optionalRendererFlagsAreCapabilityGatedAndHiddenWithTheFix() {
+        val manager = source("app/src/main/java/com/saas/x11manager/util/VirGLFixManager.kt")
+        val settings = source("app/src/main/java/com/saas/x11manager/util/FixSettings.kt")
+        val fixes = source("app/src/main/java/com/saas/x11manager/ui/screen/FixesDialog.kt")
+        val flags = source("app/src/main/java/com/saas/x11manager/util/VirGLRuntimeFlags.kt")
+
+        assertTrue(manager.contains("supportedOptionalFlags"))
+        assertTrue(manager.contains("--help 2>&1 || true"))
+        assertTrue(manager.contains("VirGLRuntimeFlags.fromHelp"))
+        assertTrue(manager.contains("VirGLRuntimeFlags.arguments"))
+        assertTrue(manager.contains("Renderer flags:"))
+        assertTrue(manager.contains("Renderer flag change is pending"))
+        assertTrue(settings.contains("VIRGL_FLAGS_KEY"))
+        assertTrue(settings.contains("getVirGLRuntimeFlags"))
+        assertTrue(fixes.contains("if (virglEnabled)"))
+        assertTrue(fixes.contains("VirGLFixManager.supportedOptionalFlags()"))
+        assertTrue(flags.contains("--use-egl-surfaceless"))
+        assertTrue(flags.contains("--use-gles"))
+        assertTrue(flags.contains("--use-glx"))
+        assertTrue(flags.contains("--no-fork"))
+        assertTrue(flags.contains("--no-loop-or-fork"))
+        assertFalse(flags.contains("--socket-path"))
+        assertFalse(flags.contains("--multi-clients"))
+    }
+
 }
