@@ -531,10 +531,6 @@ object PulseAudioFixManager {
         val command = """
             cfg=$cfg
             [ -f "${'$'}cfg" ] || exit 50
-            current=${'$'}(sed -n 's/^enable_pulseaudio=//p' "${'$'}cfg" 2>/dev/null | tail -n 1)
-            case '$value':"${'$'}current" in
-                1:1|1:true|1:yes|1:on|0:0|0:false|0:no|0:off) exit 0 ;;
-            esac
             tmp="${'$'}cfg.saas-x11-audio.${'$'}${'$'}"
             : > "${'$'}tmp" || exit 51
             found=0
@@ -561,7 +557,6 @@ object PulseAudioFixManager {
         val command = """
             cfg=$cfg
             [ -f "${'$'}cfg" ] || exit 50
-            grep -q '^enable_pulseaudio=' "${'$'}cfg" 2>/dev/null || exit 0
             tmp="${'$'}cfg.saas-x11-audio.${'$'}${'$'}"
             : > "${'$'}tmp" || exit 51
             while IFS= read -r line || [ -n "${'$'}line" ]; do
