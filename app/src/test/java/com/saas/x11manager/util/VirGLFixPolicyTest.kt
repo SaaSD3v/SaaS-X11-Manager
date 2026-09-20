@@ -52,6 +52,8 @@ class VirGLFixPolicyTest {
         assertTrue(manager.contains("candidates.size != 1"))
         assertTrue(manager.contains("su ${runtime.uid} -c"))
         assertTrue(manager.contains("readLease() == lease"))
+        assertTrue(manager.contains("processUid(lease.pid) != 0"))
+        assertTrue(manager.contains("cmdline.contains(\"--socket-path \$HOST_SOCKET\")"))
         assertTrue(manager.contains("Lease recovery could not persist virgl.pid"))
         assertTrue(manager.contains("chmod 666"))
         assertTrue(manager.contains("without a recoverable Manager lease"))
