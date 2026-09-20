@@ -10,6 +10,7 @@ object FixSettings {
     private const val VIRGL_PREFIX = "virgl::"
     private const val VIRGL_APPLIED_PREFIX = "virgl_applied::"
     private const val VIRGL_ORIGINAL_PREFIX = "virgl_original::"
+    private const val VIRGL_FLAGS_KEY = "virgl_runtime_flags"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -93,6 +94,22 @@ object FixSettings {
         .putString(VIRGL_ORIGINAL_PREFIX + containerName, state)
         .commit()
 
+    fun getVirGLRuntimeFlags(context: Context): Set<VirGLRuntimeFlag> =
+        VirGLRuntimeFlags.fromStored(
+            prefs(context).getStringSet(VIRGL_FLAGS_KEY, emptySet()).orEmpty()
+        )
+
+    fun setVirGLRuntimeFlagEnabled(
+        context: Context,
+        flag: VirGLRuntimeFlag,
+        enabled: Boolean
+    ): Boolean {
+        val updated = VirGLRuntimeFlags.withToggled(getVirGLRuntimeFlags(context), flag, enabled)
+        return prefs(context)
+            .edit()
+            .putStringSet(VIRGL_FLAGS_KEY, VirGLRuntimeFlags.toStored(updated))
+            .commit()
+    }
     fun clearVirGLRuntimeState(context: Context, containerName: String): Boolean =
         prefs(context)
             .edit()

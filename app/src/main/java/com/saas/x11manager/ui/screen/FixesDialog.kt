@@ -19,6 +19,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +32,9 @@ import androidx.compose.ui.unit.dp
 import com.saas.x11manager.ui.component.SettingsSection
 import com.saas.x11manager.ui.component.SettingsToggleRow
 import com.saas.x11manager.util.FixSettings
+import com.saas.x11manager.util.VirGLFixManager
+import com.saas.x11manager.util.VirGLRuntimeFlag
+import com.saas.x11manager.util.VirGLRuntimeFlags
 
 @Composable
 internal fun FixesScreen(
@@ -44,7 +48,21 @@ internal fun FixesScreen(
     var virglEnabled by remember(containerName) {
         mutableStateOf(FixSettings.isVirGLEnabled(context, containerName))
     }
+    var selectedVirglFlags by remember(containerName) {
+        mutableStateOf(FixSettings.getVirGLRuntimeFlags(context))
+    }
+    var supportedVirglFlags by remember(containerName) {
+        mutableStateOf<Set<VirGLRuntimeFlag>?>(null)
+    }
     var saveError by remember(containerName) { mutableStateOf(false) }
+
+    LaunchedEffect(containerName, virglEnabled) {
+        supportedVirglFlags = if (virglEnabled) {
+            VirGLFixManager.supportedOptionalFlags()
+        } else {
+            null
+        }
+    }
 
     BackHandler(onBack = onBack)
 
@@ -141,6 +159,60 @@ internal fun FixesScreen(
                 )
             }
 
+            if (virglEnabled) {
+                SettingsSection(
+                    title = "VirGL renderer flags",
+                    subtitle = "Optional host flags detected from the installed virglrenderer",
+                    icon = { Icon(Icons.Default.Build, contentDescription = null) }
+                ) {
+                    val supported = supportedVirglFlags
+                    if (supported == null) {
+                        Text(
+                            "Checking supported virglrenderer flags…",
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        val visibleFlags = VirGLRuntimeFlags.all.filter { it in supported }
+                        if (visibleFlags.isEmpty()) {
+                            Text(
+                                "The installed renderer did not report any optional flags managed by this screen.",
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            visibleFlags.forEach { flag ->
+                                SettingsToggleRow(
+                                    title = flag.title,
+                                    subtitle = "${flag.argument} · ${flag.description}",
+                                    checked = flag in selectedVirglFlags,
+                                    onCheckedChange = { requested ->
+                                        val saved = FixSettings.setVirGLRuntimeFlagEnabled(
+                                            context = context,
+                                            flag = flag,
+                                            enabled = requested
+                                        )
+                                        if (saved) {
+                                            selectedVirglFlags = FixSettings.getVirGLRuntimeFlags(context)
+                                            saveError = false
+                                        } else {
+                                            saveError = true
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                        Text(
+                            "These flags configure the shared Manager VirGL renderer. Incompatible GLX/EGL choices are resolved automatically; changes apply on the next safe renderer restart.",
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
             if (saveError) {
                 Text(
                     "Could not save this setting.",
