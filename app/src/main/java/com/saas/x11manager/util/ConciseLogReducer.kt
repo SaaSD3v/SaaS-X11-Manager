@@ -495,18 +495,23 @@ internal class ConciseLogReducer {
             body.contains(" session active on Monitor ", ignoreCase = true) ||
             body.startsWith("Integrated X11 session started", ignoreCase = true) ||
             body.startsWith("Integrated X11 ready", ignoreCase = true) ||
-            body.contains("VNC", ignoreCase = true)
+            body.contains("VNC", ignoreCase = true) ||
+            body.contains("VirGL", ignoreCase = true) ||
+            body.contains("virpipe", ignoreCase = true) ||
+            body.contains("vtest socket", ignoreCase = true)
     }
 
     private fun startsWithSemanticComponent(message: String): Boolean =
         message.startsWith("[X11]") || message.startsWith("[SESSION]") ||
             message.startsWith("[USER]") || message.startsWith("[AUDIO]") ||
             message.startsWith("[VNC]") || message.startsWith("[CONTAINER]") ||
-            message.startsWith("[INSTALL]") || message.startsWith("[MANAGER]")
+            message.startsWith("[INSTALL]") || message.startsWith("[VIRGL]") ||
+            message.startsWith("[MANAGER]")
 
     private fun sectionSummary(message: String): String? = when (message) {
         "--- Graphic Access Start ---" -> "[SESSION] Starting graphical access"
         "--- Audio Configuration ---" -> "[AUDIO] Preparing Android audio"
+        "--- VirGL Configuration ---" -> "[VIRGL] Preparing 3D acceleration"
         "--- Starting Integrated X11 Session ---" -> "[X11] Starting Integrated X11"
         "--- Integrated X11 Server Start ---" -> "[X11] Starting monitor server"
         "--- Graphic Session Synchronization ---" -> "[SESSION] Synchronizing graphical session"
@@ -636,6 +641,7 @@ internal class ConciseLogReducer {
     private fun inferComponent(body: String): String {
         val value = body.lowercase()
         return when {
+            value.contains("virgl") || value.contains("virpipe") || value.contains("vtest") -> "VIRGL"
             value.contains("pulseaudio") || value.contains("audio") || value.contains("aaudio") ||
                 value.contains("opensl") || (value.contains("listener") && value.contains("container client")) ||
                 (value.startsWith("port ") && value.contains("bound")) -> "AUDIO"
