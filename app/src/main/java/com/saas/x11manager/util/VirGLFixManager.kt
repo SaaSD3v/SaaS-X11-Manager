@@ -63,7 +63,7 @@ object VirGLFixManager {
         }
     }
 
-    private fun resolveRendererFlags(logger: ContainerLogger?): Set<VirGLRuntimeFlag> {
+    private suspend fun resolveRendererFlags(logger: ContainerLogger?): Set<VirGLRuntimeFlag> {
         val configured = FixSettings.getVirGLRuntimeFlags(X11Application.instance)
         val supported = rendererHelp()?.let(VirGLRuntimeFlags::fromHelp).orEmpty()
         val effective = VirGLRuntimeFlags.sanitize(
