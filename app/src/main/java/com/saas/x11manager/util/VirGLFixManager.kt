@@ -318,10 +318,21 @@ object VirGLFixManager {
         logger?.i("[VIRGL] ✓ Termux VirGL renderer binary is available")
         return true
     }
+    private fun parseProcStartTime(statLine: String): String? {
+        val close = statLine.lastIndexOf(") ")
+        if (close < 0) return null
+        val fields = statLine.substring(close + 2)
+            .trim()
+            .split(Regex("\\s+"))
+        return fields.getOrNull(19)?.takeIf { value ->
+            value.isNotEmpty() && value.all(Char::isDigit)
+        }
+    }
+
     private fun processStartTime(pid: Int): String? = try {
         val result = Shell.cmd("cat /proc/$pid/stat 2>/dev/null").exec()
         if (!result.isSuccess) null
-        else X11SessionManager.parseProcStartTime(result.out.joinToString(" "))
+        else parseProcStartTime(result.out.joinToString(" "))
     } catch (_: Exception) {
         null
     }
