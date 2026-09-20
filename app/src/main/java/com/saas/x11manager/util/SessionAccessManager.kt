@@ -122,11 +122,17 @@ object SessionAccessManager {
                     perf.stage("audio.prepare-host") {
                         prepareAudioBeforeGraphicalStart(containerName, logger)
                     }
+                    perf.stage("virgl.prepare-host") {
+                        VirGLFixManager.prepareBeforeGraphicalStart(containerName, logger)
+                    }
                     val startResult = perf.stage("x11.start-session") {
                         X11SessionManager.startX11Session(
                             containerName = containerName,
                             logger = logger,
                             beforeGraphicSession = {
+                                perf.stage("virgl.finalize-guest") {
+                                    VirGLFixManager.finalizeAfterContainerReady(containerName, logger)
+                                }
                                 perf.stage("audio.finalize-client") {
                                     finalizeAudioAfterContainerReady(containerName, logger)
                                 }
