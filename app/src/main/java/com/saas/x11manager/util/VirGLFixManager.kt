@@ -50,12 +50,17 @@ object VirGLFixManager {
         rendererHelp()?.let(VirGLRuntimeFlags::fromHelp).orEmpty()
     }
 
-    private fun rendererHelp(): String? = try {
-        if (!Shell.cmd("test -x ${q(VIRGL_BIN)}").exec().isSuccess) return null
-        val result = Shell.cmd("${q(VIRGL_BIN)} --help 2>&1 || true").exec()
-        (result.out + result.err).joinToString("\n").takeIf(String::isNotBlank)
-    } catch (_: Exception) {
-        null
+    private fun rendererHelp(): String? {
+        return try {
+            if (!Shell.cmd("test -x ${q(VIRGL_BIN)}").exec().isSuccess) {
+                null
+            } else {
+                val result = Shell.cmd("${q(VIRGL_BIN)} --help 2>&1 || true").exec()
+                (result.out + result.err).joinToString("\n").takeIf(String::isNotBlank)
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun resolveRendererFlags(logger: ContainerLogger?): Set<VirGLRuntimeFlag> {
