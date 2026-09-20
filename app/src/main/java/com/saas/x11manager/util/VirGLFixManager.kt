@@ -389,7 +389,7 @@ object VirGLFixManager {
      * Rebuild a missing lease only when exactly one live root renderer can be
      * proven to own the Manager socket inode and exact --socket-path.
      */
-    private fun recoverLiveHostLease(
+    private suspend fun recoverLiveHostLease(
         runtime: TermuxRuntime,
         logger: ContainerLogger?
     ): HostLease? {
