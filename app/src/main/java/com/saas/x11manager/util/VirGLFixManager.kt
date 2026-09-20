@@ -336,19 +336,13 @@ object VirGLFixManager {
     }
 
     private fun ownedIdentity(runtime: TermuxRuntime, lease: HostLease): Boolean {
+        @Suppress("UNUSED_VARIABLE")
+        val termuxUid = runtime.uid
         if (processStartTime(lease.pid) != lease.startTime) return false
-        val command = """
-            pid=${lease.pid}
-            [ -r "/proc/${'$'}pid/status" ] && [ -r "/proc/${'$'}pid/cmdline" ] || exit 1
-            uid=${'$'}(sed -n 's/^Uid:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "/proc/${'$'}pid/status" | sed -n '1p')
-            [ "${'$'}uid" = 0 ] || exit 1
-            cmd=${'$'}(tr '\\000' ' ' < "/proc/${'$'}pid/cmdline" 2>/dev/null || true)
-            case " ${'$'}cmd " in
-                *${q(VIRGL_BIN)}*--socket-path*${q(HOST_SOCKET)}*) exit 0 ;;
-                *) exit 1 ;;
-            esac
-        """.trimIndent()
-        return try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
+        if (processUid(lease.pid) != 0) return false
+        val cmdline = processCmdline(lease.pid) ?: return false
+        return cmdline.contains(VIRGL_BIN) &&
+            cmdline.contains("--socket-path $HOST_SOCKET")
     }
     private fun socketInode(path: String): String? = try {
         val result = Shell.cmd("cat /proc/net/unix 2>/dev/null").exec()
