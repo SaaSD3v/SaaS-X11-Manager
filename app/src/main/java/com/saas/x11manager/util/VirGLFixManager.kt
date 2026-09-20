@@ -353,13 +353,77 @@ object VirGLFixManager {
         """.trimIndent()
         return try { Shell.cmd(command).exec().isSuccess } catch (_: Exception) { false }
     }
-    private fun kernelSocketLive(path: String): Boolean = try {
+    private fun socketInode(path: String): String? = try {
         val result = Shell.cmd("cat /proc/net/unix 2>/dev/null").exec()
-        result.isSuccess &&
-            (UnixSocketTableParser.findInode(result.out, path) != null ||
-                UnixSocketTableParser.findInode(result.out, "@$path") != null)
+        if (!result.isSuccess) null
+        else UnixSocketTableParser.findInode(result.out, path)
+            ?: UnixSocketTableParser.findInode(result.out, "@$path")
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun kernelSocketLive(path: String): Boolean = socketInode(path) != null
+
+    private fun processUid(pid: Int): Int? = try {
+        val result = Shell.cmd("stat -c '%u' /proc/$pid 2>/dev/null").exec()
+        if (!result.isSuccess) null else result.out.firstOrNull()?.trim()?.toIntOrNull()
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun processCmdline(pid: Int): String? = try {
+        val result = Shell.cmd("tr '\\000' ' ' < /proc/$pid/cmdline 2>/dev/null").exec()
+        if (!result.isSuccess) null else result.out.joinToString(" ").trim().takeIf(String::isNotEmpty)
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun processOwnsSocket(pid: Int, inode: String): Boolean = try {
+        val result = Shell.cmd("ls -l /proc/$pid/fd 2>/dev/null").exec()
+        result.isSuccess && result.out.any { it.contains("socket:[$inode]") }
     } catch (_: Exception) {
         false
+    }
+
+    /**
+     * Rebuild a missing lease only when exactly one live root renderer can be
+     * proven to own the Manager socket inode and exact --socket-path.
+     */
+    private fun recoverLiveHostLease(
+        runtime: TermuxRuntime,
+        logger: ContainerLogger?
+    ): HostLease? {
+        val inode = socketInode(HOST_SOCKET) ?: return null
+        val pidResult = try {
+            Shell.cmd("pidof virgl_test_server_android 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+            return null
+        }
+        val candidates = pidResult.out
+            .flatMap { line -> line.trim().split(Regex("\\s+")) }
+            .mapNotNull(String::toIntOrNull)
+            .filter { it > 1 }
+            .distinct()
+            .mapNotNull { pid ->
+                if (processUid(pid) != 0) return@mapNotNull null
+                val cmdline = processCmdline(pid) ?: return@mapNotNull null
+                if (!cmdline.contains(VIRGL_BIN)) return@mapNotNull null
+                if (!cmdline.contains("--socket-path $HOST_SOCKET")) return@mapNotNull null
+                if (!processOwnsSocket(pid, inode)) return@mapNotNull null
+                val start = processStartTime(pid) ?: return@mapNotNull null
+                HostLease(pid, start)
+            }
+
+        if (candidates.size != 1) return null
+        val lease = candidates.single()
+        if (!ownedIdentity(runtime, lease)) return null
+        if (!writeLease(runtime, lease)) return null
+        try {
+            Shell.cmd("chmod 666 ${q(HOST_SOCKET)} 2>/dev/null || true").exec()
+        } catch (_: Exception) {
+        }
+        logger?.i("[VIRGL] ✓ Recovered Manager lease for existing renderer PID=${lease.pid}")
+        return lease
     }
 
     private fun ownedHostReady(runtime: TermuxRuntime): HostLease? {
@@ -488,7 +552,11 @@ object VirGLFixManager {
         }
 
         if (kernelSocketLive(HOST_SOCKET) && readLease() == null) {
-            logger?.w("[!] Private VirGL socket is live without a Manager lease; refusing to start a second renderer")
+            recoverLiveHostLease(runtime, logger)?.let {
+                logger?.i("[VIRGL] ✓ Reusing recovered renderer PID=${it.pid}")
+                return it
+            }
+            logger?.w("[!] Private VirGL socket is live without a recoverable Manager lease; refusing to start a second renderer")
             return null
         }
 
