@@ -16,6 +16,7 @@ permissions:
 env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_MAXSIZE: 2G
+  SAAS_NATIVE_LTO: "1"
 
 jobs:
   cold:
@@ -84,7 +85,7 @@ jobs:
           set -euo pipefail
           chmod +x gradlew
           start=$(date +%s)
-          ./gradlew testReleaseUnitTest assembleRelease             --build-cache --parallel --profile             -PVERSION_NAME=1.0.0-opt-test             -PVERSION_CODE=${{ github.run_number }}             2>&1 | tee gradle-opt-cold.log
+          ./gradlew testReleaseUnitTest assembleRelease             --build-cache --parallel --profile             -PcomposeCompilerReports=true             -PVERSION_NAME=1.0.0-opt-test             -PVERSION_CODE=${{ github.run_number }}             2>&1 | tee gradle-opt-cold.log
           end=$(date +%s)
           echo "$((end-start))" | tee build-seconds.txt
           echo "Cold Gradle build: $((end-start)) seconds"
@@ -119,8 +120,9 @@ jobs:
           cp -f apk-sizes.txt benchmark/ 2>/dev/null || true
           cp -f ccache-stats.txt benchmark/ 2>/dev/null || true
           cp -f app/build/outputs/mapping/release/mapping.txt benchmark/ 2>/dev/null || true
-          mkdir -p benchmark/gradle-profile
+          mkdir -p benchmark/gradle-profile benchmark/compose-compiler
           find build/reports/profile -maxdepth 1 -type f -exec cp -f {} benchmark/gradle-profile/ \; 2>/dev/null || true
+          find app/build/compose-compiler -type f -exec cp -f {} benchmark/compose-compiler/ \; 2>/dev/null || true
           find app/build/outputs -type f -name 'native-debug-symbols.zip' -exec cp -f {} benchmark/ \; 2>/dev/null || true
 
       - name: Upload cold benchmark
@@ -200,7 +202,7 @@ jobs:
           set -euo pipefail
           chmod +x gradlew
           start=$(date +%s)
-          ./gradlew testReleaseUnitTest assembleRelease             --build-cache --parallel --profile             -PVERSION_NAME=1.0.0-opt-test             -PVERSION_CODE=${{ github.run_number }}             2>&1 | tee gradle-opt-warm.log
+          ./gradlew testReleaseUnitTest assembleRelease             --build-cache --parallel --profile             -PcomposeCompilerReports=true             -PVERSION_NAME=1.0.0-opt-test             -PVERSION_CODE=${{ github.run_number }}             2>&1 | tee gradle-opt-warm.log
           end=$(date +%s)
           echo "$((end-start))" | tee build-seconds.txt
           echo "Warm Gradle build: $((end-start)) seconds"
@@ -230,8 +232,9 @@ jobs:
           cp -f apk-sizes.txt benchmark/ 2>/dev/null || true
           cp -f ccache-stats.txt benchmark/ 2>/dev/null || true
           cp -f app/build/outputs/mapping/release/mapping.txt benchmark/ 2>/dev/null || true
-          mkdir -p benchmark/gradle-profile
+          mkdir -p benchmark/gradle-profile benchmark/compose-compiler
           find build/reports/profile -maxdepth 1 -type f -exec cp -f {} benchmark/gradle-profile/ \; 2>/dev/null || true
+          find app/build/compose-compiler -type f -exec cp -f {} benchmark/compose-compiler/ \; 2>/dev/null || true
           find app/build/outputs -type f -name 'native-debug-symbols.zip' -exec cp -f {} benchmark/ \; 2>/dev/null || true
 
       - name: Upload warm benchmark
@@ -243,3 +246,102 @@ jobs:
           path: |
             benchmark/
             app/build/outputs/apk/release/*.apk
+
+
+  runtime-profile:
+    name: Generate Baseline Profile and run macrobenchmarks
+    needs: warm
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Enable KVM for Gradle Managed Device
+        run: |
+          set -euo pipefail
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: temurin
+
+      - name: Set up Gradle caches
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      - name: Restore native CMake state
+        uses: actions/cache@v4
+        with:
+          path: |
+            embedded-lorie/.cxx
+            embedded-avnc/.cxx
+          key: ${{ runner.os }}-native-cxx-opt-v1-${{ hashFiles('embedded-lorie/build.gradle', 'embedded-avnc/build.gradle', 'third_party/termux-x11/lorie/src/main/cpp/**', 'third_party/avnc/app/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-native-cxx-opt-v1-
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ${{ runner.os }}-ccache-opt-v1-${{ hashFiles('embedded-lorie/build.gradle', 'embedded-avnc/build.gradle', 'third_party/termux-x11/lorie/src/main/cpp/**', 'third_party/avnc/app/CMakeLists.txt', 'third_party/avnc/extern/**') }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-opt-v1-
+
+      - name: Install ccache
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ccache
+          echo "CCACHE_EXECUTABLE=$(command -v ccache)" >> "$GITHUB_ENV"
+          ccache --max-size "$CCACHE_MAXSIZE"
+
+      - name: Generate Baseline and Startup Profiles
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:generateBaselineProfile             --build-cache --parallel             -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.enabledRules=BaselineProfile             -PVERSION_NAME=1.0.0-opt-profile             -PVERSION_CODE=${{ github.run_number }}
+
+      - name: Discover managed-device benchmark task
+        run: |
+          set -euo pipefail
+          ./gradlew :baseline-profile:tasks --all --console=plain > benchmark-tasks.txt
+          task=$(grep -E 'pixel6Api34.*BenchmarkReleaseAndroidTest' benchmark-tasks.txt | awk '{print $1}' | head -n1 || true)
+          if [ -n "$task" ]; then
+            echo "MACROBENCHMARK_TASK=:baseline-profile:$task" >> "$GITHUB_ENV"
+            echo "Discovered macrobenchmark task: $task"
+          else
+            echo "::warning::Managed-device macrobenchmark task was not found; profile generation still remains valid."
+          fi
+
+      - name: Run startup and frame macrobenchmarks
+        if: ${{ env.MACROBENCHMARK_TASK != '' }}
+        run: |
+          set -euo pipefail
+          ./gradlew "$MACROBENCHMARK_TASK"             --build-cache --parallel             -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.enabledRules=Macrobenchmark             -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.fullTracing.enable=true             -PVERSION_NAME=1.0.0-opt-profile             -PVERSION_CODE=${{ github.run_number }}
+
+      - name: Collect runtime performance artifacts
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          mkdir -p runtime-performance
+          cp -f benchmark-tasks.txt runtime-performance/ 2>/dev/null || true
+          find app/src -path '*generated/baselineProfiles/*' -type f -exec cp -f {} runtime-performance/ \; 2>/dev/null || true
+          find app/build -path '*baselineProfiles*' -type f -exec cp -f {} runtime-performance/ \; 2>/dev/null || true
+          find baseline-profile/build -type f \( -name '*.json' -o -name '*.trace' -o -name '*.perfetto-trace' -o -name '*baseline-prof.txt' -o -name '*startup-prof.txt' \) -exec cp -f {} runtime-performance/ \; 2>/dev/null || true
+          ccache --show-stats --verbose > runtime-performance/ccache-stats.txt 2>/dev/null || true
+
+      - name: Upload runtime performance results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-performance-${{ github.run_id }}
+          if-no-files-found: warn
+          path: runtime-performance/
