@@ -42,6 +42,7 @@ fun HomeScreen(
     var generalSettingsContainer by remember { mutableStateOf<String?>(null) }
     var pendingUserContainer by remember { mutableStateOf<ContainerInfo?>(null) }
     var pendingAccessContainer by remember { mutableStateOf<ContainerInfo?>(null) }
+    var pendingAccessFreeMode by remember { mutableStateOf(false) }
     val activeOperation = viewModel.runningOperationContainer
     val startScope = rememberCoroutineScope()
 
@@ -59,6 +60,7 @@ fun HomeScreen(
             onConfirm = { selection ->
                 GraphicSessionUserManager.selectForNextStart(container.name, selection)
                 pendingUserContainer = null
+                pendingAccessFreeMode = false
                 pendingAccessContainer = container
             }
         )
@@ -73,15 +75,24 @@ fun HomeScreen(
             containerName = container.name,
             port = port,
             initialMode = initialMode,
-            onDismiss = { pendingAccessContainer = null },
+            freeMode = pendingAccessFreeMode,
+            onDismiss = {
+                pendingAccessContainer = null
+                pendingAccessFreeMode = false
+            },
             onBack = {
                 pendingAccessContainer = null
-                pendingUserContainer = container
+                if (pendingAccessFreeMode) {
+                    pendingAccessFreeMode = false
+                } else {
+                    pendingUserContainer = container
+                }
             },
             onConfirm = { mode, vncPort, adbLocalPort, password ->
                 val runtimeMode = RuntimeAccessPolicy.normalize(mode)
                 VncSettings.setAccessMode(context, container.name, runtimeMode)
                 pendingAccessContainer = null
+                pendingAccessFreeMode = false
                 viewModel.startSession(
                     container = container,
                     accessMode = runtimeMode,
@@ -182,7 +193,8 @@ fun HomeScreen(
                                 onStartX11 = {
                                     startScope.launch {
                                         if (viewModel.isFreeMode(container.name)) {
-                                            viewModel.startFree(container)
+                                            pendingAccessFreeMode = true
+                                            pendingAccessContainer = container
                                         } else {
                                             pendingUserContainer = container
                                         }
