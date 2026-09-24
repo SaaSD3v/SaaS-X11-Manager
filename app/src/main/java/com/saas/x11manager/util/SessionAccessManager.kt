@@ -288,10 +288,10 @@ object SessionAccessManager {
                 logger?.i("[FREE] • Monitor: ${slot.monitorNumber}")
                 logger?.i("[FREE] • Display assigned to this container: ${slot.displayName}")
                 logger?.i("[FREE] • Container socket: /tmp/.X11-unix/X${slot.number}")
-                logger?.i("[FREE] • Set DISPLAY: export DISPLAY=${slot.displayName}")
-                logger?.i("[FREE] • Remove DISPLAY: unset DISPLAY")
-                logger?.i("[FREE] • Replace DISPLAY in one command: unset DISPLAY; export DISPLAY=${slot.displayName}")
                 logger?.i("[FREE] ✓ Empty monitor is ready")
+                logger?.i("[FREE] • Remove DISPLAY: ${FreeX11Runtime.unsetCommand()}")
+                logger?.i("[FREE] • Replace DISPLAY in one command: ${FreeX11Runtime.replaceCommand(slot.displayName)}")
+                logger?.i("[FREE] • Set DISPLAY: ${FreeX11Runtime.exportCommand(slot.displayName)}")
                 true
             }
 
