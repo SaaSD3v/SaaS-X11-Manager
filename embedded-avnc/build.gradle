@@ -9,6 +9,18 @@ def generatedAssets = layout.buildDirectory.dir('generated/embeddedAvnc/assets')
 def ccacheExecutable = System.getenv('CCACHE_EXECUTABLE')
 def enableNativeLto = System.getenv('SAAS_NATIVE_LTO') == '1'
 def nativePgoProfile = System.getenv('SAAS_NATIVE_PGO_PROFDATA')?.trim()
+def nativeCompileOptimizationFlags = []
+def nativeLinkOptimizationFlags = []
+if (enableNativeLto) {
+    nativeCompileOptimizationFlags << '-flto=thin'
+    nativeLinkOptimizationFlags << '-flto=thin'
+    nativeLinkOptimizationFlags << '-fuse-ld=lld'
+}
+if (nativePgoProfile) {
+    nativeCompileOptimizationFlags << "-fprofile-instr-use=${nativePgoProfile}"
+    nativeCompileOptimizationFlags << '-Wno-profile-instr-unprofiled'
+    nativeLinkOptimizationFlags << "-fprofile-instr-use=${nativePgoProfile}"
+}
 
 android {
     namespace 'com.gaurav.avnc'
@@ -29,15 +41,16 @@ android {
                               "-DCMAKE_CXX_COMPILER_LAUNCHER=${ccacheExecutable}",
                               "-DCMAKE_ASM_COMPILER_LAUNCHER=${ccacheExecutable}"
                 }
-                if (enableNativeLto) {
-                    arguments "-DCMAKE_POLICY_DEFAULT_CMP0069=NEW",
-                              "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON"
+                if (!nativeCompileOptimizationFlags.isEmpty()) {
+                    def compileFlags = nativeCompileOptimizationFlags.join(' ')
+                    arguments "-DCMAKE_C_FLAGS=${compileFlags}",
+                              "-DCMAKE_CXX_FLAGS=${compileFlags}"
                 }
-                if (nativePgoProfile) {
-                    def pgoFlags = "-fprofile-instr-use=${nativePgoProfile} -Wno-profile-instr-unprofiled"
-                    arguments "-DCMAKE_C_FLAGS=${pgoFlags}",
-                              "-DCMAKE_CXX_FLAGS=${pgoFlags}",
-                              "-DCMAKE_SHARED_LINKER_FLAGS=${pgoFlags}"
+                if (!nativeLinkOptimizationFlags.isEmpty()) {
+                    def linkFlags = nativeLinkOptimizationFlags.join(' ')
+                    arguments "-DCMAKE_SHARED_LINKER_FLAGS=${linkFlags}",
+                              "-DCMAKE_MODULE_LINKER_FLAGS=${linkFlags}",
+                              "-DCMAKE_EXE_LINKER_FLAGS=${linkFlags}"
                 }
                 targets 'native-vnc'
             }
