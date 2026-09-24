@@ -44,7 +44,6 @@ internal object FreeX11Runtime {
 
         logger?.i("[FREE] Raw X11 transport ready")
         logger?.i("[FREE] Container socket: $containerSocket")
-        logger?.i("[FREE] Run inside the container: ${exportCommand(displayName)}")
         true
     }
 
