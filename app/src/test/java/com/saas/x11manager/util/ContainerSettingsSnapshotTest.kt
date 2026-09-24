@@ -66,6 +66,22 @@ class ContainerSettingsSnapshotTest {
     }
 
     @Test
+    fun parsesExplicitFreeModeWithoutTreatingItAsInstalledSession() {
+        val snapshot = ContainerSettingsManager.parseSnapshot(
+            listOf(
+                "platform=ubuntu",
+                "init_system=systemd",
+                "graphic_session=none",
+                "free_mode=1"
+            )
+        )
+
+        assertTrue(snapshot.freeMode)
+        assertEquals(GraphicSession.NONE, snapshot.graphicSession)
+        assertTrue(snapshot.installedSessions.isEmpty())
+    }
+
+    @Test
     fun malformedOrUnknownValuesRemainUnconfigured() {
         val snapshot = ContainerSettingsManager.parseSnapshot(
             listOf(
