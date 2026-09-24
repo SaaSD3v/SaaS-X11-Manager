@@ -272,6 +272,19 @@ class ManagedDisplayViewModel : ViewModel() {
                             containerSocket = "/tmp/.X11-unix/X${monitor.slot.number}",
                             state = if (graphicSessionReady) "ready" else "server ready; graphical session not confirmed"
                         )
+                        if (monitor.containerName != null) {
+                            val freeMode = ContainerSettingsManager.readSnapshot(
+                                monitor.containerName,
+                                forceRefresh = true
+                            ).freeMode
+                            if (freeMode) {
+                                DisplayLogDetails.freeEnvironment(
+                                    logger = logger,
+                                    component = "X11",
+                                    displayName = monitor.displayName
+                                )
+                            }
+                        }
                         if (!graphicSessionReady) {
                             message =
                                 "${monitor.slot.describe()} is running, but its graphic session did not start"
