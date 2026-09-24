@@ -50,6 +50,11 @@ internal object FreeX11Runtime {
     internal fun exportCommand(displayName: String): String =
         "export DISPLAY=$displayName"
 
+    internal fun unsetCommand(): String = "unset DISPLAY"
+
+    internal fun replaceCommand(displayName: String): String =
+        "${unsetCommand()}; ${exportCommand(displayName)}"
+
     private fun shellQuote(value: String): String =
         "'" + value.replace("'", "'\\''") + "'"
 }
