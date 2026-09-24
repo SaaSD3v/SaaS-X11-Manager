@@ -24,6 +24,7 @@ import com.saas.x11manager.util.ContainerInfo
 import com.saas.x11manager.util.GraphicSessionUserManager
 import com.saas.x11manager.util.RuntimeAccessPolicy
 import com.saas.x11manager.util.VncSettings
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -42,6 +43,7 @@ fun HomeScreen(
     var pendingUserContainer by remember { mutableStateOf<ContainerInfo?>(null) }
     var pendingAccessContainer by remember { mutableStateOf<ContainerInfo?>(null) }
     val activeOperation = viewModel.runningOperationContainer
+    val startScope = rememberCoroutineScope()
 
     generalSettingsContainer?.let { containerName ->
         GeneralSettingsDialog(
@@ -177,7 +179,15 @@ fun HomeScreen(
                                         if (expandedContainerName.value == container.name) null else container.name
                                 },
                                 onShowLogs = { viewModel.showLogs(container) },
-                                onStartX11 = { pendingUserContainer = container },
+                                onStartX11 = {
+                                    startScope.launch {
+                                        if (viewModel.isFreeMode(container.name)) {
+                                            viewModel.startFree(container)
+                                        } else {
+                                            pendingUserContainer = container
+                                        }
+                                    }
+                                },
                                 onStop = { viewModel.stopContainer(container) },
                                 onEdit = {
                                     expandedContainerName.value = null
