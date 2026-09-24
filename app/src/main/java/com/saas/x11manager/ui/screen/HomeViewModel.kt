@@ -232,14 +232,32 @@ class HomeViewModel : ViewModel() {
                 runtimeRefreshJob?.join()
                 val profile = withContext(Dispatchers.IO) { ContainerSettingsManager.readSnapshot(container.name, forceRefresh = true) }
                 val session = profile.graphicSession
-                if (session == null || session == GraphicSession.NONE) {
+                if ((session == null || session == GraphicSession.NONE) && !profile.freeMode) {
                     logger.e("[-] No configured graphic session found for ${container.name}")
                     logger.e("[-] Open Edit container and configure a graphic session first")
                     return@launch
                 }
-                val runtimeMode = RuntimeAccessPolicy.normalize(accessMode)
+                val effectiveSession = session ?: GraphicSession.NONE
+                val runtimeMode = if (profile.freeMode) {
+                    SessionAccessMode.INTEGRATED_X11
+                } else {
+                    RuntimeAccessPolicy.normalize(accessMode)
+                }
                 logger.i("[CTX] Access method: ${runtimeMode.label}")
-                val started = SessionAccessManager.start(container.name, profile.platform, session, runtimeMode, vncPort, vncAdbLocalPort, vncPassword, logger)
+                if (profile.freeMode) {
+                    logger.i("[FREE] Raw monitor mode selected; managed desktop/session startup is skipped")
+                }
+                val started = SessionAccessManager.start(
+                    containerName = container.name,
+                    platform = profile.platform,
+                    session = effectiveSession,
+                    accessMode = runtimeMode,
+                    vncPort = vncPort,
+                    vncAdbLocalPort = vncAdbLocalPort,
+                    vncPassword = vncPassword,
+                    logger = logger,
+                    freeMode = profile.freeMode
+                )
                 val (running, pid) = ContainerManager.checkContainerStatusPublic(container.name)
                 if (running) updateContainerState(container.name, ContainerStatus.RUNNING, pid)
                 if (!started) logger.e("[-] ${runtimeMode.label} start was not fully confirmed")
