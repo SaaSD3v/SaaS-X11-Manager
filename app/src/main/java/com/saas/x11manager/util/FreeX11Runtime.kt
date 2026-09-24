@@ -28,22 +28,22 @@ internal object FreeX11Runtime {
                     "sh -c ${shellQuote(command)}"
             ).exec()
         } catch (e: Exception) {
-            logger?.e("[FREE] Could not prepare raw X11 transport: ${e.message}")
+            logger?.e("[X11] ✗ Could not prepare Free raw transport: ${e.message}")
             return@withContext false
         }
 
         if (!result.isSuccess) {
-            logger?.e("[FREE] Raw X11 socket preparation failed (exit ${result.code})")
+            logger?.e("[X11] ✗ Free raw socket preparation failed (exit ${result.code})")
             (result.out + result.err)
                 .map(String::trim)
                 .filter(String::isNotEmpty)
                 .takeLast(12)
-                .forEach { logger?.w("[FREE] $it") }
+                .forEach { logger?.w("[X11] ! $it") }
             return@withContext false
         }
 
-        logger?.i("[FREE] Raw X11 transport ready")
-        logger?.i("[FREE] Container socket: $containerSocket")
+        logger?.i("[X11] ✓ Free raw transport ready")
+        logger?.i("[X11] • Container socket: $containerSocket")
         true
     }
 
