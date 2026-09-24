@@ -44,6 +44,7 @@ internal fun GraphicAccessDialog(
     containerName: String,
     port: Int,
     initialMode: SessionAccessMode,
+    freeMode: Boolean = false,
     onDismiss: () -> Unit,
     onBack: () -> Unit,
     onConfirm: (SessionAccessMode, Int, Int, String?) -> Unit
@@ -112,7 +113,11 @@ internal fun GraphicAccessDialog(
                 Text("Choose access method", style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "$containerName · choose how to start this session",
+                    if (freeMode) {
+                        "$containerName · Free mode · choose the empty display transport"
+                    } else {
+                        "$containerName · choose how to start this session"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -120,14 +125,22 @@ internal fun GraphicAccessDialog(
 
                 AccessChoice(
                     title = "Integrated X11",
-                    subtitle = "Start the Manager X11 monitor and graphical session now.",
+                    subtitle = if (freeMode) {
+                        "Start the Manager X11 monitor with no desktop, window manager or compositor."
+                    } else {
+                        "Start the Manager X11 monitor and graphical session now."
+                    },
                     selected = selectedMode == SessionAccessMode.INTEGRATED_X11,
                     onClick = { selectedMode = SessionAccessMode.INTEGRATED_X11 }
                 )
                 Spacer(Modifier.height(10.dp))
                 AccessChoice(
                     title = "VNC",
-                    subtitle = "Start a standalone TigerVNC virtual display. Integrated X11 stays off.",
+                    subtitle = if (freeMode) {
+                        "Start a standalone empty TigerVNC virtual display. Integrated X11 stays off."
+                    } else {
+                        "Start a standalone TigerVNC virtual display. Integrated X11 stays off."
+                    },
                     selected = selectedMode == SessionAccessMode.VNC,
                     onClick = { selectedMode = SessionAccessMode.VNC }
                 )
@@ -149,7 +162,11 @@ internal fun GraphicAccessDialog(
                         ) {
                             Text("TigerVNC", style = MaterialTheme.typography.titleSmall)
                             Text(
-                                "Server port: $port · The selected Linux user will own the desktop session.",
+                                if (freeMode) {
+                                    "Server port: $port · Free mode starts only the TigerVNC display; no desktop session is launched."
+                                } else {
+                                    "Server port: $port · The selected Linux user will own the desktop session."
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
