@@ -24,7 +24,8 @@ object VncConnectionGuide {
         desktopUser: String,
         session: GraphicSession,
         password: String?,
-        logger: ContainerLogger?
+        logger: ContainerLogger?,
+        freeMode: Boolean = false
     ) {
         if (logger == null) return
 
@@ -49,8 +50,12 @@ object VncConnectionGuide {
         logger.i(ACTIVE_SUMMARY_BEGIN)
         logger.i("[VNC] ✓ Standalone VNC is ready")
         logger.i("[CONTAINER] • Container: $containerName")
-        logger.i("[USER] • Desktop user: $desktopUser")
-        logger.i("[SESSION] • Desktop: ${session.label}")
+        if (freeMode) {
+            logger.i("[FREE] • Desktop/session: none")
+        } else {
+            logger.i("[USER] • Desktop user: $desktopUser")
+            logger.i("[SESSION] • Desktop: ${session.label}")
+        }
         displayName?.let { logger.i("[VNC] • Virtual X display: $it") }
 
         logger.i(LogLayout.SPACER)
@@ -144,6 +149,17 @@ object VncConnectionGuide {
             logger.i("[VNC] • Overrides: none")
         } else {
             overrides.forEach { value -> logger.i("[VNC] • $value") }
+        }
+
+        if (freeMode && displayName != null) {
+            logger.i(LogLayout.SPACER)
+            logger.i("[FREE] Raw display environment")
+            logger.i("[CONTAINER] • Container: $containerName")
+            logger.i("[FREE] • Display assigned to this container: $displayName")
+            logger.i("[FREE] • Set DISPLAY: export DISPLAY=$displayName")
+            logger.i("[FREE] • Remove DISPLAY: unset DISPLAY")
+            logger.i("[FREE] • Replace DISPLAY in one command: unset DISPLAY; export DISPLAY=$displayName")
+            logger.i("[FREE] ✓ Empty VNC monitor is ready")
         }
 
         logger.i(LogLayout.SPACER)
