@@ -194,10 +194,16 @@ object GraphicSessionUserManager {
             if command -v apk >/dev/null 2>&1; then
                 adduser -D $user
             elif command -v adduser >/dev/null 2>&1; then
+                ADDUSER_NAME_OPT=
+                if adduser --help 2>&1 | grep -q -- '--allow-bad-names'; then
+                    ADDUSER_NAME_OPT=--allow-bad-names
+                elif adduser --help 2>&1 | grep -q -- '--force-badname'; then
+                    ADDUSER_NAME_OPT=--force-badname
+                fi
                 if adduser --help 2>&1 | grep -q -- '--comment'; then
-                    adduser --disabled-password --comment '' $user
+                    adduser $ADDUSER_NAME_OPT --disabled-password --comment '' $user
                 else
-                    adduser --disabled-password --gecos '' $user
+                    adduser $ADDUSER_NAME_OPT --disabled-password --gecos '' $user
                 fi
             elif command -v useradd >/dev/null 2>&1; then
                 useradd -m $user
