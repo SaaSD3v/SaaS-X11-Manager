@@ -110,11 +110,18 @@ class ManagedDisplayViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 logger.i("--- Deleting X11 monitor ---")
-                logger.i("[*] Monitor: ${monitor.monitorNumber}")
-                logger.i("[*] Display: ${monitor.displayName}")
-                logger.i("[*] Runtime: ${monitor.slot.runtimeDir}")
-                logger.i("[*] Socket: ${monitor.slot.socketFile}")
-                logger.i("")
+                DisplayLogDetails.x11(
+                    logger = logger,
+                    containerName = monitor.containerName,
+                    monitorNumber = monitor.monitorNumber,
+                    displayName = monitor.displayName,
+                    pid = monitor.pid,
+                    processName = monitor.slot.processName,
+                    runtimeDir = monitor.slot.runtimeDir,
+                    hostSocket = monitor.slot.socketFile,
+                    containerSocket = "/tmp/.X11-unix/X${monitor.slot.number}",
+                    state = "delete requested"
+                )
 
                 if (monitor.containerName != null) {
                     message = "${monitor.slot.describe()} is reserved by ${monitor.containerName}"
@@ -174,11 +181,18 @@ class ManagedDisplayViewModel : ViewModel() {
             try {
                 if (monitor.status == X11ServerStatus.Running) {
                     logger.i("--- Stopping X11 monitor ---")
-                    logger.i("[*] Monitor: ${monitor.monitorNumber}")
-                    logger.i("[*] Display: ${monitor.displayName}")
-                    monitor.pid?.let { logger.i("[*] PID: $it") }
-                    monitor.containerName?.let { logger.i("[*] Container remains running: $it") }
-                    logger.i("")
+                    DisplayLogDetails.x11(
+                        logger = logger,
+                        containerName = monitor.containerName,
+                        monitorNumber = monitor.monitorNumber,
+                        displayName = monitor.displayName,
+                        pid = monitor.pid,
+                        processName = monitor.slot.processName,
+                        runtimeDir = monitor.slot.runtimeDir,
+                        hostSocket = monitor.slot.socketFile,
+                        containerSocket = "/tmp/.X11-unix/X${monitor.slot.number}",
+                        state = "stop requested"
+                    )
 
                     if (monitor.containerName != null) {
                         val sessionStopped = X11SessionManager.stopContainerGraphicSession(
@@ -214,14 +228,18 @@ class ManagedDisplayViewModel : ViewModel() {
                     }
                 } else {
                     logger.i("--- Starting X11 monitor ---")
-                    logger.i("[*] Monitor: ${monitor.monitorNumber}")
-                    logger.i("[*] Display: ${monitor.displayName}")
-                    logger.i("[*] Process: ${monitor.slot.processName}")
-                    logger.i("[*] Runtime: ${monitor.slot.runtimeDir}")
-                    logger.i("[*] Socket: ${monitor.slot.socketFile}")
-                    logger.i("")
-
                     val seed = monitor.containerName ?: seedContainer
+                    DisplayLogDetails.x11(
+                        logger = logger,
+                        containerName = seed,
+                        monitorNumber = monitor.monitorNumber,
+                        displayName = monitor.displayName,
+                        processName = monitor.slot.processName,
+                        runtimeDir = monitor.slot.runtimeDir,
+                        hostSocket = monitor.slot.socketFile,
+                        containerSocket = "/tmp/.X11-unix/X${monitor.slot.number}",
+                        state = "start requested"
+                    )
                     val started = X11SessionManager.startIntegratedServer(
                         displaySlot = monitor.slot,
                         containerName = seed,
@@ -241,9 +259,19 @@ class ManagedDisplayViewModel : ViewModel() {
                         } else {
                             persistManualDisplayNumbers(manualDisplayNumbers - monitor.slot.number)
                         }
-                        logger.i("")
                         logger.i("[+] ${monitor.slot.describe()} is ready")
-                        logger.i("[+] PID: ${started.getOrNull()}")
+                        DisplayLogDetails.x11(
+                            logger = logger,
+                            containerName = monitor.containerName ?: seed,
+                            monitorNumber = monitor.monitorNumber,
+                            displayName = monitor.displayName,
+                            pid = started.getOrNull(),
+                            processName = monitor.slot.processName,
+                            runtimeDir = monitor.slot.runtimeDir,
+                            hostSocket = monitor.slot.socketFile,
+                            containerSocket = "/tmp/.X11-unix/X${monitor.slot.number}",
+                            state = if (graphicSessionReady) "ready" else "server ready; graphical session not confirmed"
+                        )
                         if (!graphicSessionReady) {
                             message =
                                 "${monitor.slot.describe()} is running, but its graphic session did not start"
