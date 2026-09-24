@@ -198,7 +198,7 @@ object SessionAccessManager {
         logger?.i("[FREE] Display: ${Constants.X11_DISPLAY}")
         logger?.i("[FREE] Host socket directory: ${Constants.X11_SOCK_DIR}")
         logger?.i("[FREE] Empty monitor ready; launch anything you want from the container")
-        true
+        return true
     }
 
     private suspend fun finalizeAudioAfterContainerReady(
