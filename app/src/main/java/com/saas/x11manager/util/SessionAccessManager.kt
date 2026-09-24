@@ -275,7 +275,7 @@ object SessionAccessManager {
         logger?.i("[FREE] Host runtime: ${slot.runtimeDir}")
         logger?.i("[FREE] Host socket: ${slot.socketFile}")
         logger?.i("[FREE] Empty monitor ready; launch anything you want from the container")
-        true
+        return true
     }
 
     private suspend fun ensureIntegratedMonitorStoppedForVnc(
