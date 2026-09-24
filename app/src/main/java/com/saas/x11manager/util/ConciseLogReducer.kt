@@ -323,6 +323,67 @@ internal class ConciseLogReducer {
             message.startsWith("[CTX] Display:") || message.startsWith("[CTX] Host display:") ->
                 level to "[X11] • Display: $value"
 
+            message.startsWith("[CTX] Process:") ||
+                message.startsWith("[CTX] Process nice-name:") ->
+                level to "[X11] • Process: $value"
+
+            message.startsWith("[CTX] Runtime:") ->
+                level to "[X11] • Runtime: $value"
+
+            message.startsWith("[CTX] Socket:") ->
+                level to "[X11] • Socket: $value"
+
+            message.startsWith("[CTX] Lock:") ->
+                level to "[X11] • Lock: $value"
+
+            message.startsWith("[CTX] Server log:") ->
+                level to "[X11] • Server log: $value"
+
+            message.startsWith("[CTX] Existing server PIDs:") ->
+                level to "[X11] • Existing PID(s): $value"
+
+            message.startsWith("[CTX] Existing live socket:") ->
+                level to "[X11] • Existing socket: $value"
+
+            message.startsWith("[CTX] Live server PIDs:") ->
+                level to "[X11] • Server PID(s): $value"
+
+            message.startsWith("[CTX] Server lease:") ->
+                level to "[X11] • Server lease: $value"
+
+            message.startsWith("[CTX] Start duration:") ->
+                level to "[X11] • Start time: $value"
+
+            message.startsWith("[CTX] Total start duration:") ->
+                level to "[X11] • Total start time: $value"
+
+            message.startsWith("[CTX] Host socket directory:") ->
+                level to "[X11] • Host socket directory: $value"
+
+            message.startsWith("[CTX] Container socket directory:") ->
+                level to "[X11] • Container socket directory: $value"
+
+            message.startsWith("[CTX] Required bind:") ->
+                level to "[X11] • Bind: $value"
+
+            message.startsWith("[CTX] VNC port:") ->
+                level to "[VNC] • Server port: $value"
+
+            message.startsWith("[CTX] VNC X display:") ->
+                level to "[VNC] • Virtual X display: $value"
+
+            message.startsWith("[CTX] VNC resolution:") ->
+                level to "[VNC] • Resolution: $value"
+
+            message.startsWith("[CTX] VNC depth:") ->
+                level to "[VNC] • Color depth: $value"
+
+            message.startsWith("[CTX] Mode:") ->
+                level to "[VNC] • Mode: $value"
+
+            message.startsWith("[CTX] Graphic session:") ->
+                level to "[SESSION] • Desktop: $value"
+
             message.startsWith("[CTX] Assigned display before stop:") ->
                 level to "[X11] • Assigned display: $value"
 
@@ -510,6 +571,7 @@ internal class ConciseLogReducer {
 
     private fun sectionSummary(message: String): String? = when (message) {
         "--- Graphic Access Start ---" -> "[SESSION] Starting graphical access"
+        "--- Free Display Start ---" -> "[SESSION] Starting Free display"
         "--- Audio Configuration ---" -> "[AUDIO] Preparing Android audio"
         "--- VirGL Configuration ---" -> "[VIRGL] Preparing 3D acceleration"
         "--- Starting Integrated X11 Session ---" -> "[X11] Starting Integrated X11"
