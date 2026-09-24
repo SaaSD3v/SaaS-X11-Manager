@@ -172,10 +172,7 @@ class ManagedDisplayViewModel : ViewModel() {
                             )
                             val freeOwner = owner ?: seedContainer
                             if (freeOwner != null) {
-                                val freeMode = ContainerSettingsManager.readSnapshot(
-                                    freeOwner,
-                                    forceRefresh = true
-                                ).freeMode
+                                val freeMode = home.isFreeMode(freeOwner)
                                 if (freeMode) {
                                     DisplayLogDetails.freeEnvironment(
                                         logger = logger,
