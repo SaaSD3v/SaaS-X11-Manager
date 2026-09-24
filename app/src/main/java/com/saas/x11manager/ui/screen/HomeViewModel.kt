@@ -250,7 +250,7 @@ class HomeViewModel : ViewModel() {
                 val runtimeMode = RuntimeAccessPolicy.normalize(accessMode)
                 logger.i("[CTX] Access method: ${runtimeMode.label}")
                 if (profile.freeMode) {
-                    logger.i("[FREE] Raw monitor mode selected; managed desktop/session startup is skipped")
+                    logger.i("[SESSION] Free mode selected; managed desktop/session startup is skipped")
                 }
 
                 val started = SessionAccessManager.start(
