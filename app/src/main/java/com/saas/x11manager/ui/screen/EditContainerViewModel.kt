@@ -65,6 +65,8 @@ class EditContainerViewModel : ViewModel() {
         private set
     var graphicSession by mutableStateOf(GraphicSession.NONE)
         private set
+    var freeMode by mutableStateOf(false)
+        private set
     var containerCapabilities by mutableStateOf<ContainerCapabilities?>(null)
         private set
 
@@ -131,6 +133,7 @@ class EditContainerViewModel : ViewModel() {
     private var containerName = ""
     private var cacheDir: File? = null
     private var savedGraphicSession = GraphicSession.NONE
+    private var savedFreeMode = false
 
     fun load(containerName: String, cacheDir: File) {
         if (loaded && this.containerName == containerName) return
@@ -163,11 +166,13 @@ class EditContainerViewModel : ViewModel() {
                 val selected = snapshot.graphicSession?.takeIf { session ->
                     session == GraphicSession.NONE || installed[session] == true
                 } ?: GraphicSession.NONE
-                selected to installed
+                Triple(selected, installed, snapshot.freeMode)
             }
 
             graphicSession = sessionState.first
             savedGraphicSession = graphicSession
+            freeMode = sessionState.third
+            savedFreeMode = freeMode
             installedSessions.clear()
             sessionState.second.forEach { (session, installed) ->
                 installedSessions[session] = installed
@@ -315,6 +320,68 @@ class EditContainerViewModel : ViewModel() {
         if (isPreparingWizard || isInstallingSession) return
         pendingWizardProtocol = protocol
         wizardStage = ConfigurationWizardStage.CATALOG_SELECTION
+    }
+
+    fun selectWizardFreeMode() {
+        if (isPreparingWizard || isInstallingSession || isSaving) return
+        val cd = cacheDir ?: run {
+            wizardError = "cacheDir not set"
+            return
+        }
+
+        wizardStage = ConfigurationWizardStage.HIDDEN
+        wizardStarted = false
+        pendingWizardSession = null
+        isSaving = true
+        saveError = null
+        logs = listOf(Log.INFO to "[FREE] Enabling raw X11 monitor mode...")
+
+        viewModelScope.launch {
+            val previousSession = savedGraphicSession
+            val previousFreeMode = savedFreeMode
+            try {
+                val settingsSaved = withContext(Dispatchers.IO) {
+                    ContainerSettingsManager.enableFreeMode(containerName, cd)
+                }
+                if (!settingsSaved) {
+                    saveError = "Error: Failed to save Free mode"
+                    logs = logs + (Log.ERROR to "[-] Could not persist Free mode")
+                    return@launch
+                }
+
+                val startupDisabled = ContainerManager.disableManagedGraphicSession(containerName)
+                if (!startupDisabled) {
+                    withContext(Dispatchers.IO) {
+                        if (previousFreeMode) {
+                            ContainerSettingsManager.enableFreeMode(containerName, cd)
+                        } else {
+                            ContainerSettingsManager.setGraphicSession(containerName, previousSession, cd)
+                        }
+                    }
+                    if (!previousFreeMode) {
+                        ContainerManager.updateInitSystem(containerName, initSystem, cd)
+                    }
+                    saveError = "Error: Could not disable managed desktop startup"
+                    logs = logs + (Log.ERROR to "[-] Free mode was rolled back")
+                    return@launch
+                }
+
+                graphicSession = GraphicSession.NONE
+                savedGraphicSession = GraphicSession.NONE
+                freeMode = true
+                savedFreeMode = true
+                installResult = "OK: Free mode enabled"
+                installResultSession = null
+                logs = logs + (Log.INFO to "[+] Free mode enabled — no desktop, WM or compositor will be started")
+                logs = logs + (Log.INFO to "[+] Start from Home to receive a raw X11 monitor")
+                saveError = "OK: Free mode enabled"
+            } catch (e: Exception) {
+                saveError = "Error: ${e.message}"
+                logs = logs + (Log.ERROR to "[-] ${e.message}")
+            } finally {
+                isSaving = false
+            }
+        }
     }
 
     fun selectWizardCatalogMode(mode: GraphicSessionCatalogMode) {
@@ -469,6 +536,8 @@ class EditContainerViewModel : ViewModel() {
                         initSystem = selectedInitSystem
                         graphicSession = session
                         savedGraphicSession = session
+                        freeMode = false
+                        savedFreeMode = false
                         installedSessions[session] = true
 
                         val markerSaved = withContext(Dispatchers.IO) {
@@ -681,6 +750,7 @@ class EditContainerViewModel : ViewModel() {
 
                 logs = logs + (Log.INFO to "[*] Saving configuration...")
                 val previousSession = savedGraphicSession
+                val previousFreeMode = savedFreeMode
                 val sessionSaved = withContext(Dispatchers.IO) {
                     ContainerSettingsManager.setGraphicSession(containerName, graphicSession, cd)
                 }
@@ -694,6 +764,8 @@ class EditContainerViewModel : ViewModel() {
                 val initOk = ContainerManager.updateInitSystem(containerName, initSystem, cd)
                 if (initOk) {
                     savedGraphicSession = graphicSession
+                    savedFreeMode = false
+                    freeMode = false
                     logs = logs + (Log.INFO to "[+] Init System and Graphic Session saved")
                     saveError = "OK: Config saved"
                     val info = ContainerManager.getContainerInfo(containerName)
@@ -703,9 +775,14 @@ class EditContainerViewModel : ViewModel() {
                     }
                 } else {
                     withContext(Dispatchers.IO) {
-                        ContainerSettingsManager.setGraphicSession(containerName, previousSession, cd)
+                        if (previousFreeMode) {
+                            ContainerSettingsManager.enableFreeMode(containerName, cd)
+                        } else {
+                            ContainerSettingsManager.setGraphicSession(containerName, previousSession, cd)
+                        }
                     }
                     graphicSession = previousSession
+                    freeMode = previousFreeMode
                     logs = logs + (Log.ERROR to "[-] Failed to apply Init System / Graphic Session")
                     saveError = "Error: Failed to apply configuration"
                 }
