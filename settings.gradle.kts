@@ -16,6 +16,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "X11Manager"
 include(":app")
+include(":baseline-profile")
 
 // The upstream Termux:X11 repository stays pinned and untouched. This local wrapper uses
 // its Java/resources/CMake sources with the Gradle/AGP versions of this project.
