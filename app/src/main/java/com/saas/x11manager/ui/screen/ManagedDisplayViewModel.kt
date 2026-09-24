@@ -170,6 +170,20 @@ class ManagedDisplayViewModel : ViewModel() {
                                 containerSocket = "/tmp/.X11-unix/X0",
                                 state = if (succeeded) "ready" else "server ready; graphical session not confirmed"
                             )
+                            val freeOwner = owner ?: seedContainer
+                            if (freeOwner != null) {
+                                val freeMode = ContainerSettingsManager.readSnapshot(
+                                    freeOwner,
+                                    forceRefresh = true
+                                ).freeMode
+                                if (freeMode) {
+                                    DisplayLogDetails.freeEnvironment(
+                                        logger = logger,
+                                        component = "X11",
+                                        displayName = Constants.X11_DISPLAY
+                                    )
+                                }
+                            }
                             if (!succeeded) message = "X11 is running, but its desktop could not be confirmed"
                         }
                     }
