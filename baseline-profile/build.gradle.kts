@@ -12,6 +12,7 @@ android {
         minSdk = 26
         targetSdk = 34
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunnerArguments["androidx.benchmark.fullTracing.enable"] = "true"
     }
 
     targetProjectPath = ":app"
@@ -35,4 +36,6 @@ dependencies {
     implementation("androidx.test:runner:1.7.0")
     implementation("androidx.test.ext:junit:1.3.0")
     implementation("androidx.test.uiautomator:uiautomator:2.4.0")
+    implementation("androidx.tracing:tracing-perfetto:1.0.0")
+    implementation("androidx.tracing:tracing-perfetto-binary:1.0.0")
 }
