@@ -42,12 +42,16 @@ object VncServerManager {
         port: Int,
         password: String? = null,
         logger: ContainerLogger? = null,
-        beforeGraphicSession: (suspend () -> Unit)? = null
+        beforeGraphicSession: (suspend () -> Unit)? = null,
+        freeMode: Boolean = false
     ): VncStartResult = withContext(Dispatchers.IO) {
         logger?.i("--- Starting External TigerVNC Session ---")
         logger?.i("")
         logger?.i("[CTX] Container: $containerName")
-        logger?.i("[CTX] Graphic session: ${session.label}")
+        logger?.i(
+            if (freeMode) "[CTX] Graphic session: Free (none)"
+            else "[CTX] Graphic session: ${session.label}"
+        )
         logger?.i("[CTX] VNC port: $port")
         logger?.i("[CTX] Mode: standalone virtual display")
 
@@ -82,7 +86,8 @@ object VncServerManager {
                     session = session,
                     needsMirror = false,
                     password = password,
-                    logger = logger
+                    logger = logger,
+                    freeMode = freeMode
                 )) {
                 return@withContext VncStartResult(false, port)
             }
@@ -136,31 +141,39 @@ object VncServerManager {
             }
 
             beforeGraphicSession?.invoke()
-            val sessionLaunch =
-                "DISPLAY=${shellQuote(displayName)} " +
-                    "nohup $SESSION_SCRIPT >$SESSION_LOG 2>&1 & " +
-                    "session_pid=\$!; " +
-                    VncRuntimeSafety.recordLease(STATE_DIR, "session", "session_pid")
-            if (!runContainerCommand(
-                    containerName,
-                    "Launching ${session.label} on VNC $displayName",
-                    sessionLaunch,
-                    logger
-                )) {
-                logContainerFileTail(containerName, SESSION_LOG, logger)
-                stopManagedVnc(containerName, logger)
-                return@withContext VncStartResult(false, port, displayName)
-            }
 
-            // The previous path slept a fixed 750 ms and then checked only the
-            // TCP port. Verify the recorded server/session identities plus LISTEN
-            // state across a short stability window inside one container command.
-            if (!isStandaloneRuntimeStable(containerName, port)) {
-                logger?.e("[-] TigerVNC or its graphical session became unstable after launch")
-                logContainerFileTail(containerName, SERVER_LOG, logger)
-                logContainerFileTail(containerName, SESSION_LOG, logger)
-                stopManagedVnc(containerName, logger)
-                return@withContext VncStartResult(false, port, displayName)
+            if (freeMode) {
+                if (!isStandaloneServerOnlyStable(containerName, port)) {
+                    logger?.e("[-] TigerVNC server became unstable after launch")
+                    logContainerFileTail(containerName, SERVER_LOG, logger)
+                    stopManagedVnc(containerName, logger)
+                    return@withContext VncStartResult(false, port, displayName)
+                }
+                logger?.i("[FREE] TigerVNC display is ready with no desktop, WM or compositor")
+            } else {
+                val sessionLaunch =
+                    "DISPLAY=${shellQuote(displayName)} " +
+                        "nohup $SESSION_SCRIPT >$SESSION_LOG 2>&1 & " +
+                        "session_pid=\$!; " +
+                        VncRuntimeSafety.recordLease(STATE_DIR, "session", "session_pid")
+                if (!runContainerCommand(
+                        containerName,
+                        "Launching ${session.label} on VNC $displayName",
+                        sessionLaunch,
+                        logger
+                    )) {
+                    logContainerFileTail(containerName, SESSION_LOG, logger)
+                    stopManagedVnc(containerName, logger)
+                    return@withContext VncStartResult(false, port, displayName)
+                }
+
+                if (!isStandaloneRuntimeStable(containerName, port)) {
+                    logger?.e("[-] TigerVNC or its graphical session became unstable after launch")
+                    logContainerFileTail(containerName, SERVER_LOG, logger)
+                    logContainerFileTail(containerName, SESSION_LOG, logger)
+                    stopManagedVnc(containerName, logger)
+                    return@withContext VncStartResult(false, port, displayName)
+                }
             }
 
             logger?.i("[+] VNC server started successfully")
@@ -301,7 +314,8 @@ object VncServerManager {
         session: GraphicSession,
         needsMirror: Boolean,
         password: String?,
-        logger: ContainerLogger?
+        logger: ContainerLogger?,
+        freeMode: Boolean = false
     ): Boolean {
         if (password != null && !VncSettings.isValidPassword(password)) {
             logger?.e(
@@ -374,7 +388,7 @@ object VncServerManager {
             logger?.i("[VNC] • Authentication: none for this Start")
         }
 
-        if (!needsMirror) {
+        if (!needsMirror && !freeMode) {
             val launcher = sessionLauncher(session)
             val writeLauncher =
                 "mkdir -p /usr/local/bin /root/.vnc && " +
@@ -547,6 +561,12 @@ object VncServerManager {
         probeContainer(
             containerName,
             VncRuntimeSafety.stableStandaloneRuntime(STATE_DIR, port)
+        )
+
+    private fun isStandaloneServerOnlyStable(containerName: String, port: Int): Boolean =
+        probeContainer(
+            containerName,
+            VncRuntimeSafety.stableStandaloneServerOnly(STATE_DIR, port)
         )
 
     private fun isPortListening(containerName: String, port: Int): Boolean =
