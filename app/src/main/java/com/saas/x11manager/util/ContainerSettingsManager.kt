@@ -14,7 +14,8 @@ data class ContainerSettingsSnapshot(
     val initSystem: InitSystem? = null,
     val platform: ContainerPlatform? = null,
     val graphicSession: GraphicSession? = null,
-    val installedSessions: Set<GraphicSession> = emptySet()
+    val installedSessions: Set<GraphicSession> = emptySet(),
+    val freeMode: Boolean = false
 ) {
     fun isGraphicSessionInstalled(graphicSession: GraphicSession): Boolean =
         graphicSession != GraphicSession.NONE && graphicSession in installedSessions
@@ -34,6 +35,7 @@ object ContainerSettingsManager {
     private const val INIT_SYSTEM_KEY = "init_system"
     private const val PLATFORM_KEY = "platform"
     private const val GRAPHIC_SESSION_KEY = "graphic_session"
+    private const val FREE_MODE_KEY = "free_mode"
     private const val SNAPSHOT_CACHE_WINDOW_NANOS = 1_000_000_000L
 
     private data class CachedSnapshot(
@@ -83,12 +85,29 @@ object ContainerSettingsManager {
         containerName: String,
         graphicSession: GraphicSession,
         cacheDir: File
-    ): Boolean = setValue(
+    ): Boolean = setValues(
         containerName = containerName,
-        key = GRAPHIC_SESSION_KEY,
-        value = graphicSession.name.lowercase(),
+        values = linkedMapOf(
+            GRAPHIC_SESSION_KEY to graphicSession.name.lowercase(),
+            FREE_MODE_KEY to "0"
+        ),
         cacheDir = cacheDir
     )
+
+    fun enableFreeMode(
+        containerName: String,
+        cacheDir: File
+    ): Boolean = setValues(
+        containerName = containerName,
+        values = linkedMapOf(
+            GRAPHIC_SESSION_KEY to GraphicSession.NONE.name.lowercase(),
+            FREE_MODE_KEY to "1"
+        ),
+        cacheDir = cacheDir
+    )
+
+    fun isFreeMode(containerName: String): Boolean =
+        readSnapshot(containerName).freeMode
 
     fun setProfile(
         containerName: String,
@@ -107,7 +126,8 @@ object ContainerSettingsManager {
                 InitSystem.SYSTEMD -> "systemd"
                 InitSystem.OPENRC -> "openrc"
             },
-            GRAPHIC_SESSION_KEY to graphicSession.name.lowercase()
+            GRAPHIC_SESSION_KEY to graphicSession.name.lowercase(),
+            FREE_MODE_KEY to "0"
         ),
         cacheDir = cacheDir
     )
@@ -196,6 +216,10 @@ object ContainerSettingsManager {
                 it.name.equals(saved.trim(), ignoreCase = true)
             }
         }
+        val freeMode = when (values[FREE_MODE_KEY]?.lowercase()) {
+            "1", "true", "yes" -> true
+            else -> false
+        }
         val installedSessions = GraphicSession.entries
             .asSequence()
             .filter { it != GraphicSession.NONE }
@@ -211,7 +235,8 @@ object ContainerSettingsManager {
             initSystem = initSystem,
             platform = platform,
             graphicSession = graphicSession,
-            installedSessions = installedSessions
+            installedSessions = installedSessions,
+            freeMode = freeMode
         )
     }
 
