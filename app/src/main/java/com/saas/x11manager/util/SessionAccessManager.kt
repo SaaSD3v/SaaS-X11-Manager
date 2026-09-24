@@ -253,7 +253,7 @@ object SessionAccessManager {
         logger?.i("--- Free Display Start ---")
         logger?.i("[CTX] Container: $containerName")
         logger?.i("[CTX] Access method: ${accessMode.label}")
-        logger?.i("[FREE] No desktop, window manager or compositor will be started")
+        logger?.i("[SESSION] Free mode starts no managed desktop, window manager or compositor")
 
         return when (accessMode) {
             SessionAccessMode.INTEGRATED_X11, SessionAccessMode.BOTH -> {
@@ -268,7 +268,7 @@ object SessionAccessManager {
                         finalizeAudioAfterContainerReady(containerName, logger)
                     }
                 ) ?: run {
-                    logger?.e("[FREE] Integrated X11 transport failed")
+                    logger?.e("[-] Integrated X11 transport failed")
                     return false
                 }
 
@@ -281,21 +281,31 @@ object SessionAccessManager {
                 )
                 if (!rawReady) return false
 
+                val userPreparation = GraphicSessionUserManager.prepareFreeForStart(
+                    containerName = containerName,
+                    logger = logger
+                ) ?: return false
+
                 val serverPid = X11SessionManager.getServerPid(slot)
-                logger?.i(LogLayout.SPACER)
-                logger?.i("[FREE] Active raw display")
-                logger?.i("[CONTAINER] • Container: $containerName")
-                logger?.i("[FREE] • Transport: Integrated X11")
-                logger?.i("[FREE] • Monitor: ${slot.monitorNumber}")
-                logger?.i("[FREE] • Display assigned to this container: ${slot.displayName}")
-                serverPid?.let { logger?.i("[FREE] • Server PID: $it") }
-                logger?.i("[FREE] • Host runtime: ${slot.runtimeDir}")
-                logger?.i("[FREE] • Host socket: ${slot.socketFile}")
-                logger?.i("[FREE] • Container socket: /tmp/.X11-unix/X${slot.number}")
-                logger?.i("[FREE] ✓ Empty monitor is ready")
-                logger?.i("[FREE] • Remove DISPLAY: ${FreeX11Runtime.unsetCommand()}")
-                logger?.i("[FREE] • Replace DISPLAY in one command: ${FreeX11Runtime.replaceCommand(slot.displayName)}")
-                logger?.i("[FREE] • Set DISPLAY: ${FreeX11Runtime.exportCommand(slot.displayName)}")
+                DisplayLogDetails.x11(
+                    logger = logger,
+                    containerName = containerName,
+                    monitorNumber = slot.monitorNumber,
+                    displayName = slot.displayName,
+                    pid = serverPid,
+                    processName = slot.processName,
+                    runtimeDir = slot.runtimeDir,
+                    hostSocket = slot.socketFile,
+                    containerSocket = "/tmp/.X11-unix/X${slot.number}",
+                    state = "ready"
+                )
+                logger?.i("[USER] • Free user: ${userPreparation.selection.userName}")
+                logger?.i("[SESSION] ✓ Free Integrated X11 display is ready")
+                DisplayLogDetails.freeEnvironment(
+                    logger = logger,
+                    component = "X11",
+                    displayName = slot.displayName
+                )
                 true
             }
 
@@ -337,27 +347,38 @@ object SessionAccessManager {
                         freeMode = true
                     )
                     vncStarted = result.success
-                    if (result.success) {
-                        VncConnectionGuide.logAfterSuccessfulStart(
-                            containerName = containerName,
-                            port = vncPort,
-                            adbLocalPort = vncAdbLocalPort,
-                            displayName = result.displayName,
-                            desktopUser = "not used",
-                            session = GraphicSession.NONE,
-                            password = vncPassword,
-                            logger = logger,
-                            freeMode = true
-                        )
-                    } else {
+                    if (!result.success) {
                         VncConnectionGuide.logAdbForwardRestartRecovery(
                             port = vncPort,
                             localPort = vncAdbLocalPort,
                             logger = logger,
                             onlyIfTroubleshooting = true
                         )
+                        return false
                     }
-                    result.success
+
+                    val userPreparation = GraphicSessionUserManager.prepareFreeForStart(
+                        containerName = containerName,
+                        logger = logger
+                    )
+                    if (userPreparation == null) {
+                        VncServerManager.stopManagedVnc(containerName, logger)
+                        vncStarted = false
+                        return false
+                    }
+
+                    VncConnectionGuide.logAfterSuccessfulStart(
+                        containerName = containerName,
+                        port = vncPort,
+                        adbLocalPort = vncAdbLocalPort,
+                        displayName = result.displayName,
+                        desktopUser = userPreparation.selection.userName,
+                        session = GraphicSession.NONE,
+                        password = vncPassword,
+                        logger = logger,
+                        freeMode = true
+                    )
+                    true
                 } finally {
                     if (!vncStarted) {
                         VncX11MonitorReservation.rollbackAfterFailedVncStart(
