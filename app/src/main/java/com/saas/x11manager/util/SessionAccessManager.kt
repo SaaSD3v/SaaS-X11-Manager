@@ -204,12 +204,15 @@ object SessionAccessManager {
                 )
                 if (!rawReady) return false
 
+                val serverPid = X11SessionManager.getServerPid()
                 logger?.i(LogLayout.SPACER)
                 logger?.i("[FREE] Active raw display")
                 logger?.i("[CONTAINER] • Container: $containerName")
                 logger?.i("[FREE] • Transport: Integrated X11")
                 logger?.i("[FREE] • Monitor: 1")
                 logger?.i("[FREE] • Display assigned to this container: ${Constants.X11_DISPLAY}")
+                serverPid?.let { logger?.i("[FREE] • Server PID: $it") }
+                logger?.i("[FREE] • Host socket: ${Constants.X11_SOCK_FILE}")
                 logger?.i("[FREE] • Container socket: /tmp/.X11-unix/X0")
                 logger?.i("[FREE] ✓ Empty monitor is ready")
                 logger?.i("[FREE] • Remove DISPLAY: ${FreeX11Runtime.unsetCommand()}")
