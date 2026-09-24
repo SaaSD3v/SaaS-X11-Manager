@@ -162,6 +162,72 @@ object GraphicSessionUserManager {
         GraphicSessionUserPreparation(requested, previous != requested)
     }
 
+    suspend fun prepareFreeForStart(
+        containerName: String,
+        logger: ContainerLogger? = null
+    ): GraphicSessionUserPreparation? = withContext(Dispatchers.IO) {
+        val info = ContainerManager.getContainerInfo(containerName) ?: run {
+            logger?.e("[-] Could not resolve container while preparing Free user")
+            return@withContext null
+        }
+        if (!info.isRunning) {
+            logger?.e("[-] Container must be running before preparing the Free user")
+            return@withContext null
+        }
+
+        val persisted = readPersistedSelection(info)
+        val requested = selectedForStart[containerName]
+            ?: persisted
+            ?: GraphicSessionUserSelection.ROOT
+        if (!isValidUserName(requested.userName)) {
+            logger?.e("[-] Invalid Free user name: ${requested.userName}")
+            return@withContext null
+        }
+
+        val user = shellQuote(requested.userName)
+        val create = if (requested.createIfMissing) "1" else "0"
+        val ensureUser = """
+            if awk -F: -v user=$user '$1 == user { found=1 } END { exit found ? 0 : 1 }' /etc/passwd; then
+                exit 0
+            fi
+            [ $create = 1 ] || exit 42
+            if command -v apk >/dev/null 2>&1; then
+                adduser -D $user
+            elif command -v adduser >/dev/null 2>&1; then
+                if adduser --help 2>&1 | grep -q -- '--comment'; then
+                    adduser --disabled-password --comment '' $user
+                else
+                    adduser --disabled-password --gecos '' $user
+                fi
+            elif command -v useradd >/dev/null 2>&1; then
+                useradd -m $user
+            else
+                exit 43
+            fi
+        """.trimIndent()
+
+        val ensured = runContainerCommand(containerName, ensureUser)
+        if (!ensured.isSuccess) {
+            val reason = when (ensured.code) {
+                42 -> "Selected Linux user does not exist: ${requested.userName}"
+                43 -> "No supported Linux user creation command is available"
+                else -> "Could not prepare Linux user ${requested.userName}"
+            }
+            logger?.e("[-] $reason")
+            return@withContext null
+        }
+
+        if (!writePersistedSelection(info, requested)) {
+            logger?.e("[-] Could not persist Free user selection for $containerName")
+            return@withContext null
+        }
+        consumePreparedSelection(containerName, requested)
+
+        logger?.i("[CTX] Graphic user: ${requested.userName}")
+        logger?.i("[USER] ✓ Free display user ready")
+        GraphicSessionUserPreparation(requested, persisted != requested)
+    }
+
     private fun readPersistedSelection(info: ContainerInfo): GraphicSessionUserSelection? {
         val lines = if (info.isRunning) {
             runContainerCommand(info.name, "cat $SETTINGS_FILE 2>/dev/null").out
