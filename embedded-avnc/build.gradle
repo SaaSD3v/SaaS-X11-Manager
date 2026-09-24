@@ -7,6 +7,8 @@ def upstreamCommit = 'f30406514ef8880097e960da7dc1d8dc4c713d7f'
 def generatedUpstreamJava = layout.buildDirectory.dir('generated/embeddedAvnc/upstreamJava')
 def generatedAssets = layout.buildDirectory.dir('generated/embeddedAvnc/assets')
 def ccacheExecutable = System.getenv('CCACHE_EXECUTABLE')
+def enableNativeLto = System.getenv('SAAS_NATIVE_LTO') == '1'
+def nativePgoProfile = System.getenv('SAAS_NATIVE_PGO_PROFDATA')?.trim()
 
 android {
     namespace 'com.gaurav.avnc'
@@ -26,6 +28,16 @@ android {
                     arguments "-DCMAKE_C_COMPILER_LAUNCHER=${ccacheExecutable}",
                               "-DCMAKE_CXX_COMPILER_LAUNCHER=${ccacheExecutable}",
                               "-DCMAKE_ASM_COMPILER_LAUNCHER=${ccacheExecutable}"
+                }
+                if (enableNativeLto) {
+                    arguments "-DCMAKE_POLICY_DEFAULT_CMP0069=NEW",
+                              "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON"
+                }
+                if (nativePgoProfile) {
+                    def pgoFlags = "-fprofile-instr-use=${nativePgoProfile} -Wno-profile-instr-unprofiled"
+                    arguments "-DCMAKE_C_FLAGS=${pgoFlags}",
+                              "-DCMAKE_CXX_FLAGS=${pgoFlags}",
+                              "-DCMAKE_SHARED_LINKER_FLAGS=${pgoFlags}"
                 }
                 targets 'native-vnc'
             }
