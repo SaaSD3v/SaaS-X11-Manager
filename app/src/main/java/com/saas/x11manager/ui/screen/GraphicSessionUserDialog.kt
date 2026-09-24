@@ -40,6 +40,7 @@ import com.saas.x11manager.util.GraphicSessionUserSelection
 @Composable
 internal fun GraphicSessionUserDialog(
     containerName: String,
+    freeMode: Boolean = false,
     onDismiss: () -> Unit,
     onConfirm: (GraphicSessionUserSelection) -> Unit
 ) {
@@ -72,7 +73,8 @@ internal fun GraphicSessionUserDialog(
                 Text("Choose Linux user", style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "$containerName · graphical session owner",
+                    if (freeMode) "$containerName · Free display user"
+                    else "$containerName · graphical session owner",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -81,6 +83,7 @@ internal fun GraphicSessionUserDialog(
                 GraphicSessionUserPicker(
                     containerName = containerName,
                     selection = selection,
+                    freeMode = freeMode,
                     onSelectionChange = { selection = it }
                 )
 
@@ -108,6 +111,7 @@ internal fun GraphicSessionUserDialog(
 internal fun GraphicSessionUserPicker(
     containerName: String,
     selection: GraphicSessionUserSelection,
+    freeMode: Boolean = false,
     onSelectionChange: (GraphicSessionUserSelection) -> Unit
 ) {
     var users by remember(containerName) { mutableStateOf<List<GraphicSessionUser>>(emptyList()) }
@@ -140,9 +144,16 @@ internal fun GraphicSessionUserPicker(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Run desktop as", style = MaterialTheme.typography.titleSmall)
         Text(
-            "The selected account owns its home and the files created by the desktop session. System installation still runs as root.",
+            if (freeMode) "Use Free display as" else "Run desktop as",
+            style = MaterialTheme.typography.titleSmall
+        )
+        Text(
+            if (freeMode) {
+                "The selected Linux account is prepared for this Free display. No desktop, window manager or compositor is started."
+            } else {
+                "The selected account owns its home and the files created by the desktop session. System installation still runs as root."
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
