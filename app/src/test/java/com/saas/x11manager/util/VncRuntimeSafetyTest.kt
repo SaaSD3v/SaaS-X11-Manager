@@ -66,6 +66,18 @@ class VncRuntimeSafetyTest {
     }
 
     @Test
+    fun `free standalone stability requires server and listener but no desktop lease`() {
+        val script = VncRuntimeSafety.stableStandaloneServerOnly("/run/test-vnc", 5901)
+        assertTrue(script.contains("/run/test-vnc/server.pid"))
+        assertTrue(script.contains("/run/test-vnc/server.start"))
+        assertTrue(script.contains("Xtigervnc"))
+        assertTrue(script.contains("Xvnc"))
+        assertTrue(script.contains("port_listening"))
+        assertFalse(script.contains("owned_role session"))
+        assertFalse(script.contains("session.pid"))
+    }
+
+    @Test
     fun `integrated service stop verifies both systemd units`() {
         val script = VncRuntimeSafety.stopIntegratedGraphicService()
         assertTrue(script.contains("x11-session.service"))
