@@ -291,6 +291,16 @@ class HomeViewModel : ViewModel() {
         vncPort = VncSettings.DEFAULT_PORT
     )
 
+    suspend fun isFreeMode(containerName: String): Boolean = withContext(Dispatchers.IO) {
+        ContainerSettingsManager.readSnapshot(containerName, forceRefresh = true).freeMode
+    }
+
+    fun startFree(container: ContainerInfo) = startSession(
+        container = container,
+        accessMode = SessionAccessMode.INTEGRATED_X11,
+        vncPort = VncSettings.DEFAULT_PORT
+    )
+
     fun stopContainer(container: ContainerInfo) {
         if (!tryBeginOperation(container.name)) return
         viewModelScope.launch {
