@@ -238,11 +238,7 @@ class HomeViewModel : ViewModel() {
                     return@launch
                 }
                 val effectiveSession = session ?: GraphicSession.NONE
-                val runtimeMode = if (profile.freeMode) {
-                    SessionAccessMode.INTEGRATED_X11
-                } else {
-                    RuntimeAccessPolicy.normalize(accessMode)
-                }
+                val runtimeMode = RuntimeAccessPolicy.normalize(accessMode)
                 logger.i("[CTX] Access method: ${runtimeMode.label}")
                 if (profile.freeMode) {
                     logger.i("[FREE] Raw monitor mode selected; managed desktop/session startup is skipped")
