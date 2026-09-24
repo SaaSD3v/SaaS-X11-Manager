@@ -319,8 +319,21 @@ object X11SessionManager {
         logger: ContainerLogger?
     ): Result<ServerLease> = serverMutex.withLock { withContext(Dispatchers.IO) {
         try {
+            logger?.i("--- Integrated X11 Server Start ---")
             val existing = probeServerRuntime()
             val existingPids = existing.pids
+            DisplayLogDetails.x11(
+                logger = logger,
+                containerName = containerName,
+                monitorNumber = 1,
+                displayName = Constants.X11_DISPLAY,
+                pid = existingPids.singleOrNull(),
+                processName = Constants.X11_SERVER_PROCESS,
+                runtimeDir = Constants.INTEGRATED_X11_RUNTIME_DIR,
+                hostSocket = Constants.X11_SOCK_FILE,
+                containerSocket = "/tmp/.X11-unix/X0",
+                state = "inspecting"
+            )
             if (existing.socketReady && existingPids.isNotEmpty()) {
                 if (existingPids.size != 1) {
                     return@withContext Result.failure(
@@ -336,6 +349,18 @@ object X11SessionManager {
                         IllegalStateException("Could not establish the fixed X0 process lease")
                     )
                 logger?.i("[+] Integrated X11 ${Constants.X11_DISPLAY} ready (PID=$pid)")
+                DisplayLogDetails.x11(
+                    logger = logger,
+                    containerName = containerName,
+                    monitorNumber = 1,
+                    displayName = Constants.X11_DISPLAY,
+                    pid = pid,
+                    processName = Constants.X11_SERVER_PROCESS,
+                    runtimeDir = Constants.INTEGRATED_X11_RUNTIME_DIR,
+                    hostSocket = Constants.X11_SOCK_FILE,
+                    containerSocket = "/tmp/.X11-unix/X0",
+                    state = "ready (reused)"
+                )
                 return@withContext Result.success(
                     ServerLease(pid, record.startTime, reused = true)
                 )
@@ -379,6 +404,18 @@ object X11SessionManager {
                 val record = ensureServerLease(pid)
                 if (record != null) {
                     logger?.i("[+] Integrated X11 ${Constants.X11_DISPLAY} ready (PID=$pid)")
+                    DisplayLogDetails.x11(
+                        logger = logger,
+                        containerName = containerName,
+                        monitorNumber = 1,
+                        displayName = Constants.X11_DISPLAY,
+                        pid = pid,
+                        processName = Constants.X11_SERVER_PROCESS,
+                        runtimeDir = Constants.INTEGRATED_X11_RUNTIME_DIR,
+                        hostSocket = Constants.X11_SOCK_FILE,
+                        containerSocket = "/tmp/.X11-unix/X0",
+                        state = "ready"
+                    )
                     return@withContext Result.success(
                         ServerLease(pid, record.startTime, reused = false)
                     )
@@ -415,7 +452,20 @@ object X11SessionManager {
     suspend fun stopIntegratedServer(logger: ContainerLogger? = null): Boolean =
         serverMutex.withLock { withContext(Dispatchers.IO) {
             try {
+                logger?.i("--- Integrated X11 Server Stop ---")
                 val before = probeServerRuntime()
+                DisplayLogDetails.x11(
+                    logger = logger,
+                    containerName = getOwnerContainerName(),
+                    monitorNumber = 1,
+                    displayName = Constants.X11_DISPLAY,
+                    pid = before.pids.singleOrNull(),
+                    processName = Constants.X11_SERVER_PROCESS,
+                    runtimeDir = Constants.INTEGRATED_X11_RUNTIME_DIR,
+                    hostSocket = Constants.X11_SOCK_FILE,
+                    containerSocket = "/tmp/.X11-unix/X0",
+                    state = "stop requested"
+                )
                 if (!stopOwnedServer(before.pids, logger)) {
                     logger?.e("[-] Integrated X11 process ownership could not be proven")
                     return@withContext false
