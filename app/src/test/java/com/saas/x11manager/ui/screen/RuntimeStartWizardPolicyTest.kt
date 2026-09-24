@@ -18,14 +18,17 @@ class RuntimeStartWizardPolicyTest {
     }
 
     @Test
-    fun homeStartChoosesLinuxUserBeforeTransportAndDoesNotPreselectTransportInCard() {
+    fun homeStartKeepsManagedUserStepWhileFreeGoesDirectlyToTransport() {
         val home = source("app/src/main/java/com/saas/x11manager/ui/screen/HomeScreen.kt")
         val userDialog = home.indexOf("GraphicSessionUserDialog(")
         val accessDialog = home.indexOf("GraphicAccessDialog(")
 
         assertTrue(userDialog >= 0)
         assertTrue(accessDialog > userDialog)
-        assertTrue(home.contains("pendingUserContainer = null\n                pendingAccessContainer = container"))
+        assertTrue(home.contains("pendingUserContainer = null\\n                pendingAccessFreeMode = false\\n                pendingAccessContainer = container"))
+        assertTrue(home.contains("if (viewModel.isFreeMode(container.name))"))
+        assertTrue(home.contains("pendingAccessFreeMode = true"))
+        assertTrue(home.contains("freeMode = pendingAccessFreeMode"))
         assertTrue(home.contains("startLabel = \"Start\""))
         assertFalse(home.contains("startLabel = \"Start X11\""))
         assertFalse(home.contains("startLabel = \"Start VNC\""))
@@ -98,6 +101,25 @@ class RuntimeStartWizardPolicyTest {
         assertTrue(reservation.contains("reserve only; Integrated X11 remains off"))
         assertTrue(reservation.contains("X11DisplayAllocator.firstFree(occupied)"))
         assertTrue(reservation.contains("ContainerConfigManager.ensureManualX11Config"))
+    }
+
+    @Test
+    fun freeModeOffersX11OrVncWithoutLaunchingManagedDesktopAndKeepsDetailsInLogs() {
+        val dialog = source("app/src/main/java/com/saas/x11manager/ui/screen/GraphicAccessDialog.kt")
+        val access = source("app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt")
+        val vnc = source("app/src/main/java/com/saas/x11manager/util/VncServerManager.kt")
+        val guide = source("app/src/main/java/com/saas/x11manager/util/VncConnectionGuide.kt")
+        val display = source("app/src/main/java/com/saas/x11manager/ui/screen/ManagedDisplayScreen.kt")
+
+        assertTrue(dialog.contains("Free mode · choose the empty display transport"))
+        assertTrue(dialog.contains("standalone empty TigerVNC virtual display"))
+        assertTrue(access.contains("session = GraphicSession.NONE"))
+        assertTrue(access.contains("freeMode = true"))
+        assertTrue(vnc.contains("if (!needsMirror && !freeMode)"))
+        assertTrue(vnc.contains("stableStandaloneServerOnly"))
+        assertTrue(guide.contains("FreeX11Runtime.unsetCommand()"))
+        assertTrue(guide.contains("FreeX11Runtime.exportCommand(displayName)"))
+        assertFalse(display.contains("FreeMonitorInfoCard"))
     }
 
     @Test
