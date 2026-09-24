@@ -273,10 +273,7 @@ class ManagedDisplayViewModel : ViewModel() {
                             state = if (graphicSessionReady) "ready" else "server ready; graphical session not confirmed"
                         )
                         if (monitor.containerName != null) {
-                            val freeMode = ContainerSettingsManager.readSnapshot(
-                                monitor.containerName,
-                                forceRefresh = true
-                            ).freeMode
+                            val freeMode = home.isFreeMode(monitor.containerName)
                             if (freeMode) {
                                 DisplayLogDetails.freeEnvironment(
                                     logger = logger,
