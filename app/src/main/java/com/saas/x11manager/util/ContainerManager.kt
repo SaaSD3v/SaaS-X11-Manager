@@ -393,11 +393,12 @@ object ContainerManager {
     }
 
     /**
-     * Remove only Manager-owned graphical startup wiring.
+     * Disable only Manager-owned automatic graphical startup.
      *
-     * Free mode intentionally installs no desktop, window manager or persistent
-     * session service. Existing user packages and user-created configuration are
-     * left untouched.
+     * Free mode preserves installed packages, launchers and service definitions
+     * so returning to a managed session does not require reinstalling anything.
+     * Only boot/runlevel links are removed; FreeX11Runtime prepares the raw X11
+     * socket bridge when the user starts the container.
      */
     suspend fun disableManagedGraphicSession(
         name: String,
@@ -414,16 +415,9 @@ object ContainerManager {
             ) { root ->
                 Shell.cmd(
                     "rm -f " +
-                        "'$root/usr/local/bin/x11-session.sh' " +
-                        "'$root/etc/init.d/x11-setup' " +
-                        "'$root/etc/init.d/x11-session' " +
-                        "'$root/etc/init.d/x11-xfce' " +
                         "'$root/etc/runlevels/default/x11-setup' " +
                         "'$root/etc/runlevels/default/x11-session' " +
                         "'$root/etc/runlevels/default/x11-xfce' " +
-                        "'$root/etc/systemd/system/setup-x11-socket.service' " +
-                        "'$root/etc/systemd/system/x11-session.service' " +
-                        "'$root/etc/systemd/system/x11-xfce.service' " +
                         "'$root/etc/systemd/system/multi-user.target.wants/setup-x11-socket.service' " +
                         "'$root/etc/systemd/system/graphical.target.wants/x11-session.service' " +
                         "'$root/etc/systemd/system/graphical.target.wants/x11-xfce.service' " +
@@ -432,9 +426,9 @@ object ContainerManager {
             } ?: false
 
             if (cleaned) {
-                logger?.i("[FREE] Manager desktop/session startup wiring removed")
+                logger?.i("[FREE] Automatic Manager desktop/session startup disabled")
             } else {
-                logger?.e("[FREE] Could not remove Manager desktop/session startup wiring")
+                logger?.e("[FREE] Could not disable automatic Manager desktop/session startup")
             }
             cleaned
         } catch (e: Exception) {
