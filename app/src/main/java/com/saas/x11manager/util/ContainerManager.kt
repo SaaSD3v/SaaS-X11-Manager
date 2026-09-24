@@ -392,6 +392,57 @@ object ContainerManager {
         }
     }
 
+    /**
+     * Remove only Manager-owned graphical startup wiring.
+     *
+     * Free mode intentionally installs no desktop, window manager or persistent
+     * session service. Existing user packages and user-created configuration are
+     * left untouched.
+     */
+    suspend fun disableManagedGraphicSession(
+        name: String,
+        logger: ContainerLogger? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val config = loadConfig(
+                "${Constants.CONTAINERS_DIR}/$name/${Constants.CONFIG_FILE}", name
+            ) ?: return@withContext false
+
+            val cleaned = RootfsAccessor.use(
+                rootfsPath = config.rootfsPath,
+                tag = "free_x11_$name"
+            ) { root ->
+                Shell.cmd(
+                    "rm -f " +
+                        "'$root/usr/local/bin/x11-session.sh' " +
+                        "'$root/etc/init.d/x11-setup' " +
+                        "'$root/etc/init.d/x11-session' " +
+                        "'$root/etc/init.d/x11-xfce' " +
+                        "'$root/etc/runlevels/default/x11-setup' " +
+                        "'$root/etc/runlevels/default/x11-session' " +
+                        "'$root/etc/runlevels/default/x11-xfce' " +
+                        "'$root/etc/systemd/system/setup-x11-socket.service' " +
+                        "'$root/etc/systemd/system/x11-session.service' " +
+                        "'$root/etc/systemd/system/x11-xfce.service' " +
+                        "'$root/etc/systemd/system/multi-user.target.wants/setup-x11-socket.service' " +
+                        "'$root/etc/systemd/system/graphical.target.wants/x11-session.service' " +
+                        "'$root/etc/systemd/system/graphical.target.wants/x11-xfce.service' " +
+                        "2>/dev/null"
+                ).exec().isSuccess
+            } ?: false
+
+            if (cleaned) {
+                logger?.i("[FREE] Manager desktop/session startup wiring removed")
+            } else {
+                logger?.e("[FREE] Could not remove Manager desktop/session startup wiring")
+            }
+            cleaned
+        } catch (e: Exception) {
+            logger?.e("[FREE] Cleanup error: ${e.message}")
+            false
+        }
+    }
+
     suspend fun startContainer(name: String, logger: ContainerLogger? = null): Boolean = withContext(Dispatchers.IO) {
         try {
             val r = Shell.cmd(
