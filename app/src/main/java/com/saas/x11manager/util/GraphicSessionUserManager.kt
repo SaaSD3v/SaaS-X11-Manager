@@ -187,23 +187,29 @@ object GraphicSessionUserManager {
         val user = shellQuote(requested.userName)
         val create = if (requested.createIfMissing) "1" else "0"
         val ensureUser = """
-            if awk -F: -v user=$user '${' /etc/passwd; then
+            if id -u $user >/dev/null 2>&1; then
                 exit 0
             fi
             [ $create = 1 ] || exit 42
             if command -v apk >/dev/null 2>&1; then
                 adduser -D $user
             elif command -v adduser >/dev/null 2>&1; then
-                ADDUSER_NAME_OPT=
                 if adduser --help 2>&1 | grep -q -- '--allow-bad-names'; then
-                    ADDUSER_NAME_OPT=--allow-bad-names
+                    if adduser --help 2>&1 | grep -q -- '--comment'; then
+                        adduser --allow-bad-names --disabled-password --comment '' $user
+                    else
+                        adduser --allow-bad-names --disabled-password --gecos '' $user
+                    fi
                 elif adduser --help 2>&1 | grep -q -- '--force-badname'; then
-                    ADDUSER_NAME_OPT=--force-badname
-                fi
-                if adduser --help 2>&1 | grep -q -- '--comment'; then
-                    adduser ${'
+                    if adduser --help 2>&1 | grep -q -- '--comment'; then
+                        adduser --force-badname --disabled-password --comment '' $user
+                    else
+                        adduser --force-badname --disabled-password --gecos '' $user
+                    fi
+                elif adduser --help 2>&1 | grep -q -- '--comment'; then
+                    adduser --disabled-password --comment '' $user
                 else
-                    adduser ${'
+                    adduser --disabled-password --gecos '' $user
                 fi
             elif command -v useradd >/dev/null 2>&1; then
                 useradd -m $user
