@@ -1,5 +1,7 @@
 package com.saas.x11manager.ui.screen
 
+// Build benchmark: Kotlin-only change; runtime behavior is unchanged.
+
 import android.os.Build
 import android.util.Log
 import androidx.compose.runtime.getValue
