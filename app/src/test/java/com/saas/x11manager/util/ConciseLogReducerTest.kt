@@ -198,6 +198,37 @@ class ConciseLogReducerTest {
         assertTrue(output.contains("[X11] ! Stop the monitor before deleting it"))
     }
 
+
+    @Test
+    fun fullDisplayContextAndFreeCommandsRemainVisible() {
+        val reducer = ConciseLogReducer()
+        val output = buildList {
+            addAll(reducer.reduce(Log.INFO, "--- Free Display Start ---"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Container: filebrowser"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Monitor: 4"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Display: :3"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Process: saas-x11-test"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Runtime: /data/local/tmp/saas-x11/test"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Socket: /data/local/tmp/saas-x11/test/.X11-unix/X0"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Lock: /data/local/tmp/saas-x11/test/.X0-lock"))
+            addAll(reducer.reduce(Log.INFO, "[CTX] Server lease: new"))
+            addAll(reducer.reduce(Log.INFO, "[X11] • Remove DISPLAY: unset DISPLAY"))
+            addAll(reducer.reduce(Log.INFO, "[X11] • Set DISPLAY: export DISPLAY=:3"))
+        }.map { it.second }
+
+        assertTrue(output.contains("[SESSION] Starting Free display"))
+        assertTrue(output.contains("[CONTAINER] • Container: filebrowser"))
+        assertTrue(output.contains("[X11] • Monitor: 4"))
+        assertTrue(output.contains("[X11] • Display: :3"))
+        assertTrue(output.contains("[X11] • Process: saas-x11-test"))
+        assertTrue(output.contains("[X11] • Runtime: /data/local/tmp/saas-x11/test"))
+        assertTrue(output.any { it.startsWith("[X11] • Socket:") })
+        assertTrue(output.any { it.startsWith("[X11] • Lock:") })
+        assertTrue(output.contains("[X11] • Server lease: new"))
+        assertTrue(output.contains("[X11] • Remove DISPLAY: unset DISPLAY"))
+        assertTrue(output.contains("[X11] • Set DISPLAY: export DISPLAY=:3"))
+    }
+
     @Test
     fun droidSpacesBannerStateNeverSuppressesFollowingManagerLogs() {
         val reducer = ConciseLogReducer()
