@@ -327,6 +327,36 @@ internal class ConciseLogReducer {
                 message.startsWith("[CTX] Process nice-name:") ->
                 level to "[X11] • Process: $value"
 
+            message.startsWith("[CTX] XKB root:") ->
+                level to "[X11] • XKB root: $value"
+
+            message.startsWith("[CTX] Manager APK:") ->
+                level to "[X11] • Manager APK: $value"
+
+            message.startsWith("[CTX] Entrypoint:") ->
+                level to "[X11] • Entrypoint: $value"
+
+            message.startsWith("[CTX] Launcher exit code:") ->
+                level to "[X11] • Launcher exit code: $value"
+
+            message.startsWith("[CTX] Captured launcher PID:") ->
+                level to "[X11] • Launcher PID: $value"
+
+            message.startsWith("[CTX] Config:") ->
+                level to "[CONTAINER] • Config: $value"
+
+            message.startsWith("[CTX] Requested monitor:") ->
+                level to "[X11] • Requested monitor: $value"
+
+            message.startsWith("[CTX] Requested display:") ->
+                level to "[X11] • Requested display: $value"
+
+            message.startsWith("[CTX] DroidSpaces Termux:X11 integration:") ->
+                level to "[X11] • DroidSpaces integration: $value"
+
+            message.startsWith("[CTX] Existing Manager X11 bind:") ->
+                level to "[X11] • Existing bind: $value"
+
             message.startsWith("[CTX] Runtime:") ->
                 level to "[X11] • Runtime: $value"
 
