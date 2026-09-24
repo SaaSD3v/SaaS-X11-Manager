@@ -35,15 +35,12 @@ import androidx.compose.ui.unit.dp
 import com.saas.x11manager.ui.component.TerminalDialog
 import com.saas.x11manager.ui.component.OperationResultCard
 import com.saas.x11manager.X11Application
-import com.saas.x11manager.util.ContainerSettingsManager
 import com.saas.x11manager.util.X11DisplayAllocator
 import com.saas.x11manager.util.X11DisplaySlot
 import com.saas.x11manager.util.X11MonitorInfo
 import com.saas.x11manager.util.X11ServerStatus
 import com.saas.x11manager.util.X11SessionManager
 import com.termux.x11.EmbeddedDisplayHost
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 @Composable
 fun ManagedDisplayScreen(
@@ -75,7 +72,6 @@ fun ManagedDisplayScreen(
     }
     var additionalKeysVisible by remember { mutableStateOf(false) }
     var extraKeysConfig by remember { mutableStateOf(store.getString("extra_keys_config", null)) }
-    var selectedFreeMode by remember { mutableStateOf(false) }
 
 
     val selectedMonitor = selectedDisplayNumber?.let { selected ->
@@ -84,16 +80,6 @@ fun ManagedDisplayScreen(
     val selectedSlot = selectedMonitor?.slot
     val selectedStatus = selectedMonitor?.status ?: X11ServerStatus.Stopped
     val selectedPid = selectedMonitor?.pid
-    val selectedContainerName = selectedMonitor?.containerName
-
-    LaunchedEffect(selectedContainerName, selectedStatus) {
-        selectedFreeMode = selectedContainerName?.let { owner ->
-            withContext(Dispatchers.IO) {
-                ContainerSettingsManager.readSnapshot(owner, forceRefresh = true).freeMode
-            }
-        } ?: false
-    }
-
     fun persistManualDisplayNumbers(numbers: Set<Int>) = model.persistManualDisplayNumbers(numbers)
 
     /**
@@ -344,19 +330,6 @@ fun ManagedDisplayScreen(
                     }
                 }
                 message?.let { DisplayErrorMessage(it) }
-
-                if (!fullscreen && selectedFreeMode && selectedSlot != null && selectedContainerName != null) {
-                    FreeMonitorInfoCard(
-                        containerName = selectedContainerName,
-                        monitorNumber = selectedSlot.monitorNumber,
-                        displayName = selectedSlot.displayName,
-                        containerSocket = "/tmp/.X11-unix/X${selectedSlot.number}",
-                        hostSocket = selectedSlot.socketFile,
-                        pid = selectedPid,
-                        connected = connected,
-                        running = selectedStatus == X11ServerStatus.Running
-                    )
-                }
 
                 Box(
                     modifier = Modifier
@@ -800,59 +773,6 @@ private fun ManagedDisplayViewport(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun FreeMonitorInfoCard(
-    containerName: String,
-    monitorNumber: Int,
-    displayName: String,
-    containerSocket: String,
-    hostSocket: String,
-    pid: Int?,
-    connected: Boolean,
-    running: Boolean
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp)
-        ) {
-            Text("Free · raw X11 monitor", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Text("Container: $containerName", style = MaterialTheme.typography.bodySmall)
-            Text("Monitor: $monitorNumber · Display: $displayName", style = MaterialTheme.typography.bodySmall)
-            Text(
-                "Status: ${if (connected) "connected" else if (running) "running" else "stopped"}" +
-                    (pid?.let { " · PID $it" } ?: ""),
-                style = MaterialTheme.typography.bodySmall
-            )
-            Text("Container socket: $containerSocket", style = MaterialTheme.typography.bodySmall)
-            Text("Host socket: $hostSocket", style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.height(3.dp))
-            Text("Inside the container:", style = MaterialTheme.typography.labelMedium)
-            Text(
-                "export DISPLAY=$displayName",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Text(
-                "Nothing else is started for you. Launch any X11 application, WM or desktop manually.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
