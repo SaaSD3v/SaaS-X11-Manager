@@ -196,6 +196,51 @@ internal object VncRuntimeSafety {
         """.trimIndent()
     }
 
+    /**
+     * Free VNC has no managed desktop/session process. Validate only the owned
+     * TigerVNC server identity plus the requested listening port.
+     */
+    fun stableStandaloneServerOnly(
+        stateDir: String,
+        port: Int,
+        samples: Int = 3,
+        sleepSeconds: String = "0.1"
+    ): String {
+        require(samples > 0)
+        return """
+            owned_server() {
+                pid=$(cat "$stateDir/server.pid" 2>/dev/null) || return 1
+                expected=$(cat "$stateDir/server.start" 2>/dev/null) || return 1
+                case "$pid:$expected" in *[!0-9:]*|'':*|*:) return 1 ;; esac
+                kill -0 "$pid" 2>/dev/null || return 1
+                actual=$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null) || return 1
+                [ "$actual" = "$expected" ] || return 1
+                cmd=$(tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+                case "$cmd" in *Xtigervnc*|*Xvnc*) ;; *) return 1 ;; esac
+            }
+            port_listening() {
+                hex=$(printf '%04X' $port)
+                for table in /proc/net/tcp /proc/net/tcp6; do
+                    [ -r "$table" ] || continue
+                    while read -r sl local remote state rest; do
+                        [ "$state" = 0A ] || continue
+                        case "$local" in *:$hex) return 0 ;; esac
+                    done < "$table"
+                done
+                return 1
+            }
+            sample=0
+            while [ "$sample" -lt $samples ]; do
+                owned_server || exit 1
+                port_listening || exit 1
+                sample=$((sample + 1))
+                [ "$sample" -ge $samples ] && exit 0
+                sleep $sleepSeconds
+            done
+            exit 1
+        """.trimIndent()
+    }
+
     fun stopIntegratedGraphicService(): String = """
         if command -v systemctl >/dev/null 2>&1; then
             systemctl stop x11-session.service setup-x11-socket.service >/dev/null 2>&1 || true
