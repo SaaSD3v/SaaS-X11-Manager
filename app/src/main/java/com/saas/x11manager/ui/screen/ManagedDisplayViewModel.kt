@@ -107,8 +107,19 @@ class ManagedDisplayViewModel : ViewModel() {
                 val owner = owners.singleOrNull()
                 ownerForLogs = owner
                 logger.i(if (running) "--- Stopping X11 monitor ---" else "--- Starting X11 monitor ---")
-                logger.i("[*] Monitor: 1")
-                logger.i("[*] Display: ${Constants.X11_DISPLAY}")
+                val currentPid = X11SessionManager.getServerPid()
+                DisplayLogDetails.x11(
+                    logger = logger,
+                    containerName = owner ?: seedContainer,
+                    monitorNumber = 1,
+                    displayName = Constants.X11_DISPLAY,
+                    pid = currentPid,
+                    processName = Constants.X11_SERVER_PROCESS,
+                    runtimeDir = Constants.INTEGRATED_X11_RUNTIME_DIR,
+                    hostSocket = Constants.X11_SOCK_FILE,
+                    containerSocket = "/tmp/.X11-unix/X0",
+                    state = if (running) "stop requested" else "start requested"
+                )
 
                 if (owners.size > 1) {
                     message = "X0 ownership conflict: " + owners.joinToString(", ")
@@ -124,6 +135,17 @@ class ManagedDisplayViewModel : ViewModel() {
                         if (succeeded) {
                             result = "X11 display stopped"
                             owner?.let { logger.i("[+] Container '$it' was left running") }
+                            DisplayLogDetails.x11(
+                                logger = logger,
+                                containerName = owner,
+                                monitorNumber = 1,
+                                displayName = Constants.X11_DISPLAY,
+                                processName = Constants.X11_SERVER_PROCESS,
+                                runtimeDir = Constants.INTEGRATED_X11_RUNTIME_DIR,
+                                hostSocket = Constants.X11_SOCK_FILE,
+                                containerSocket = "/tmp/.X11-unix/X0",
+                                state = "stopped"
+                            )
                         }
                     } else {
                         val started = X11SessionManager.startIntegratedServer(owner ?: seedContainer, logger)
@@ -136,6 +158,18 @@ class ManagedDisplayViewModel : ViewModel() {
                                 X11SessionManager.ensureContainerGraphicSession(it, logger)
                             } ?: true
                             result = "X11 display ready"
+                            DisplayLogDetails.x11(
+                                logger = logger,
+                                containerName = owner ?: seedContainer,
+                                monitorNumber = 1,
+                                displayName = Constants.X11_DISPLAY,
+                                pid = started.getOrNull(),
+                                processName = Constants.X11_SERVER_PROCESS,
+                                runtimeDir = Constants.INTEGRATED_X11_RUNTIME_DIR,
+                                hostSocket = Constants.X11_SOCK_FILE,
+                                containerSocket = "/tmp/.X11-unix/X0",
+                                state = if (succeeded) "ready" else "server ready; graphical session not confirmed"
+                            )
                             if (!succeeded) message = "X11 is running, but its desktop could not be confirmed"
                         }
                     }
