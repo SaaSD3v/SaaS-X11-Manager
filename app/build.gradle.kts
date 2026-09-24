@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("androidx.baselineprofile")
 }
 
 val releaseVersionName = providers.gradleProperty("VERSION_NAME")
@@ -108,6 +109,8 @@ android {
 }
 
 dependencies {
+    baselineProfile(project(":baseline-profile"))
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     // Local compatibility wrapper around the pinned Termux:X11/Lorie sources.
     implementation(project(":embedded-lorie"))
 
@@ -149,4 +152,33 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+}
+
+
+baselineProfile {
+    // Keep generation explicit in this experimental branch. Normal assembleRelease
+    // stays fast; the dedicated CI job generates and benchmarks profiles.
+    automaticGenerationDuringBuild = false
+    saveInSrc = true
+    mergeIntoMain = true
+    filter {
+        include("com.saas.x11manager.**")
+    }
+}
+
+
+val composeCompilerReports = providers.gradleProperty("composeCompilerReports")
+    .map(String::toBoolean)
+    .orElse(false)
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    if (composeCompilerReports.get()) {
+        val reportDir = layout.buildDirectory.dir("compose-compiler").get().asFile.absolutePath
+        kotlinOptions.freeCompilerArgs += listOf(
+            "-P",
+            "plugin:androidx.compose.compiler.plugins.kotlin:reportsDestination=$reportDir",
+            "-P",
+            "plugin:androidx.compose.compiler.plugins.kotlin:metricsDestination=$reportDir"
+        )
+    }
 }
