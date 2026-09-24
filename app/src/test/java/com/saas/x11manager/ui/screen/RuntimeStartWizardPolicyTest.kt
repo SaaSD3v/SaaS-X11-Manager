@@ -18,16 +18,17 @@ class RuntimeStartWizardPolicyTest {
     }
 
     @Test
-    fun homeStartKeepsManagedUserStepWhileFreeGoesDirectlyToTransport() {
+    fun homeStartKeepsLinuxUserStepForManagedAndFreeBeforeTransport() {
         val home = source("app/src/main/java/com/saas/x11manager/ui/screen/HomeScreen.kt")
         val userDialog = home.indexOf("GraphicSessionUserDialog(")
         val accessDialog = home.indexOf("GraphicAccessDialog(")
 
         assertTrue(userDialog >= 0)
         assertTrue(accessDialog > userDialog)
-        assertTrue(home.contains("pendingUserContainer = null\n                pendingAccessFreeMode = false\n                pendingAccessContainer = container"))
-        assertTrue(home.contains("if (viewModel.isFreeMode(container.name))"))
-        assertTrue(home.contains("pendingAccessFreeMode = true"))
+        assertTrue(home.contains("freeMode = pendingUserFreeMode"))
+        assertTrue(home.contains("pendingAccessFreeMode = pendingUserFreeMode"))
+        assertTrue(home.contains("pendingUserFreeMode = viewModel.isFreeMode(container.name)"))
+        assertTrue(home.contains("pendingUserContainer = container"))
         assertTrue(home.contains("freeMode = pendingAccessFreeMode"))
         assertTrue(home.contains("startLabel = \"Start\""))
         assertFalse(home.contains("startLabel = \"Start X11\""))
@@ -120,6 +121,7 @@ class RuntimeStartWizardPolicyTest {
         val access = source("app/src/main/java/com/saas/x11manager/util/SessionAccessManager.kt")
         val vnc = source("app/src/main/java/com/saas/x11manager/util/VncServerManager.kt")
         val guide = source("app/src/main/java/com/saas/x11manager/util/VncConnectionGuide.kt")
+        val displayLogs = source("app/src/main/java/com/saas/x11manager/util/DisplayLogDetails.kt")
         val display = source("app/src/main/java/com/saas/x11manager/ui/screen/ManagedDisplayScreen.kt")
 
         assertTrue(dialog.contains("Free mode · choose the empty display transport"))
@@ -128,8 +130,9 @@ class RuntimeStartWizardPolicyTest {
         assertTrue(access.contains("freeMode = true"))
         assertTrue(vnc.contains("if (!needsMirror && !freeMode)"))
         assertTrue(vnc.contains("stableStandaloneServerOnly"))
-        assertTrue(guide.contains("FreeX11Runtime.unsetCommand()"))
-        assertTrue(guide.contains("FreeX11Runtime.exportCommand(displayName)"))
+        assertTrue(displayLogs.contains("FreeX11Runtime.unsetCommand()"))
+        assertTrue(displayLogs.contains("FreeX11Runtime.exportCommand(displayName)"))
+        assertTrue(access.contains("GraphicSessionUserManager.prepareFreeForStart"))
         assertFalse(display.contains("FreeMonitorInfoCard"))
     }
 
