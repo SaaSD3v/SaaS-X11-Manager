@@ -149,7 +149,7 @@ object VncServerManager {
                     stopManagedVnc(containerName, logger)
                     return@withContext VncStartResult(false, port, displayName)
                 }
-                logger?.i("[FREE] TigerVNC display is ready with no desktop, WM or compositor")
+                logger?.i("[VNC] ✓ Free TigerVNC display ready; no desktop, WM or compositor started")
             } else {
                 val sessionLaunch =
                     "DISPLAY=${shellQuote(displayName)} " +
