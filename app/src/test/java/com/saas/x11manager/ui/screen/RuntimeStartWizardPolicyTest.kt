@@ -25,7 +25,7 @@ class RuntimeStartWizardPolicyTest {
 
         assertTrue(userDialog >= 0)
         assertTrue(accessDialog > userDialog)
-        assertTrue(home.contains("pendingUserContainer = null\\n                pendingAccessFreeMode = false\\n                pendingAccessContainer = container"))
+        assertTrue(home.contains("pendingUserContainer = null\n                pendingAccessFreeMode = false\n                pendingAccessContainer = container"))
         assertTrue(home.contains("if (viewModel.isFreeMode(container.name))"))
         assertTrue(home.contains("pendingAccessFreeMode = true"))
         assertTrue(home.contains("freeMode = pendingAccessFreeMode"))
