@@ -21,7 +21,8 @@ object SessionAccessManager {
         vncPort: Int,
         vncAdbLocalPort: Int = vncPort,
         vncPassword: String? = null,
-        logger: ContainerLogger? = null
+        logger: ContainerLogger? = null,
+        freeMode: Boolean = false
     ): Boolean = startMutex.withLock {
         startLocked(
             containerName = containerName,
@@ -31,7 +32,8 @@ object SessionAccessManager {
             vncPort = vncPort,
             vncAdbLocalPort = vncAdbLocalPort,
             vncPassword = vncPassword,
-            logger = logger
+            logger = logger,
+            freeMode = freeMode
         )
     }
 
@@ -43,8 +45,13 @@ object SessionAccessManager {
         vncPort: Int,
         vncAdbLocalPort: Int,
         vncPassword: String?,
-        logger: ContainerLogger?
+        logger: ContainerLogger?,
+        freeMode: Boolean
     ): Boolean {
+        if (freeMode) {
+            return startFreeLocked(containerName, accessMode, logger)
+        }
+
         logger?.i("--- Graphic Access Start ---")
         logger?.i("[CTX] Access method: ${accessMode.label}")
         logger?.i("[CTX] Session: ${session.label}")
@@ -150,6 +157,48 @@ object SessionAccessManager {
                 result.success
             }
         }
+    }
+
+    private suspend fun startFreeLocked(
+        containerName: String,
+        accessMode: SessionAccessMode,
+        logger: ContainerLogger?
+    ): Boolean {
+        if (accessMode == SessionAccessMode.VNC) {
+            logger?.e("[FREE] Free mode uses fixed integrated X11 ${Constants.X11_DISPLAY}, not VNC")
+            return false
+        }
+
+        logger?.i("--- Free X11 Start ---")
+        logger?.i("[FREE] No desktop, window manager or compositor will be started")
+
+        PulseAudioRuntimeSanitizer.prepare(containerName, logger)
+        PulseAudioFixManager.prepareBeforeGraphicalStart(containerName, logger)
+        VirGLFixManager.prepareBeforeGraphicalStart(containerName, logger)
+
+        val started = X11SessionManager.startX11Session(containerName, logger) {
+            VirGLFixManager.finalizeAfterContainerReady(containerName, logger)
+            finalizeAudioAfterContainerReady(containerName, logger)
+        }
+        if (!started) {
+            logger?.e("[FREE] Integrated X11 transport failed")
+            return false
+        }
+
+        val rawReady = FreeX11Runtime.prepare(
+            containerName = containerName,
+            displayName = Constants.X11_DISPLAY,
+            socketFileName = "X0",
+            logger = logger
+        )
+        if (!rawReady) return false
+
+        logger?.i("[FREE] Container: $containerName")
+        logger?.i("[FREE] Monitor: 1")
+        logger?.i("[FREE] Display: ${Constants.X11_DISPLAY}")
+        logger?.i("[FREE] Host socket directory: ${Constants.X11_SOCK_DIR}")
+        logger?.i("[FREE] Empty monitor ready; launch anything you want from the container")
+        true
     }
 
     private suspend fun finalizeAudioAfterContainerReady(
