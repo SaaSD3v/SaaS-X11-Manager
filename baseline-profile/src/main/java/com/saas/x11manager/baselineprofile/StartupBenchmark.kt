@@ -1,5 +1,6 @@
 package com.saas.x11manager.baselineprofile
 
+import androidx.benchmark.macro.BaselineProfileMode
 import androidx.benchmark.macro.CompilationMode
 import androidx.benchmark.macro.FrameTimingMetric
 import androidx.benchmark.macro.StartupMode
@@ -27,7 +28,7 @@ class StartupBenchmark {
     @Test
     fun coldStartupBaselineProfile() = startup(
         CompilationMode.Partial(
-            baselineProfileMode = CompilationMode.Partial.BaselineProfileMode.Require
+            baselineProfileMode = BaselineProfileMode.Require
         )
     )
 
@@ -37,7 +38,7 @@ class StartupBenchmark {
             packageName = TARGET_PACKAGE,
             metrics = listOf(FrameTimingMetric()),
             compilationMode = CompilationMode.Partial(
-                baselineProfileMode = CompilationMode.Partial.BaselineProfileMode.Require
+                baselineProfileMode = BaselineProfileMode.Require
             ),
             startupMode = StartupMode.WARM,
             iterations = 5,
