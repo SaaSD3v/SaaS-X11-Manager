@@ -35,6 +35,8 @@ jobs:
 
       - name: Set up Gradle caches
         uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
 
       - name: Cache native CMake state
         uses: actions/cache@v4
@@ -149,6 +151,8 @@ jobs:
 
       - name: Set up Gradle caches
         uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
 
       - name: Restore native CMake state
         uses: actions/cache@v4
