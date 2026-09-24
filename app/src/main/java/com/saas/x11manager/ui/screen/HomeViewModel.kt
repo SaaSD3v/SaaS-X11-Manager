@@ -240,24 +240,33 @@ class HomeViewModel : ViewModel() {
                     ContainerSettingsManager.readSnapshot(container.name, forceRefresh = true)
                 }
                 val session = profile.graphicSession
-                if (session == null || session == GraphicSession.NONE) {
+                if ((session == null || session == GraphicSession.NONE) && !profile.freeMode) {
                     logger.e("[-] No configured graphic session found for ${container.name}")
                     logger.e("[-] Open Edit container and configure a graphic session first")
                     return@launch
                 }
+                val effectiveSession = session ?: GraphicSession.NONE
 
-                val runtimeMode = RuntimeAccessPolicy.normalize(accessMode)
+                val runtimeMode = if (profile.freeMode) {
+                    SessionAccessMode.INTEGRATED_X11
+                } else {
+                    RuntimeAccessPolicy.normalize(accessMode)
+                }
                 logger.i("[CTX] Access method: ${runtimeMode.label}")
+                if (profile.freeMode) {
+                    logger.i("[FREE] Raw monitor mode selected; managed desktop/session startup is skipped")
+                }
 
                 val started = SessionAccessManager.start(
                     containerName = container.name,
                     platform = profile.platform,
-                    session = session,
+                    session = effectiveSession,
                     accessMode = runtimeMode,
                     vncPort = vncPort,
                     vncAdbLocalPort = vncAdbLocalPort,
                     vncPassword = vncPassword,
-                    logger = logger
+                    logger = logger,
+                    freeMode = profile.freeMode
                 )
 
                 val (running, pid) = ContainerManager.checkContainerStatusPublic(container.name)
