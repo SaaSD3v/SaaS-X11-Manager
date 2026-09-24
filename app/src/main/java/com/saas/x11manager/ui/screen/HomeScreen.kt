@@ -41,6 +41,7 @@ fun HomeScreen(
     val expandedContainerName = remember { mutableStateOf<String?>(null) }
     var generalSettingsContainer by remember { mutableStateOf<String?>(null) }
     var pendingUserContainer by remember { mutableStateOf<ContainerInfo?>(null) }
+    var pendingUserFreeMode by remember { mutableStateOf(false) }
     var pendingAccessContainer by remember { mutableStateOf<ContainerInfo?>(null) }
     var pendingAccessFreeMode by remember { mutableStateOf(false) }
     val activeOperation = viewModel.runningOperationContainer
@@ -56,11 +57,16 @@ fun HomeScreen(
     pendingUserContainer?.let { container ->
         GraphicSessionUserDialog(
             containerName = container.name,
-            onDismiss = { pendingUserContainer = null },
+            freeMode = pendingUserFreeMode,
+            onDismiss = {
+                pendingUserContainer = null
+                pendingUserFreeMode = false
+            },
             onConfirm = { selection ->
                 GraphicSessionUserManager.selectForNextStart(container.name, selection)
                 pendingUserContainer = null
-                pendingAccessFreeMode = false
+                pendingAccessFreeMode = pendingUserFreeMode
+                pendingUserFreeMode = false
                 pendingAccessContainer = container
             }
         )
@@ -82,11 +88,9 @@ fun HomeScreen(
             },
             onBack = {
                 pendingAccessContainer = null
-                if (pendingAccessFreeMode) {
-                    pendingAccessFreeMode = false
-                } else {
-                    pendingUserContainer = container
-                }
+                pendingUserFreeMode = pendingAccessFreeMode
+                pendingAccessFreeMode = false
+                pendingUserContainer = container
             },
             onConfirm = { mode, vncPort, adbLocalPort, password ->
                 val runtimeMode = RuntimeAccessPolicy.normalize(mode)
@@ -192,12 +196,8 @@ fun HomeScreen(
                                 onShowLogs = { viewModel.showLogs(container) },
                                 onStartX11 = {
                                     startScope.launch {
-                                        if (viewModel.isFreeMode(container.name)) {
-                                            pendingAccessFreeMode = true
-                                            pendingAccessContainer = container
-                                        } else {
-                                            pendingUserContainer = container
-                                        }
+                                        pendingUserFreeMode = viewModel.isFreeMode(container.name)
+                                        pendingUserContainer = container
                                     }
                                 },
                                 onStop = { viewModel.stopContainer(container) },
