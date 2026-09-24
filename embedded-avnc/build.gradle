@@ -6,6 +6,7 @@ def upstream = new File(upstreamRoot, 'app')
 def upstreamCommit = 'f30406514ef8880097e960da7dc1d8dc4c713d7f'
 def generatedUpstreamJava = layout.buildDirectory.dir('generated/embeddedAvnc/upstreamJava')
 def generatedAssets = layout.buildDirectory.dir('generated/embeddedAvnc/assets')
+def ccacheExecutable = System.getenv('CCACHE_EXECUTABLE')
 
 android {
     namespace 'com.gaurav.avnc'
@@ -21,6 +22,11 @@ android {
         externalNativeBuild {
             cmake {
                 arguments '-DANDROID_STL=none'
+                if (ccacheExecutable) {
+                    arguments "-DCMAKE_C_COMPILER_LAUNCHER=${ccacheExecutable}",
+                              "-DCMAKE_CXX_COMPILER_LAUNCHER=${ccacheExecutable}",
+                              "-DCMAKE_ASM_COMPILER_LAUNCHER=${ccacheExecutable}"
+                }
                 targets 'native-vnc'
             }
         }
