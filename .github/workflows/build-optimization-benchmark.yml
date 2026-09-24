@@ -40,8 +40,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            embedded-lorie/build/.cxx
-            embedded-avnc/build/.cxx
+            embedded-lorie/.cxx
+            embedded-avnc/.cxx
           key: ${{ runner.os }}-native-cxx-opt-v1-${{ hashFiles('embedded-lorie/build.gradle', 'embedded-avnc/build.gradle', 'third_party/termux-x11/lorie/src/main/cpp/**', 'third_party/avnc/app/CMakeLists.txt') }}
           restore-keys: |
             ${{ runner.os }}-native-cxx-opt-v1-
@@ -82,7 +82,7 @@ jobs:
           set -euo pipefail
           chmod +x gradlew
           start=$(date +%s)
-          ./gradlew testReleaseUnitTest assembleRelease             --build-cache --parallel             -PVERSION_NAME=1.0.0-opt-test             -PVERSION_CODE=${{ github.run_number }}             2>&1 | tee gradle-opt-cold.log
+          ./gradlew testReleaseUnitTest assembleRelease             --build-cache --parallel --profile             -PVERSION_NAME=1.0.0-opt-test             -PVERSION_CODE=${{ github.run_number }}             2>&1 | tee gradle-opt-cold.log
           end=$(date +%s)
           echo "$((end-start))" | tee build-seconds.txt
           echo "Cold Gradle build: $((end-start)) seconds"
@@ -154,8 +154,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            embedded-lorie/build/.cxx
-            embedded-avnc/build/.cxx
+            embedded-lorie/.cxx
+            embedded-avnc/.cxx
           key: ${{ runner.os }}-native-cxx-opt-v1-${{ hashFiles('embedded-lorie/build.gradle', 'embedded-avnc/build.gradle', 'third_party/termux-x11/lorie/src/main/cpp/**', 'third_party/avnc/app/CMakeLists.txt') }}
           restore-keys: |
             ${{ runner.os }}-native-cxx-opt-v1-
@@ -196,7 +196,7 @@ jobs:
           set -euo pipefail
           chmod +x gradlew
           start=$(date +%s)
-          ./gradlew testReleaseUnitTest assembleRelease             --build-cache --parallel             -PVERSION_NAME=1.0.0-opt-test             -PVERSION_CODE=${{ github.run_number }}             2>&1 | tee gradle-opt-warm.log
+          ./gradlew testReleaseUnitTest assembleRelease             --build-cache --parallel --profile             -PVERSION_NAME=1.0.0-opt-test             -PVERSION_CODE=${{ github.run_number }}             2>&1 | tee gradle-opt-warm.log
           end=$(date +%s)
           echo "$((end-start))" | tee build-seconds.txt
           echo "Warm Gradle build: $((end-start)) seconds"
