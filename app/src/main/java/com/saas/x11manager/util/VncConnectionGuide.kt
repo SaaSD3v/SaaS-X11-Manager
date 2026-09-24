@@ -156,10 +156,10 @@ object VncConnectionGuide {
             logger.i("[FREE] Raw display environment")
             logger.i("[CONTAINER] • Container: $containerName")
             logger.i("[FREE] • Display assigned to this container: $displayName")
-            logger.i("[FREE] • Set DISPLAY: export DISPLAY=$displayName")
-            logger.i("[FREE] • Remove DISPLAY: unset DISPLAY")
-            logger.i("[FREE] • Replace DISPLAY in one command: unset DISPLAY; export DISPLAY=$displayName")
             logger.i("[FREE] ✓ Empty VNC monitor is ready")
+            logger.i("[FREE] • Remove DISPLAY: ${FreeX11Runtime.unsetCommand()}")
+            logger.i("[FREE] • Replace DISPLAY in one command: ${FreeX11Runtime.replaceCommand(displayName)}")
+            logger.i("[FREE] • Set DISPLAY: ${FreeX11Runtime.exportCommand(displayName)}")
         }
 
         logger.i(LogLayout.SPACER)
