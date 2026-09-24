@@ -148,7 +148,7 @@ fun EditContainerScreen(
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
-                            "This container is currently running with ${graphicSession.label} " +
+                            "This container is currently running with ${if (viewModel.freeMode) "Free raw X11" else graphicSession.label} " +
                                 "using ${initSystem.name.lowercase()}."
                         )
                         if (isEntryWarning) {
@@ -380,7 +380,7 @@ fun EditContainerScreen(
                 WizardChoice(
                     title = "X11",
                     subtitle = "Direct X11 window managers and desktop sessions.",
-                    selected = viewModel.pendingWizardProtocol == GraphicProtocol.X11,
+                    selected = !viewModel.freeMode && viewModel.pendingWizardProtocol == GraphicProtocol.X11,
                     installed = false,
                     onClick = { viewModel.selectWizardProtocol(GraphicProtocol.X11) }
                 )
@@ -388,9 +388,17 @@ fun EditContainerScreen(
                 WizardChoice(
                     title = "Wayland",
                     subtitle = "Native Wayland compositors using an X11 transport for nested presentation.",
-                    selected = viewModel.pendingWizardProtocol == GraphicProtocol.WAYLAND,
+                    selected = !viewModel.freeMode && viewModel.pendingWizardProtocol == GraphicProtocol.WAYLAND,
                     installed = false,
                     onClick = { viewModel.selectWizardProtocol(GraphicProtocol.WAYLAND) }
+                )
+                Spacer(Modifier.height(10.dp))
+                WizardChoice(
+                    title = "Free",
+                    subtitle = "Raw X11 monitor only. Installs and starts no desktop, window manager or compositor.",
+                    selected = viewModel.freeMode,
+                    installed = false,
+                    onClick = { viewModel.selectWizardFreeMode() }
                 )
             }
         }
@@ -553,7 +561,7 @@ fun EditContainerScreen(
                             )
                             Text(
                                 "The Manager detects distro and init automatically. You only choose the graphical " +
-                                    "protocol, catalog and session. Linux user and X11/VNC are chosen when Start is pressed.",
+                                    "protocol, catalog and session, or Free for a raw empty X11 monitor. Linux user and access are chosen when Start is pressed.",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 12.sp
                             )
@@ -564,8 +572,11 @@ fun EditContainerScreen(
                                 SummaryRow("Architecture", it.architectureDisplayName)
                             }
                             SummaryRow("Init system", initSystem.name.lowercase())
-                            SummaryRow("Protocol", graphicSession.protocol.label)
-                            SummaryRow("Graphic session", graphicSession.label)
+                            SummaryRow("Protocol", if (viewModel.freeMode) "Free" else graphicSession.protocol.label)
+                            SummaryRow(
+                                "Graphic session",
+                                if (viewModel.freeMode) "None — raw X11 monitor" else graphicSession.label
+                            )
                             Spacer(Modifier.height(6.dp))
                             viewModel.sessionLogOperation?.let { operation ->
                                 OperationResultCard(operation, viewModel::openInstallTerminal)
@@ -636,7 +647,7 @@ private fun DetectedContainerSummaryDialog(
                     }
                 }
                 Text(
-                    "Continue to choose the graphic protocol, catalog and desktop/session.",
+                    "Continue to choose X11, Wayland, or Free for an empty raw X11 monitor.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
