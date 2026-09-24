@@ -211,10 +211,10 @@ object SessionAccessManager {
                 logger?.i("[FREE] • Monitor: 1")
                 logger?.i("[FREE] • Display assigned to this container: ${Constants.X11_DISPLAY}")
                 logger?.i("[FREE] • Container socket: /tmp/.X11-unix/X0")
-                logger?.i("[FREE] • Set DISPLAY: export DISPLAY=${Constants.X11_DISPLAY}")
-                logger?.i("[FREE] • Remove DISPLAY: unset DISPLAY")
-                logger?.i("[FREE] • Replace DISPLAY in one command: unset DISPLAY; export DISPLAY=${Constants.X11_DISPLAY}")
                 logger?.i("[FREE] ✓ Empty monitor is ready")
+                logger?.i("[FREE] • Remove DISPLAY: ${FreeX11Runtime.unsetCommand()}")
+                logger?.i("[FREE] • Replace DISPLAY in one command: ${FreeX11Runtime.replaceCommand(Constants.X11_DISPLAY)}")
+                logger?.i("[FREE] • Set DISPLAY: ${FreeX11Runtime.exportCommand(Constants.X11_DISPLAY)}")
                 true
             }
 
