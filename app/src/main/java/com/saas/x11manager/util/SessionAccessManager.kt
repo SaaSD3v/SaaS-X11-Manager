@@ -49,7 +49,15 @@ object SessionAccessManager {
         freeMode: Boolean
     ): Boolean {
         if (freeMode) {
-            return startFreeLocked(containerName, accessMode, logger)
+            return startFreeLocked(
+                containerName = containerName,
+                platform = platform,
+                accessMode = accessMode,
+                vncPort = vncPort,
+                vncAdbLocalPort = vncAdbLocalPort,
+                vncPassword = vncPassword,
+                logger = logger
+            )
         }
 
         val perf = RuntimePerfTrace("graphic-start:${accessMode.name.lowercase()}", containerName)
@@ -235,47 +243,128 @@ object SessionAccessManager {
 
     private suspend fun startFreeLocked(
         containerName: String,
+        platform: ContainerPlatform?,
         accessMode: SessionAccessMode,
+        vncPort: Int,
+        vncAdbLocalPort: Int,
+        vncPassword: String?,
         logger: ContainerLogger?
     ): Boolean {
-        if (accessMode == SessionAccessMode.VNC) {
-            logger?.e("[FREE] Free mode uses the integrated X11 monitor, not VNC")
-            return false
-        }
-
-        logger?.i("--- Free X11 Start ---")
+        logger?.i("--- Free Display Start ---")
+        logger?.i("[CTX] Container: $containerName")
+        logger?.i("[CTX] Access method: ${accessMode.label}")
         logger?.i("[FREE] No desktop, window manager or compositor will be started")
-        prepareAudioBeforeGraphicalStart(containerName, logger)
-        VirGLFixManager.prepareBeforeGraphicalStart(containerName, logger)
 
-        val startResult = X11SessionManager.startX11Session(
-            containerName = containerName,
-            logger = logger,
-            beforeGraphicSession = {
-                VirGLFixManager.finalizeAfterContainerReady(containerName, logger)
-                finalizeAudioAfterContainerReady(containerName, logger)
+        return when (accessMode) {
+            SessionAccessMode.INTEGRATED_X11, SessionAccessMode.BOTH -> {
+                prepareAudioBeforeGraphicalStart(containerName, logger)
+                VirGLFixManager.prepareBeforeGraphicalStart(containerName, logger)
+
+                val startResult = X11SessionManager.startX11Session(
+                    containerName = containerName,
+                    logger = logger,
+                    beforeGraphicSession = {
+                        VirGLFixManager.finalizeAfterContainerReady(containerName, logger)
+                        finalizeAudioAfterContainerReady(containerName, logger)
+                    }
+                ) ?: run {
+                    logger?.e("[FREE] Integrated X11 transport failed")
+                    return false
+                }
+
+                val slot = startResult.slot
+                val rawReady = FreeX11Runtime.prepare(
+                    containerName = containerName,
+                    displayName = slot.displayName,
+                    socketFileName = "X${slot.number}",
+                    logger = logger
+                )
+                if (!rawReady) return false
+
+                logger?.i(LogLayout.SPACER)
+                logger?.i("[FREE] Active raw display")
+                logger?.i("[CONTAINER] • Container: $containerName")
+                logger?.i("[FREE] • Transport: Integrated X11")
+                logger?.i("[FREE] • Monitor: ${slot.monitorNumber}")
+                logger?.i("[FREE] • Display assigned to this container: ${slot.displayName}")
+                logger?.i("[FREE] • Container socket: /tmp/.X11-unix/X${slot.number}")
+                logger?.i("[FREE] • Set DISPLAY: export DISPLAY=${slot.displayName}")
+                logger?.i("[FREE] • Remove DISPLAY: unset DISPLAY")
+                logger?.i("[FREE] • Replace DISPLAY in one command: unset DISPLAY; export DISPLAY=${slot.displayName}")
+                logger?.i("[FREE] ✓ Empty monitor is ready")
+                true
             }
-        ) ?: run {
-            logger?.e("[FREE] Integrated X11 transport failed")
-            return false
+
+            SessionAccessMode.VNC -> {
+                logger?.i(LogLayout.SPACER)
+                logger?.i("[VNC] Preparing standalone Free VNC transport")
+                logger?.i("[VNC] • Server port: $vncPort")
+                logger?.i("[VNC] • PC local ADB port: $vncAdbLocalPort")
+
+                val reservation = VncX11MonitorReservation.reserveBeforeVncStart(
+                    containerName = containerName,
+                    logger = logger
+                )
+                if (reservation.isFailure) {
+                    logger?.e(
+                        "[-] Could not reserve the container's X11 monitor: " +
+                            (reservation.exceptionOrNull()?.message ?: "unknown error")
+                    )
+                    return false
+                }
+                val reservedSlot = reservation.getOrNull()
+                var vncStarted = false
+                try {
+                    if (!ensureIntegratedMonitorStoppedForVnc(containerName, reservedSlot, logger)) {
+                        return false
+                    }
+
+                    prepareAudioBeforeGraphicalStart(containerName, logger)
+                    val result = VncServerManager.startStandalone(
+                        containerName = containerName,
+                        platform = platform,
+                        session = GraphicSession.NONE,
+                        port = vncPort,
+                        password = vncPassword,
+                        logger = logger,
+                        beforeGraphicSession = {
+                            finalizeAudioAfterContainerReady(containerName, logger)
+                        },
+                        freeMode = true
+                    )
+                    vncStarted = result.success
+                    if (result.success) {
+                        VncConnectionGuide.logAfterSuccessfulStart(
+                            containerName = containerName,
+                            port = vncPort,
+                            adbLocalPort = vncAdbLocalPort,
+                            displayName = result.displayName,
+                            desktopUser = "not used",
+                            session = GraphicSession.NONE,
+                            password = vncPassword,
+                            logger = logger,
+                            freeMode = true
+                        )
+                    } else {
+                        VncConnectionGuide.logAdbForwardRestartRecovery(
+                            port = vncPort,
+                            localPort = vncAdbLocalPort,
+                            logger = logger,
+                            onlyIfTroubleshooting = true
+                        )
+                    }
+                    result.success
+                } finally {
+                    if (!vncStarted) {
+                        VncX11MonitorReservation.rollbackAfterFailedVncStart(
+                            containerName = containerName,
+                            displaySlot = reservedSlot,
+                            logger = logger
+                        )
+                    }
+                }
+            }
         }
-
-        val slot = startResult.slot
-        val rawReady = FreeX11Runtime.prepare(
-            containerName = containerName,
-            displayName = slot.displayName,
-            socketFileName = "X${slot.number}",
-            logger = logger
-        )
-        if (!rawReady) return false
-
-        logger?.i("[FREE] Container: $containerName")
-        logger?.i("[FREE] Monitor: ${slot.monitorNumber}")
-        logger?.i("[FREE] Display: ${slot.displayName}")
-        logger?.i("[FREE] Host runtime: ${slot.runtimeDir}")
-        logger?.i("[FREE] Host socket: ${slot.socketFile}")
-        logger?.i("[FREE] Empty monitor ready; launch anything you want from the container")
-        return true
     }
 
     private suspend fun ensureIntegratedMonitorStoppedForVnc(
