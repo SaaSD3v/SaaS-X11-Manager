@@ -51,7 +51,8 @@ object VncConnectionGuide {
         logger.i("[VNC] ✓ Standalone VNC is ready")
         logger.i("[CONTAINER] • Container: $containerName")
         if (freeMode) {
-            logger.i("[FREE] • Desktop/session: none")
+            logger.i("[USER] • Free user: $desktopUser")
+            logger.i("[SESSION] • Desktop: none (Free)")
         } else {
             logger.i("[USER] • Desktop user: $desktopUser")
             logger.i("[SESSION] • Desktop: ${session.label}")
@@ -152,14 +153,12 @@ object VncConnectionGuide {
         }
 
         if (freeMode && displayName != null) {
-            logger.i(LogLayout.SPACER)
-            logger.i("[FREE] Raw display environment")
-            logger.i("[CONTAINER] • Container: $containerName")
-            logger.i("[FREE] • Display assigned to this container: $displayName")
-            logger.i("[FREE] ✓ Empty VNC monitor is ready")
-            logger.i("[FREE] • Remove DISPLAY: ${FreeX11Runtime.unsetCommand()}")
-            logger.i("[FREE] • Replace DISPLAY in one command: ${FreeX11Runtime.replaceCommand(displayName)}")
-            logger.i("[FREE] • Set DISPLAY: ${FreeX11Runtime.exportCommand(displayName)}")
+            logger.i("[VNC] ✓ Empty Free VNC display is ready")
+            DisplayLogDetails.freeEnvironment(
+                logger = logger,
+                component = "VNC",
+                displayName = displayName
+            )
         }
 
         logger.i(LogLayout.SPACER)
