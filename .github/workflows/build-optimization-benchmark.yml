@@ -16,7 +16,8 @@ permissions:
 env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_MAXSIZE: 2G
-  SAAS_NATIVE_LTO: "1"
+  SAAS_NATIVE_LTO_LORIE: "0"
+  SAAS_NATIVE_LTO_AVNC: "1"
 
 jobs:
   cold:
@@ -85,7 +86,7 @@ jobs:
           set -euo pipefail
           chmod +x gradlew
           start=$(date +%s)
-          ./gradlew testReleaseUnitTest assembleRelease             --build-cache --parallel --profile             -PcomposeCompilerReports=true             -PVERSION_NAME=1.0.0-opt-test             -PVERSION_CODE=${{ github.run_number }}             2>&1 | tee gradle-opt-cold.log
+          ./gradlew testReleaseUnitTest assembleRelease             --build-cache --parallel --profile --stacktrace             -PcomposeCompilerReports=true             -PVERSION_NAME=1.0.0-opt-test             -PVERSION_CODE=${{ github.run_number }}             2>&1 | tee gradle-opt-cold.log
           end=$(date +%s)
           echo "$((end-start))" | tee build-seconds.txt
           echo "Cold Gradle build: $((end-start)) seconds"
@@ -124,6 +125,9 @@ jobs:
           find build/reports/profile -maxdepth 1 -type f -exec cp -f {} benchmark/gradle-profile/ \; 2>/dev/null || true
           find app/build/compose-compiler -type f -exec cp -f {} benchmark/compose-compiler/ \; 2>/dev/null || true
           find app/build/outputs -type f -name 'native-debug-symbols.zip' -exec cp -f {} benchmark/ \; 2>/dev/null || true
+          mkdir -p benchmark/test-reports
+          cp -a app/build/reports/tests/. benchmark/test-reports/ 2>/dev/null || true
+          find app/build/test-results -type f -name '*.xml' -exec cp -f {} benchmark/test-reports/ \; 2>/dev/null || true
 
       - name: Upload cold benchmark
         if: ${{ always() }}
@@ -202,7 +206,7 @@ jobs:
           set -euo pipefail
           chmod +x gradlew
           start=$(date +%s)
-          ./gradlew testReleaseUnitTest assembleRelease             --build-cache --parallel --profile             -PcomposeCompilerReports=true             -PVERSION_NAME=1.0.0-opt-test             -PVERSION_CODE=${{ github.run_number }}             2>&1 | tee gradle-opt-warm.log
+          ./gradlew testReleaseUnitTest assembleRelease             --build-cache --parallel --profile --stacktrace             -PcomposeCompilerReports=true             -PVERSION_NAME=1.0.0-opt-test             -PVERSION_CODE=${{ github.run_number }}             2>&1 | tee gradle-opt-warm.log
           end=$(date +%s)
           echo "$((end-start))" | tee build-seconds.txt
           echo "Warm Gradle build: $((end-start)) seconds"
@@ -236,6 +240,9 @@ jobs:
           find build/reports/profile -maxdepth 1 -type f -exec cp -f {} benchmark/gradle-profile/ \; 2>/dev/null || true
           find app/build/compose-compiler -type f -exec cp -f {} benchmark/compose-compiler/ \; 2>/dev/null || true
           find app/build/outputs -type f -name 'native-debug-symbols.zip' -exec cp -f {} benchmark/ \; 2>/dev/null || true
+          mkdir -p benchmark/test-reports
+          cp -a app/build/reports/tests/. benchmark/test-reports/ 2>/dev/null || true
+          find app/build/test-results -type f -name '*.xml' -exec cp -f {} benchmark/test-reports/ \; 2>/dev/null || true
 
       - name: Upload warm benchmark
         if: ${{ always() }}
