@@ -17,6 +17,13 @@ android {
 
     targetProjectPath = ":app"
 
+    buildTypes {
+        create("benchmark") {
+            isDebuggable = true
+            matchingFallbacks += listOf("release")
+        }
+    }
+
     testOptions.managedDevices.devices {
         create<com.android.build.api.dsl.ManagedVirtualDevice>("pixel6Api34") {
             device = "Pixel 6"
