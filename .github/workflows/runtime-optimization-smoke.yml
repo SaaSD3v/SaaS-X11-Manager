@@ -1,0 +1,129 @@
+name: Runtime Optimization Smoke
+
+on:
+  push:
+    branches:
+      - "test/build-optimization-benchmark"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 2G
+  SAAS_NATIVE_LTO_LORIE: "0"
+  SAAS_NATIVE_LTO_AVNC: "1"
+
+jobs:
+  smoke:
+    name: Release + runtime optimization smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          java-version: "17"
+          distribution: temurin
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      - name: Restore native CMake state
+        uses: actions/cache@v4
+        with:
+          path: |
+            embedded-lorie/.cxx
+            embedded-avnc/.cxx
+          key: ${{ runner.os }}-native-cxx-opt-v2-${{ hashFiles('embedded-lorie/build.gradle', 'embedded-avnc/build.gradle', 'third_party/termux-x11/lorie/src/main/cpp/**', 'third_party/avnc/app/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-native-cxx-opt-v2-
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ${{ runner.os }}-ccache-opt-v2-${{ hashFiles('embedded-lorie/build.gradle', 'embedded-avnc/build.gradle', 'third_party/termux-x11/lorie/src/main/cpp/**', 'third_party/avnc/app/CMakeLists.txt', 'third_party/avnc/extern/**') }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-opt-v2-
+
+      - name: Install test tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends             ccache pulseaudio pulseaudio-utils alsa-utils libasound2-plugins
+          echo "CCACHE_EXECUTABLE=$(command -v ccache)" >> "$GITHUB_ENV"
+          ccache --max-size "$CCACHE_MAXSIZE"
+          ccache --zero-stats
+
+      - name: Build DroidSpaces audio fixture
+        run: |
+          set -euo pipefail
+          audio_fixture_dir="$RUNNER_TEMP/saas-audio-protocol"
+          mkdir -p "$audio_fixture_dir"
+          upstream="https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/f60294ac4c8aa2cc860773ac85bc5790104eb77f/src"
+          curl --fail --silent --show-error --location "$upstream/daemon.c" -o "$audio_fixture_dir/daemon.c"
+          curl --fail --silent --show-error --location "$upstream/include/droidspace.h" -o "$audio_fixture_dir/droidspace.h"
+          printf '%s  %s\n'             3357017c7c56bac0bd5fd76125f6534e3a51f2dd2b90aa65070a07c75be280eb "$audio_fixture_dir/daemon.c"             4cc3466f2cf799ba018d36b7067766452554b612e3fb1d9ec2915b0d80aafb1f "$audio_fixture_dir/droidspace.h" | sha256sum --check
+          cc -O2 -ffunction-sections -fdata-sections -I"$audio_fixture_dir"             app/src/test/native/droidspaces_audio_request.c -Wl,--gc-sections             -o "$audio_fixture_dir/droidspaces-audio-request"
+          echo "SAAS_DROIDSPACES_AUDIO_FIXTURE=$audio_fixture_dir/droidspaces-audio-request" >> "$GITHUB_ENV"
+
+      - name: Verify benchmark Gradle model
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:tasks :baseline-profile:tasks --all --console=plain > benchmark-tasks.txt
+          grep -E 'assembleBenchmark|generate.*BaselineProfile|Benchmark.*AndroidTest' benchmark-tasks.txt || true
+
+      - name: Test and build optimized release
+        env:
+          SAAS_PULSE_INTEGRATION_REQUIRED: "1"
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          ./gradlew testReleaseUnitTest assembleRelease             --build-cache --parallel --stacktrace             -PcomposeCompilerReports=true             -PVERSION_NAME=1.0.0-runtime-smoke             -PVERSION_CODE=${{ github.run_number }}             2>&1 | tee runtime-smoke.log
+          end=$(date +%s)
+          echo "$((end-start))" | tee runtime-smoke-seconds.txt
+
+      - name: Validate 16 KB APK alignment
+        run: |
+          set -euo pipefail
+          ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -type f -name zipalign | sort -V | tail -n 1)
+          for apk in app/build/outputs/apk/release/*.apk; do
+            "$ZIPALIGN" -c -P 16 -v 4 "$apk" >/dev/null
+          done
+
+      - name: Report native cache
+        if: ${{ always() }}
+        run: |
+          ccache --show-stats --verbose | tee ccache-stats.txt || true
+
+      - name: Collect diagnostics
+        if: ${{ always() }}
+        run: |
+          mkdir -p smoke/test-reports smoke/compose-compiler
+          cp -f runtime-smoke.log smoke/ 2>/dev/null || true
+          cp -f runtime-smoke-seconds.txt smoke/ 2>/dev/null || true
+          cp -f benchmark-tasks.txt smoke/ 2>/dev/null || true
+          cp -f ccache-stats.txt smoke/ 2>/dev/null || true
+          cp -f app/build/outputs/mapping/release/mapping.txt smoke/ 2>/dev/null || true
+          cp -a app/build/reports/tests/. smoke/test-reports/ 2>/dev/null || true
+          find app/build/compose-compiler -type f -exec cp -f {} smoke/compose-compiler/ \; 2>/dev/null || true
+
+      - name: Upload smoke diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-smoke-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            smoke/
+            app/build/outputs/apk/release/*.apk
