@@ -7,7 +7,7 @@ def generatedUpstreamJava = layout.buildDirectory.dir('generated/embeddedLorie/u
 def generatedPrefsJava = layout.buildDirectory.dir('generated/embeddedLorie/prefsJava')
 def generatedRes = layout.buildDirectory.dir('generated/embeddedLorie/res')
 def ccacheExecutable = System.getenv('CCACHE_EXECUTABLE')
-def enableNativeLto = System.getenv('SAAS_NATIVE_LTO') == '1'
+def enableNativeLto = System.getenv('SAAS_NATIVE_LTO_LORIE') == '1'
 def nativePgoProfile = System.getenv('SAAS_NATIVE_PGO_PROFDATA')?.trim()
 def nativeCompileOptimizationFlags = []
 def nativeLinkOptimizationFlags = []
