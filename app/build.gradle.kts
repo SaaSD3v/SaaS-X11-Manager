@@ -77,6 +77,12 @@ android {
             isMinifyEnabled = false
             isDebuggable = true
         }
+        create("benchmark") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+            isDebuggable = false
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
 
     compileOptions {
@@ -111,6 +117,7 @@ android {
 dependencies {
     baselineProfile(project(":baseline-profile"))
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+    add("benchmarkImplementation", "androidx.compose.runtime:runtime-tracing:1.0.0-beta01")
     // Local compatibility wrapper around the pinned Termux:X11/Lorie sources.
     implementation(project(":embedded-lorie"))
 
@@ -124,7 +131,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.compose.runtime:runtime-tracing:1.0.0-beta01")
 
     implementation("com.google.android.material:material:1.11.0")
 
