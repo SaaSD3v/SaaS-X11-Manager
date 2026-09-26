@@ -19,6 +19,7 @@ jobs:
   smoke:
     name: Release + runtime optimization smoke
     runs-on: ubuntu-latest
+    environment: "keys"
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
@@ -127,3 +128,66 @@ jobs:
           path: |
             smoke/
             app/build/outputs/apk/release/*.apk
+
+
+      - name: Upload APKs individually to GoFile
+        if: ${{ github.event_name != 'pull_request' }}
+        shell: bash
+        env:
+          GOFILE_TOKEN: ${{ secrets.GOFILE }}
+          GOFILE_APK_ROOT: app/build/outputs/apk/release
+        run: |
+          set -euo pipefail
+          if [ -z "${GOFILE_TOKEN:-}" ]; then
+            echo "::warning::GOFILE is not configured in the keys environment; skipping GoFile upload."
+            exit 0
+          fi
+          test -d "$GOFILE_APK_ROOT"
+          mapfile -d '' apks < <(find "$GOFILE_APK_ROOT" -type f -name '*.apk' -print0 | sort -z)
+          if [ "${#apks[@]}" -eq 0 ]; then
+            echo "::error::No APK files found under $GOFILE_APK_ROOT"
+            exit 1
+          fi
+          server_json="$(curl --silent --show-error --fail-with-body --retry 5 --retry-delay 3 --retry-all-errors https://api.gofile.io/servers)"
+          upload_server="$(printf '%s' "$server_json" | python3 -c 'import json,sys; j=json.load(sys.stdin); s=(j.get("data") or {}).get("servers") or []; print((s[0] or {}).get("name","") if s else "")')"
+          test -n "$upload_server" || { echo "::error::GoFile returned no upload server"; exit 1; }
+          upload_url="https://$upload_server.gofile.io/contents/uploadfile"
+          folder_id=""
+          folder_page=""
+          uploaded=0
+          summary="$RUNNER_TEMP/gofile-apks.md"
+          : > "$summary"
+          for apk in "${apks[@]}"; do
+            args=(--silent --show-error --fail-with-body --retry 8 --retry-delay 5 --retry-all-errors --connect-timeout 30 --max-time 900
+              -H "Authorization: Bearer $GOFILE_TOKEN"
+              -F "file=@$apk")
+            if [ -n "$folder_id" ]; then
+              args+=(-F "folderId=$folder_id")
+            fi
+            response="$(curl "${args[@]}" "$upload_url")"
+            mapfile -t meta < <(printf '%s' "$response" | python3 -c 'import json,sys; j=json.load(sys.stdin); d=j.get("data") or {}; print(j.get("status","")); print(d.get("parentFolder") or d.get("folderId") or ""); print(d.get("downloadPage","")); print(d.get("parentFolderCode") or d.get("folderCode") or "")')
+            status="${meta[0]:-}"
+            parent="${meta[1]:-}"
+            page="${meta[2]:-}"
+            parent_code="${meta[3]:-}"
+            if [ "$status" != "ok" ]; then
+              echo "::error::GoFile rejected $(basename "$apk")"
+              printf '%s\n' "$response" >&2
+              exit 1
+            fi
+            if [ -z "$folder_id" ]; then folder_id="$parent"; fi
+            if [ -z "$folder_page" ] && [ -n "$parent_code" ]; then folder_page="https://gofile.io/d/$parent_code"; fi
+            name="$(basename "$apk")"
+            if [ -n "$page" ]; then
+              printf -- '- [%s](%s)\n' "$name" "$page" >> "$summary"
+            else
+              printf -- '- %s\n' "$name" >> "$summary"
+            fi
+            uploaded=$((uploaded + 1))
+          done
+          {
+            echo "### GoFile — $uploaded APKs uploaded individually"
+            [ -z "$folder_page" ] || echo "Folder: $folder_page"
+            echo
+            cat "$summary"
+          } >> "$GITHUB_STEP_SUMMARY"
