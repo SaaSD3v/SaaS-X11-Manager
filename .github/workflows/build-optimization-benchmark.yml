@@ -23,7 +23,6 @@ jobs:
   cold:
     name: Cold optimized release build
     runs-on: ubuntu-latest
-    environment: "keys"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -145,12 +144,12 @@ jobs:
         if: ${{ github.event_name != 'pull_request' }}
         shell: bash
         env:
-          GOFILE_TOKEN: ${{ secrets.GOFILE }}
+          GOFILE_TOKEN: ${{ secrets.GOFILE_TOKEN }}
           GOFILE_APK_ROOT: app/build/outputs/apk/release
         run: |
           set -euo pipefail
           if [ -z "${GOFILE_TOKEN:-}" ]; then
-            echo "::warning::GOFILE is not configured in the keys environment; skipping GoFile upload."
+            echo "::warning::GOFILE_TOKEN repository secret is not configured; skipping GoFile upload."
             exit 0
           fi
           test -d "$GOFILE_APK_ROOT"
